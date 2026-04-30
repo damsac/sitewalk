@@ -617,6 +617,11 @@ private extension RootView {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             entry.perform(.snooze(until: until), in: modelContext, preferences: notifPrefs)
             showToast("Snoozed", type: .info)
+
+        case .wake:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            entry.perform(.wake, in: modelContext, preferences: notifPrefs)
+            showToast("Awake", type: .info)
         }
     }
 

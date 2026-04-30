@@ -412,6 +412,7 @@ extension Entry {
 
 enum EntryAction {
     case snooze(until: Date?)  // nil = default 1 hour
+    case wake                  // wake a snoozed entry: set status = .active, clear snoozeUntil
     case complete
     case archive
     case unarchive
@@ -431,6 +432,13 @@ extension Entry {
             updatedAt = Date()
             save(in: context)
             NotificationService.shared.sync(self, preferences: preferences)
+
+        case .wake:
+            status = .active
+            snoozeUntil = nil
+            updatedAt = Date()
+            save(in: context)
+            NotificationService.shared.cancel(self)
 
         case .complete:
             status = .completed
