@@ -575,6 +575,21 @@ struct SmartListRow: View {
 
     private var isOverdue: Bool { entry.isOverdue }
 
+    private var isSnoozed: Bool { entry.status == .snoozed }
+
+    private var snoozeText: String? {
+        guard isSnoozed, let snoozeUntil = entry.snoozeUntil else { return nil }
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        if calendar.isDateInToday(snoozeUntil) {
+            formatter.dateFormat = "h:mm a"
+            return "Until \(formatter.string(from: snoozeUntil))"
+        }
+        if calendar.isDateInTomorrow(snoozeUntil) { return "Until tomorrow" }
+        formatter.dateFormat = "MMM d"
+        return "Until \(formatter.string(from: snoozeUntil))"
+    }
+
     private var listItems: [String] {
         guard entry.category == .list else { return [] }
         return entry.content
@@ -613,6 +628,13 @@ struct SmartListRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+            } else if isSnoozed {
+                let dotColor = Theme.categoryColor(entry.category)
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(dotColor)
+                    .frame(width: 14, height: 14)
+                    .shadow(color: dotColor.opacity(0.6), radius: 4)
             } else {
                 let dotColor = Theme.categoryColor(entry.category)
                 Circle()
@@ -628,7 +650,11 @@ struct SmartListRow: View {
                     .foregroundStyle(entry.isDone ? Theme.Colors.textTertiary : Theme.Colors.textPrimary)
                     .lineLimit(2)
 
-                if entry.category == .habit, let cadence = entry.cadence {
+                if let snoozeText {
+                    Text(snoozeText)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Colors.textTertiary)
+                } else if entry.category == .habit, let cadence = entry.cadence {
                     Text(cadence.displayName)
                         .font(.caption)
                         .foregroundStyle(Theme.Colors.textTertiary)
@@ -666,7 +692,7 @@ struct SmartListRow: View {
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
         }
         .cardStyle(accent: glowAccent, intensity: glowIntensity)
-        .opacity(entry.isDone ? 0.5 : 1.0)
+        .opacity(entry.isDone ? 0.5 : (isSnoozed ? 0.7 : 1.0))
         .animation(.easeInOut(duration: 0.2), value: entry.isCompletedToday)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(entry.category.displayName): \(entry.summary)")
