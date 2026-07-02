@@ -26,13 +26,14 @@ pub struct ContextAssembler;
 impl ContextAssembler {
     /// Renders sections as `## title\ncontent`, truncating each to its own
     /// budget (by chars = tokens * 4) with a `…[truncated]` marker.
-    /// Empty sections are skipped entirely.
+    /// Empty sections and zero-budget sections are skipped entirely
+    /// (zero budget = elide).
     pub fn assemble(sections: &[ContextSection]) -> AssembledContext {
         let mut parts = Vec::new();
         let mut truncated_sections = Vec::new();
 
         for section in sections {
-            if section.content.is_empty() {
+            if section.content.is_empty() || section.budget_tokens == 0 {
                 continue;
             }
             let budget_chars = section.budget_tokens * 4;
@@ -99,6 +100,17 @@ mod tests {
         }]);
         assert!(out.text.contains(&"é".repeat(20)));
         assert_eq!(out.truncated_sections.len(), 1);
+    }
+
+    #[test]
+    fn zero_budget_sections_are_elided() {
+        let out = ContextAssembler::assemble(&[
+            ContextSection { title: "muted".into(), content: "should vanish".into(), budget_tokens: 0 },
+            ContextSection { title: "kept".into(), content: "hi".into(), budget_tokens: 10 },
+        ]);
+        assert_eq!(out.text, "## kept\nhi");
+        assert!(!out.text.contains("muted"));
+        assert!(out.truncated_sections.is_empty());
     }
 
     #[test]

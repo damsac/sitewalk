@@ -26,7 +26,8 @@ pub struct ReflectionPolicy {
     pub warmup_reflections: u32,
     /// Churn below this counts as "nothing new learned".
     pub low_churn_threshold: f32,
-    /// Ceiling for the backoff interval.
+    /// Ceiling for the backoff interval. Values above 64 have no additional
+    /// effect (exponential backoff saturates at 2^6).
     pub max_interval_sessions: u32,
 }
 
@@ -50,6 +51,9 @@ impl ReflectionPolicy {
         let trailing_low = recent_churn
             .iter()
             .rev()
+            // Only the trailing 7 values can matter (shift saturates at 2^6),
+            // so unpruned histories don't cost O(n).
+            .take(7)
             .take_while(|c| **c < self.low_churn_threshold)
             .count() as u32;
         (1u32 << trailing_low.min(6)).min(self.max_interval_sessions)
