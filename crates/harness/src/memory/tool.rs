@@ -17,6 +17,9 @@ fn system_clock() -> u64 {
 
 /// In-session memory updates (spec §7): the agent remembers corrections and new
 /// facts as they happen. Every mutation is persisted immediately via the store.
+///
+/// Concurrent `execute()` calls are not supported — saves happen outside the
+/// lock and can interleave out of order; the agent loop calls tools sequentially.
 pub struct UpdateMemoryTool {
     memory: Arc<Mutex<Memory>>,
     store: Arc<dyn MemoryStore>,
@@ -102,7 +105,8 @@ impl Tool for UpdateMemoryTool {
 
         Ok(match op {
             "remember" => format!("remembered in {section}: {text}"),
-            _ => format!("forgot from {section}: {text}"),
+            "forget" => format!("forgot from {section}: {text}"),
+            _ => unreachable!("op validated above"),
         })
     }
 }
@@ -187,6 +191,33 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, HarnessError::Tool { .. }));
+    }
+
+    /// Store whose save() always fails.
+    struct FailStore;
+
+    impl MemoryStore for FailStore {
+        fn load(&self) -> Result<Memory, HarnessError> {
+            Ok(Memory::default())
+        }
+        fn save(&self, _memory: &Memory) -> Result<(), HarnessError> {
+            Err(HarnessError::Storage("disk full".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn save_failure_surfaces_but_memory_still_mutates() {
+        let memory = Arc::new(Mutex::new(Memory::default()));
+        let tool =
+            UpdateMemoryTool::with_clock(memory.clone(), Arc::new(FailStore), Arc::new(|| 1));
+        let err = tool
+            .execute(serde_json::json!({"op": "remember", "section": "people", "text": "Dev"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, HarnessError::Storage(_)));
+        // Contract: the in-memory mutation is applied even when persistence fails.
+        let m = memory.lock().unwrap();
+        assert_eq!(m.section_texts("people"), vec!["Dev"]);
     }
 
     #[tokio::test]
