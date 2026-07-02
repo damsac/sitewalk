@@ -151,17 +151,12 @@ impl Memory {
         removed
     }
 
-    /// Drops entries until `word_count() < cap`, evicting by ascending
+    /// Drops entries until `word_count() <= cap`, evicting by ascending
     /// `(source rank, last_touched, section name)` — inferred-oldest first,
-    /// corrected last. When exactly at cap, stops rather than evicting a
-    /// Corrected entry (they are the last to go). Returns how many entries
-    /// were removed.
+    /// corrected last. Returns how many entries were removed.
     pub fn clamp_to_cap(&mut self, cap: usize) -> usize {
         let mut removed = 0;
-        loop {
-            if self.word_count() < cap {
-                break;
-            }
+        while self.word_count() > cap {
             let next = self
                 .sections
                 .iter()
@@ -171,11 +166,7 @@ impl Memory {
                         .map(move |e| ((e.source.rank(), e.last_touched, name.clone()), e.text.clone()))
                 })
                 .min_by(|a, b| a.0.cmp(&b.0));
-            let Some(((rank, _, section), text)) = next else { break };
-            // At exactly cap: refuse to evict a Corrected fact (it survives unless truly over cap)
-            if self.word_count() == cap && rank == FactSource::Corrected.rank() {
-                break;
-            }
+            let Some(((_, _, section), text)) = next else { break };
             self.forget(&section, &text);
             removed += 1;
         }
@@ -273,10 +264,10 @@ mod tests {
         m.remember("b", "four five", 200); // 2 words
         m.remember("c", "six seven eight nine", 300); // 4 words, newest
         let removed = m.clamp_to_cap(6);
-        assert_eq!(removed, 2, "drops the two oldest entries to get under cap");
-        assert_eq!(m.word_count(), 4);
+        assert_eq!(removed, 1, "dropping the oldest entry reaches the cap");
+        assert_eq!(m.word_count(), 6);
         assert!(m.sections.get("a").is_none());
-        assert!(m.sections.get("b").is_none());
+        assert_eq!(m.section_texts("b"), vec!["four five"]);
         assert_eq!(m.section_texts("c"), vec!["six seven eight nine"]);
     }
 
