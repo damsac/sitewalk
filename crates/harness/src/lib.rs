@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod error;
 pub mod llm;
+pub mod memory;
 pub mod mock;
 pub mod providers;
 pub mod tool;
@@ -13,4 +14,5 @@ pub use llm::{
 };
 pub use mock::MockProvider;
 pub use providers::AnthropicProvider;
+pub use memory::{FactSource, Memory, MemoryEntry, DEFAULT_WORD_CAP};
 pub use tool::{Tool, ToolRegistry};
