@@ -382,11 +382,9 @@ mod tests {
         assert_eq!(store.get_session(&sid).unwrap().status, SessionStatus::Failed);
         let usage_rows = store.list_llm_usage_for_session(&sid).unwrap();
         assert_eq!(usage_rows.len(), 1, "usage logged even when agent hits MaxTurns");
-        // tool_use response has Usage { input_tokens: 100, output_tokens: 20 }
-        assert!(
-            usage_rows[0].input_tokens > 0,
-            "burned tokens from MaxTurns run must be non-zero"
-        );
+        // exact tokens from the one scripted tool_use response
+        assert_eq!(usage_rows[0].input_tokens, 100);
+        assert_eq!(usage_rows[0].output_tokens, 20);
     }
 
     /// A failed session stays Failed and process_pending does NOT re-pull it on

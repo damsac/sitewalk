@@ -32,8 +32,9 @@ pub struct TurnOutcome {
 #[derive(Debug)]
 pub struct RunError {
     pub source: HarnessError,
-    /// Tokens burned up to (and including) the call that produced the error.
-    /// Zero when the provider call itself failed before returning a response.
+    /// Tokens accumulated before the failure — zero only if no provider call
+    /// completed (e.g. a turn-1 provider error or a reflection provider error);
+    /// a mid-loop failure carries the prior turns' usage.
     pub usage: Usage,
 }
 

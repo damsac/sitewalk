@@ -330,7 +330,8 @@ mod tests {
         }]));
         let engine = ReflectionEngine::new(provider);
         let err = engine.reflect(&Memory::default(), &[], 999).await.unwrap_err();
-        // provider failure before response → zero usage; post-completion → response usage
+        // CONTENT failure (Text response, no write_memory) whose scripted usage
+        // happens to be zero — not a provider failure
         assert!(
             matches!(&err.source, HarnessError::Provider(msg) if msg.contains("missing write_memory call"))
         );
