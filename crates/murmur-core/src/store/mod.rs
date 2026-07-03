@@ -9,6 +9,7 @@ mod contacts;
 mod items;
 mod jobs;
 mod sessions;
+mod usage;
 
 use std::path::Path;
 use std::sync::Arc;

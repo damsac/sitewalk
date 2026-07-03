@@ -144,3 +144,16 @@ pub struct Artifact {
     pub updated_at: u64,
     pub device_id: String,
 }
+
+/// One LLM call's cost record (R9). Append-only.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LlmUsageRow {
+    pub id: String,
+    pub session_id: Option<String>,
+    /// What the tokens bought: "processing", "summary", "reflection", …
+    pub purpose: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub created_at: u64,
+    pub device_id: String,
+}

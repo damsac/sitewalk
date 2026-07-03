@@ -5,7 +5,7 @@ pub mod reflection;
 pub mod store;
 
 pub use domain::{
-    Artifact, CapturedItem, Contact, Job, JobStatus, NewJob, Session, SessionStatus,
+    Artifact, CapturedItem, Contact, Job, JobStatus, LlmUsageRow, NewJob, Session, SessionStatus,
 };
 pub use error::CoreError;
 pub use ids::new_id;

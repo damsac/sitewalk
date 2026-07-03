@@ -78,6 +78,19 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         last_reflected_at INTEGER NOT NULL DEFAULT 0
     );
 
+    -- append-only cost log (R9: cost per session measured from day one).
+    -- No tombstone: rows are never deleted, only summed.
+    CREATE TABLE llm_usage (
+        id            TEXT PRIMARY KEY,
+        session_id    TEXT REFERENCES sessions(id),
+        purpose       TEXT NOT NULL,
+        input_tokens  INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        created_at    INTEGER NOT NULL,
+        device_id     TEXT NOT NULL
+    );
+    CREATE INDEX idx_llm_usage_session ON llm_usage(session_id);
+
     CREATE INDEX idx_jobs_scheduled ON jobs(scheduled_at);
     CREATE INDEX idx_sessions_started ON sessions(started_at) WHERE deleted_at IS NULL;
     CREATE INDEX idx_sessions_job ON sessions(job_id) WHERE deleted_at IS NULL;

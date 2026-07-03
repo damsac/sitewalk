@@ -13,4 +13,6 @@ pub enum CoreError {
     Serde(#[from] serde_json::Error),
     #[error("invalid state: {0}")]
     InvalidState(String),
+    #[error("agent error: {0}")]
+    Agent(#[from] harness::HarnessError),
 }
