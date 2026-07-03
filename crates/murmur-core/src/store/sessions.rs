@@ -27,6 +27,12 @@ fn session_from_row(row: &Row) -> Result<Session, CoreError> {
     })
 }
 
+/// Escapes LIKE metacharacters so user text matches literally.
+fn like_pattern(query: &str) -> String {
+    let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    format!("%{escaped}%")
+}
+
 impl Store {
     /// Starts a recording session. `job_id` is optional (R4: no pre-labeling
     /// required — the pipeline can link a job later from content).
@@ -177,6 +183,29 @@ impl Store {
              ORDER BY started_at DESC, id DESC"
         ))?;
         let mut rows = stmt.query([job_id])?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            sessions.push(session_from_row(row)?);
+        }
+        Ok(sessions)
+    }
+
+    /// Session-library text search (story 9) over transcripts and summaries,
+    /// newest first. Plain LIKE — case-insensitive for ASCII only; an FTS5
+    /// upgrade is the seam if real usage (~100+ sessions) demands it
+    /// (research rec #7: wait for evidence).
+    pub fn search_sessions(&self, query: &str) -> Result<Vec<Session>, CoreError> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let pattern = like_pattern(query);
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SESSION_COLS} FROM sessions
+             WHERE deleted_at IS NULL
+               AND (transcript LIKE ?1 ESCAPE '\\' OR summary LIKE ?1 ESCAPE '\\')
+             ORDER BY started_at DESC, id DESC"
+        ))?;
+        let mut rows = stmt.query([&pattern])?;
         let mut sessions = Vec::new();
         while let Some(row) = rows.next()? {
             sessions.push(session_from_row(row)?);
@@ -363,5 +392,53 @@ mod tests {
             })
             .unwrap();
         assert_eq!(raw, 1);
+    }
+
+    #[test]
+    fn search_matches_transcript_and_summary() {
+        let s = store();
+        let a = s.start_session(None).unwrap();
+        s.append_transcript(&a.id, "the french drain needs regrading").unwrap();
+        s.end_session(&a.id).unwrap();
+
+        let b = s.start_session(None).unwrap();
+        s.end_session(&b.id).unwrap();
+        s.mark_session_processed(&b.id, "Discussed drain pricing with Johnson").unwrap();
+
+        let c = s.start_session(None).unwrap();
+        s.append_transcript(&c.id, "unrelated roofing talk").unwrap();
+
+        let hits: Vec<_> = s.search_sessions("drain").unwrap().into_iter().map(|x| x.id).collect();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.contains(&a.id) && hits.contains(&b.id));
+    }
+
+    #[test]
+    fn search_is_case_insensitive_for_ascii() {
+        let s = store();
+        let a = s.start_session(None).unwrap();
+        s.append_transcript(&a.id, "French Drain").unwrap();
+        assert_eq!(s.search_sessions("french").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn search_escapes_like_metacharacters() {
+        let s = store();
+        let a = s.start_session(None).unwrap();
+        s.append_transcript(&a.id, "50% deposit due").unwrap();
+        let b = s.start_session(None).unwrap();
+        s.append_transcript(&b.id, "500 deposit due").unwrap();
+        let hits = s.search_sessions("50%").unwrap();
+        assert_eq!(hits.len(), 1, "% must match literally, not as wildcard");
+        assert_eq!(hits[0].id, a.id);
+    }
+
+    #[test]
+    fn empty_or_blank_query_returns_nothing() {
+        let s = store();
+        let a = s.start_session(None).unwrap();
+        s.append_transcript(&a.id, "anything").unwrap();
+        assert!(s.search_sessions("").unwrap().is_empty());
+        assert!(s.search_sessions("   ").unwrap().is_empty());
     }
 }
