@@ -8,16 +8,16 @@ use crate::store::Store;
 const ARTIFACT_COLS: &str =
     "id, session_id, kind, title, body, created_at, updated_at, device_id";
 
-fn artifact_from_row(row: &Row) -> Result<Artifact, rusqlite::Error> {
+fn artifact_from_row(row: &Row) -> Result<Artifact, CoreError> {
     Ok(Artifact {
-        id: row.get("id")?,
-        session_id: row.get("session_id")?,
-        kind: row.get("kind")?,
-        title: row.get("title")?,
-        body: row.get("body")?,
-        created_at: row.get::<_, i64>("created_at")? as u64,
-        updated_at: row.get::<_, i64>("updated_at")? as u64,
-        device_id: row.get("device_id")?,
+        id: row.get("id").map_err(CoreError::Sqlite)?,
+        session_id: row.get("session_id").map_err(CoreError::Sqlite)?,
+        kind: row.get("kind").map_err(CoreError::Sqlite)?,
+        title: row.get("title").map_err(CoreError::Sqlite)?,
+        body: row.get("body").map_err(CoreError::Sqlite)?,
+        created_at: row.get::<_, i64>("created_at").map_err(CoreError::Sqlite)? as u64,
+        updated_at: row.get::<_, i64>("updated_at").map_err(CoreError::Sqlite)? as u64,
+        device_id: row.get("device_id").map_err(CoreError::Sqlite)?,
     })
 }
 
@@ -80,7 +80,7 @@ impl Store {
         ))?;
         let mut rows = stmt.query([id])?;
         match rows.next()? {
-            Some(row) => artifact_from_row(row).map_err(CoreError::Sqlite),
+            Some(row) => artifact_from_row(row),
             None => Err(CoreError::NotFound { entity: "artifact", id: id.to_string() }),
         }
     }
@@ -93,7 +93,7 @@ impl Store {
         let mut rows = stmt.query([session_id])?;
         let mut artifacts = Vec::new();
         while let Some(row) = rows.next()? {
-            artifacts.push(artifact_from_row(row).map_err(CoreError::Sqlite)?);
+            artifacts.push(artifact_from_row(row)?);
         }
         Ok(artifacts)
     }
@@ -145,6 +145,15 @@ mod tests {
     }
 
     #[test]
+    fn get_missing_artifact_is_not_found() {
+        let (s, _) = store_with_session();
+        assert!(matches!(
+            s.get_artifact("nope"),
+            Err(CoreError::NotFound { entity: "artifact", .. })
+        ));
+    }
+
+    #[test]
     fn update_body_touches_updated_at() {
         let (s, sid) = store_with_session();
         let a = s.add_artifact(&sid, "report", "t", "v1").unwrap();
@@ -160,5 +169,6 @@ mod tests {
         let a = s.add_artifact(&sid, "report", "t", "b").unwrap();
         s.delete_artifact(&a.id).unwrap();
         assert!(s.list_artifacts_for_session(&sid).unwrap().is_empty());
+        assert!(matches!(s.delete_artifact(&a.id), Err(CoreError::NotFound { .. })));
     }
 }

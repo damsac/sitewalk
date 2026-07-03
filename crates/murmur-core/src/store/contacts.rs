@@ -7,16 +7,16 @@ use crate::store::Store;
 
 const CONTACT_COLS: &str = "id, name, trade, phone, notes, created_at, updated_at, device_id";
 
-fn contact_from_row(row: &Row) -> Result<Contact, rusqlite::Error> {
+fn contact_from_row(row: &Row) -> Result<Contact, CoreError> {
     Ok(Contact {
-        id: row.get("id")?,
-        name: row.get("name")?,
-        trade: row.get("trade")?,
-        phone: row.get("phone")?,
-        notes: row.get("notes")?,
-        created_at: row.get::<_, i64>("created_at")? as u64,
-        updated_at: row.get::<_, i64>("updated_at")? as u64,
-        device_id: row.get("device_id")?,
+        id: row.get("id").map_err(CoreError::Sqlite)?,
+        name: row.get("name").map_err(CoreError::Sqlite)?,
+        trade: row.get("trade").map_err(CoreError::Sqlite)?,
+        phone: row.get("phone").map_err(CoreError::Sqlite)?,
+        notes: row.get("notes").map_err(CoreError::Sqlite)?,
+        created_at: row.get::<_, i64>("created_at").map_err(CoreError::Sqlite)? as u64,
+        updated_at: row.get::<_, i64>("updated_at").map_err(CoreError::Sqlite)? as u64,
+        device_id: row.get("device_id").map_err(CoreError::Sqlite)?,
     })
 }
 
@@ -94,7 +94,7 @@ impl Store {
         ))?;
         let mut rows = stmt.query([id])?;
         match rows.next()? {
-            Some(row) => contact_from_row(row).map_err(CoreError::Sqlite),
+            Some(row) => contact_from_row(row),
             None => Err(CoreError::NotFound { entity: "contact", id: id.to_string() }),
         }
     }
@@ -106,7 +106,7 @@ impl Store {
         let mut rows = stmt.query([])?;
         let mut contacts = Vec::new();
         while let Some(row) = rows.next()? {
-            contacts.push(contact_from_row(row).map_err(CoreError::Sqlite)?);
+            contacts.push(contact_from_row(row)?);
         }
         Ok(contacts)
     }

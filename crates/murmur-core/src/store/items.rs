@@ -8,16 +8,16 @@ use crate::store::Store;
 const ITEM_COLS: &str =
     "id, session_id, kind, text, done, created_at, updated_at, device_id";
 
-fn item_from_row(row: &Row) -> Result<CapturedItem, rusqlite::Error> {
+fn item_from_row(row: &Row) -> Result<CapturedItem, CoreError> {
     Ok(CapturedItem {
-        id: row.get("id")?,
-        session_id: row.get("session_id")?,
-        kind: row.get("kind")?,
-        text: row.get("text")?,
-        done: row.get::<_, i64>("done")? != 0,
-        created_at: row.get::<_, i64>("created_at")? as u64,
-        updated_at: row.get::<_, i64>("updated_at")? as u64,
-        device_id: row.get("device_id")?,
+        id: row.get("id").map_err(CoreError::Sqlite)?,
+        session_id: row.get("session_id").map_err(CoreError::Sqlite)?,
+        kind: row.get("kind").map_err(CoreError::Sqlite)?,
+        text: row.get("text").map_err(CoreError::Sqlite)?,
+        done: row.get::<_, i64>("done").map_err(CoreError::Sqlite)? != 0,
+        created_at: row.get::<_, i64>("created_at").map_err(CoreError::Sqlite)? as u64,
+        updated_at: row.get::<_, i64>("updated_at").map_err(CoreError::Sqlite)? as u64,
+        device_id: row.get("device_id").map_err(CoreError::Sqlite)?,
     })
 }
 
@@ -70,7 +70,7 @@ impl Store {
         ))?;
         let mut rows = stmt.query([id])?;
         match rows.next()? {
-            Some(row) => item_from_row(row).map_err(CoreError::Sqlite),
+            Some(row) => item_from_row(row),
             None => Err(CoreError::NotFound { entity: "item", id: id.to_string() }),
         }
     }
@@ -84,7 +84,7 @@ impl Store {
         let mut rows = stmt.query([session_id])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
-            items.push(item_from_row(row).map_err(CoreError::Sqlite)?);
+            items.push(item_from_row(row)?);
         }
         Ok(items)
     }
@@ -99,7 +99,7 @@ impl Store {
         let mut rows = stmt.query([])?;
         let mut items = Vec::new();
         while let Some(row) = rows.next()? {
-            items.push(item_from_row(row).map_err(CoreError::Sqlite)?);
+            items.push(item_from_row(row)?);
         }
         Ok(items)
     }
@@ -147,6 +147,15 @@ mod tests {
         assert!(matches!(
             s.add_item("nope", "todo", "x"),
             Err(CoreError::NotFound { entity: "session", .. })
+        ));
+    }
+
+    #[test]
+    fn get_missing_item_is_not_found() {
+        let (s, _) = store_with_session();
+        assert!(matches!(
+            s.get_item("nope"),
+            Err(CoreError::NotFound { entity: "item", .. })
         ));
     }
 
