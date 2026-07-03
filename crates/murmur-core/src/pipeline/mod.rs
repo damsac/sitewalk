@@ -1,3 +1,370 @@
+//! End-of-session processing (spec §6): transcript in, structured records +
+//! summary out. Reprocessing is idempotent — prior outputs are tombstoned
+//! first, so a Failed retry can't duplicate todos.
+
 pub mod tools;
 
 pub(crate) mod prompts;
+
+use std::sync::{Arc, Mutex};
+
+use harness::{
+    Agent, AgentConfig, ContextAssembler, ContextSection, LlmProvider, Memory, MemoryStore,
+    Message, ToolRegistry, UpdateMemoryTool, Usage,
+};
+
+use crate::domain::{Session, SessionStatus};
+use crate::error::CoreError;
+use crate::store::Store;
+use tools::{AddItemTool, UpsertContactTool, WriteReportTool};
+
+#[derive(Debug)]
+pub struct ProcessOutcome {
+    pub session: Session,
+    pub usage: Usage,
+}
+
+pub struct SessionProcessor {
+    provider: Arc<dyn LlmProvider>,
+    pub(crate) store: Arc<Mutex<Store>>,
+    memory: Arc<Mutex<Memory>>,
+    memory_store: Arc<dyn MemoryStore>,
+    /// Extraction-pass agent budget.
+    pub max_turns: usize,
+    pub max_tokens: u32,
+    /// Transcript token budget for both passes (chars/4 approximation).
+    pub transcript_budget_tokens: usize,
+    /// Summary-call output budget.
+    pub summary_max_tokens: u32,
+}
+
+impl SessionProcessor {
+    pub fn new(
+        provider: Arc<dyn LlmProvider>,
+        store: Arc<Mutex<Store>>,
+        memory: Arc<Mutex<Memory>>,
+        memory_store: Arc<dyn MemoryStore>,
+    ) -> Self {
+        SessionProcessor {
+            provider,
+            store,
+            memory,
+            memory_store,
+            max_turns: 16,
+            max_tokens: 4096,
+            transcript_budget_tokens: 12_000,
+            summary_max_tokens: 512,
+        }
+    }
+
+    fn locked(&self) -> Result<std::sync::MutexGuard<'_, Store>, CoreError> {
+        self.store
+            .lock()
+            .map_err(|_| CoreError::InvalidState("store lock poisoned".into()))
+    }
+
+    /// Processes one ended session. Valid from AwaitingProcessing or Failed
+    /// (retry). On success: outputs written, summary set, status Processed.
+    /// On LLM failure: status Failed, cost still logged (R9), error returned.
+    pub async fn process(&self, session_id: &str) -> Result<ProcessOutcome, CoreError> {
+        // Phase 0: validate, clear prior outputs, snapshot inputs.
+        let (transcript, memory_prompt) = {
+            let store = self.locked()?;
+            let session = store.get_session(session_id)?;
+            if !matches!(
+                session.status,
+                SessionStatus::AwaitingProcessing | SessionStatus::Failed
+            ) {
+                return Err(CoreError::InvalidState(format!(
+                    "cannot process a {} session",
+                    session.status.as_str()
+                )));
+            }
+            store.clear_session_outputs(session_id)?;
+            let memory_prompt = self
+                .memory
+                .lock()
+                .map_err(|_| CoreError::InvalidState("memory lock poisoned".into()))?
+                .to_prompt();
+            (session.transcript, memory_prompt)
+        };
+
+        let assembled = ContextAssembler::assemble(&[ContextSection {
+            title: "transcript".into(),
+            content: transcript,
+            budget_tokens: self.transcript_budget_tokens,
+        }]);
+
+        // Phase 1+2: extraction agent pass, then forced summary.
+        let mut usage = Usage::default();
+        let result =
+            self.run_llm_phases(session_id, &assembled.text, &memory_prompt, &mut usage).await;
+
+        // Exit: persist outcome + cost, success or not.
+        let store = self.locked()?;
+        match result {
+            Ok(summary) => {
+                let session = store.mark_session_processed(session_id, &summary)?;
+                store.record_llm_usage(Some(session_id), "processing", &usage)?;
+                Ok(ProcessOutcome { session, usage })
+            }
+            Err(e) => {
+                store.mark_session_failed(session_id)?;
+                store.record_llm_usage(Some(session_id), "processing", &usage)?;
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn run_llm_phases(
+        &self,
+        session_id: &str,
+        assembled_transcript: &str,
+        memory_prompt: &str,
+        usage: &mut Usage,
+    ) -> Result<String, harness::HarnessError> {
+        let mut registry = ToolRegistry::new();
+        registry.register(AddItemTool::new(self.store.clone(), session_id));
+        registry.register(UpsertContactTool::new(self.store.clone()));
+        registry.register(WriteReportTool::new(self.store.clone(), session_id));
+        registry.register(
+            UpdateMemoryTool::new(self.memory.clone(), self.memory_store.clone())
+                .for_session(session_id),
+        );
+
+        let agent = Agent::new(
+            self.provider.clone(),
+            registry,
+            AgentConfig {
+                system_prompt: prompts::extraction_system_prompt(memory_prompt),
+                max_turns: self.max_turns,
+                max_tokens: self.max_tokens,
+            },
+        );
+        let outcome = agent
+            .run(vec![Message::user_text(format!(
+                "Process this session.\n\n{assembled_transcript}"
+            ))])
+            .await?;
+        usage.add(&outcome.usage);
+
+        let (summary, summary_usage) = prompts::summarize(
+            self.provider.clone(),
+            assembled_transcript,
+            self.summary_max_tokens,
+        )
+        .await?;
+        usage.add(&summary_usage);
+        Ok(summary)
+    }
+
+    /// Drains the awaiting_processing queue (spec §6: offline sessions queue
+    /// and process on reconnect). One session at a time — failures mark that
+    /// session Failed and the drain continues. Failed sessions are NOT
+    /// auto-retried here; retry is an explicit `process()` call (user-visible
+    /// retry affordance, R7).
+    pub async fn process_pending(
+        &self,
+    ) -> Result<Vec<(String, Result<ProcessOutcome, CoreError>)>, CoreError> {
+        let queued = self
+            .locked()?
+            .list_session_summaries_by_status(SessionStatus::AwaitingProcessing)?;
+        let mut results = Vec::with_capacity(queued.len());
+        for summary in queued {
+            let outcome = self.process(&summary.id).await;
+            results.push((summary.id, outcome));
+        }
+        Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use harness::{
+        CompletionResponse, ContentBlock, FactSource, HarnessError, Memory, MemoryStore,
+        MockProvider, StopReason, Usage,
+    };
+
+    use crate::domain::SessionStatus;
+    use crate::error::CoreError;
+    use crate::store::Store;
+
+    use super::*;
+
+    /// Memory store stub — pipeline tests don't touch disk.
+    struct NullMemoryStore;
+    impl MemoryStore for NullMemoryStore {
+        fn load(&self) -> Result<Memory, HarnessError> {
+            Ok(Memory::default())
+        }
+        fn save(&self, _m: &Memory) -> Result<(), HarnessError> {
+            Ok(())
+        }
+    }
+
+    fn processor_with(
+        responses: Vec<CompletionResponse>,
+    ) -> (SessionProcessor, Arc<Mutex<Store>>, String) {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        store
+            .append_transcript(&session.id, "we need lumber. call Dev the framer.")
+            .unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(responses)),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        (processor, store, session.id)
+    }
+
+    fn tool_use(name: &str, input: serde_json::Value) -> CompletionResponse {
+        CompletionResponse {
+            content: vec![ContentBlock::ToolUse { id: "tu_1".into(), name: name.into(), input }],
+            stop_reason: StopReason::ToolUse,
+            usage: Usage { input_tokens: 100, output_tokens: 20 },
+        }
+    }
+
+    fn end_turn(text: &str) -> CompletionResponse {
+        CompletionResponse {
+            content: vec![ContentBlock::Text { text: text.into() }],
+            stop_reason: StopReason::EndTurn,
+            usage: Usage { input_tokens: 50, output_tokens: 10 },
+        }
+    }
+
+    fn summary_response(text: &str) -> CompletionResponse {
+        tool_use("write_summary", serde_json::json!({"summary": text}))
+    }
+
+    #[tokio::test]
+    async fn processes_a_session_end_to_end() {
+        let (processor, store, sid) = processor_with(vec![
+            tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+            tool_use("upsert_contact", serde_json::json!({"name": "Dev", "trade": "framer"})),
+            end_turn("done"),
+            summary_response("Ordered lumber; Dev handles framing."),
+        ]);
+        let outcome = processor.process(&sid).await.unwrap();
+        assert_eq!(outcome.session.status, SessionStatus::Processed);
+        assert_eq!(outcome.session.summary.as_deref(), Some("Ordered lumber; Dev handles framing."));
+        // usage: 100+20, 100+20, 50+10 agent + 100+20 summary
+        assert_eq!(outcome.usage, Usage { input_tokens: 350, output_tokens: 70 });
+
+        let store = store.lock().unwrap();
+        assert_eq!(store.list_items_for_session(&sid).unwrap().len(), 1);
+        assert_eq!(store.list_contacts().unwrap().len(), 1);
+        let usage_rows = store.list_llm_usage_for_session(&sid).unwrap();
+        assert_eq!(usage_rows.len(), 1);
+        assert_eq!(usage_rows[0].purpose, "processing");
+        assert_eq!(usage_rows[0].input_tokens, 350);
+    }
+
+    #[tokio::test]
+    async fn failure_marks_failed_and_still_logs_usage() {
+        // agent pass succeeds, summary response has no tool call -> Provider error
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            end_turn("I refuse to call tools"),
+        ]);
+        let err = processor.process(&sid).await.unwrap_err();
+        assert!(matches!(err, CoreError::Agent(_)));
+        let store = store.lock().unwrap();
+        assert_eq!(store.get_session(&sid).unwrap().status, SessionStatus::Failed);
+        let usage_rows = store.list_llm_usage_for_session(&sid).unwrap();
+        assert_eq!(usage_rows.len(), 1, "cost is logged even on failure (R9)");
+        assert_eq!(usage_rows[0].input_tokens, 50, "agent pass tokens counted");
+    }
+
+    #[tokio::test]
+    async fn retry_after_failure_does_not_duplicate_outputs() {
+        let (processor, store, sid) = processor_with(vec![
+            // attempt 1: extracts one item, then summary fails
+            tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+            end_turn("done"),
+            end_turn("no summary tool"),
+            // attempt 2: extracts the same item again, summary succeeds
+            tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+            end_turn("done"),
+            summary_response("Lumber ordered."),
+        ]);
+        assert!(processor.process(&sid).await.is_err());
+        processor.process(&sid).await.unwrap();
+        let store = store.lock().unwrap();
+        assert_eq!(
+            store.list_items_for_session(&sid).unwrap().len(),
+            1,
+            "attempt 1's item was cleared before retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn recording_session_is_rejected() {
+        let (processor, store, _sid) = processor_with(vec![]);
+        let recording = store.lock().unwrap().start_session(None).unwrap();
+        let err = processor.process(&recording.id).await.unwrap_err();
+        assert!(matches!(err, CoreError::InvalidState(_)));
+    }
+
+    #[tokio::test]
+    async fn memory_reaches_the_system_prompt() {
+        let provider = Arc::new(MockProvider::new(vec![end_turn("done"), summary_response("s")]));
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        store.append_transcript(&session.id, "talk about the french drain").unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        let mut memory = Memory::default();
+        memory.remember_from("vocabulary", "french drain", 1, FactSource::Stated, None);
+        let processor = SessionProcessor::new(
+            provider.clone(),
+            Arc::new(Mutex::new(store)),
+            Arc::new(Mutex::new(memory)),
+            Arc::new(NullMemoryStore),
+        );
+        processor.process(&session.id).await.unwrap();
+        let reqs = provider.requests();
+        assert!(reqs[0].system.contains("french drain"));
+    }
+
+    #[tokio::test]
+    async fn process_pending_drains_the_queue_and_survives_failures() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let a = store.start_session(None).unwrap();
+        store.append_transcript(&a.id, "session a words").unwrap();
+        store.end_and_record_session(&a.id).unwrap();
+        let b = store.start_session(None).unwrap();
+        store.append_transcript(&b.id, "session b words").unwrap();
+        store.end_and_record_session(&b.id).unwrap();
+        // still recording — must be untouched
+        let c = store.start_session(None).unwrap();
+
+        // queue order is reverse-chron (b first): b succeeds, a fails on summary
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![
+                end_turn("done b"),
+                summary_response("B done."),
+                end_turn("done a"),
+                end_turn("no summary tool"),
+            ])),
+            Arc::new(Mutex::new(store)),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+
+        let results = processor.process_pending().await.unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|(id, r)| id == &b.id && r.is_ok()));
+        assert!(results.iter().any(|(id, r)| id == &a.id && r.is_err()));
+
+        let store = processor.store.lock().unwrap();
+        assert_eq!(store.get_session(&b.id).unwrap().status, SessionStatus::Processed);
+        assert_eq!(store.get_session(&a.id).unwrap().status, SessionStatus::Failed);
+        assert_eq!(store.get_session(&c.id).unwrap().status, SessionStatus::Recording);
+    }
+}

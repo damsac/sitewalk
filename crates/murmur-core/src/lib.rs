@@ -11,4 +11,6 @@ pub use domain::{
 };
 pub use error::CoreError;
 pub use ids::new_id;
+pub use pipeline::{ProcessOutcome, SessionProcessor};
+pub use pipeline::tools::{AddItemTool, UpsertContactTool, WriteReportTool};
 pub use store::Store;
