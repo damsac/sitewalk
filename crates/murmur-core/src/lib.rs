@@ -1,3 +1,4 @@
+pub mod coordinator;
 pub mod domain;
 pub mod error;
 pub mod ids;
@@ -5,6 +6,7 @@ pub mod pipeline;
 pub mod reflection;
 pub mod store;
 
+pub use coordinator::ReflectionCoordinator;
 pub use domain::{
     Artifact, CapturedItem, Contact, Job, JobStatus, LlmUsageRow, NewJob, Session, SessionStatus,
     SessionSummary,
