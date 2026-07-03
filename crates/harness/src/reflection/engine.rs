@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use crate::agent::RunError;
 use crate::error::HarnessError;
 use crate::llm::{
     CompletionRequest, ContentBlock, LlmProvider, Message, ToolSpec, Usage,
@@ -82,12 +83,17 @@ impl ReflectionEngine {
     /// Runs one reflection. Must not overlap an active session: the caller
     /// swaps-and-persists the returned Memory, so an interleaved `update_memory`
     /// mutation would be silently discarded.
+    ///
+    /// On error, `RunError::usage` is zero when the provider call itself failed
+    /// (network/auth — no tokens were burned). For post-completion failures
+    /// (missing `write_memory`, malformed sections, empty-wipe guard), `usage`
+    /// holds the tokens from the completed response so callers can log the cost.
     pub async fn reflect(
         &self,
         current: &Memory,
         activity: &[String],
         now: u64,
-    ) -> Result<ReflectionOutcome, HarnessError> {
+    ) -> Result<ReflectionOutcome, RunError> {
         let activity_block = if activity.is_empty() {
             "(none)".to_string()
         } else {
@@ -112,7 +118,12 @@ impl ReflectionEngine {
                 max_tokens: self.max_tokens,
                 tool_choice: Some(WRITE_MEMORY.into()),
             })
-            .await?;
+            .await
+            .map_err(|e| RunError { source: e, usage: Usage::default() })?;
+
+        // Capture usage now: every post-completion error path below carries it
+        // so the coordinator can log what was burned even on content failure.
+        let response_usage = response.usage;
 
         let input = response
             .content
@@ -121,15 +132,21 @@ impl ReflectionEngine {
                 ContentBlock::ToolUse { name, input, .. } if name == WRITE_MEMORY => Some(input),
                 _ => None,
             })
-            .ok_or_else(|| {
-                HarnessError::Provider("reflection response missing write_memory call".into())
+            .ok_or_else(|| RunError {
+                source: HarnessError::Provider(
+                    "reflection response missing write_memory call".into(),
+                ),
+                usage: response_usage,
             })?;
         let sections = input
             .get("sections")
             .and_then(|s| s.as_object())
             .cloned()
-            .ok_or_else(|| {
-                HarnessError::Provider("write_memory call had malformed sections".into())
+            .ok_or_else(|| RunError {
+                source: HarnessError::Provider(
+                    "write_memory call had malformed sections".into(),
+                ),
+                usage: response_usage,
             })?;
 
         let mut memory = Memory::default();
@@ -154,14 +171,17 @@ impl ReflectionEngine {
         // confused model must not erase the user's memory. (Empty current with
         // an empty result stays OK — first-run case.)
         if !current.sections.is_empty() && memory.sections.is_empty() {
-            return Err(HarnessError::Provider(
-                "reflection produced empty memory from non-empty input".into(),
-            ));
+            return Err(RunError {
+                source: HarnessError::Provider(
+                    "reflection produced empty memory from non-empty input".into(),
+                ),
+                usage: response_usage,
+            });
         }
         memory.clamp_to_cap(self.word_cap);
 
         let churn = churn_between(current, &memory);
-        Ok(ReflectionOutcome { memory, churn, usage: response.usage })
+        Ok(ReflectionOutcome { memory, churn, usage: response_usage })
     }
 }
 
@@ -310,7 +330,11 @@ mod tests {
         }]));
         let engine = ReflectionEngine::new(provider);
         let err = engine.reflect(&Memory::default(), &[], 999).await.unwrap_err();
-        assert!(matches!(err, HarnessError::Provider(msg) if msg.contains("missing write_memory call")));
+        // provider failure before response → zero usage; post-completion → response usage
+        assert!(
+            matches!(&err.source, HarnessError::Provider(msg) if msg.contains("missing write_memory call"))
+        );
+        assert_eq!(err.usage, Usage::default());
     }
 
     #[tokio::test]
@@ -322,11 +346,15 @@ mod tests {
                 input: serde_json::json!({ "sections": "not an object" }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage::default(),
+            usage: Usage { input_tokens: 77, output_tokens: 11 },
         }]));
         let engine = ReflectionEngine::new(provider);
         let err = engine.reflect(&Memory::default(), &[], 999).await.unwrap_err();
-        assert!(matches!(err, HarnessError::Provider(msg) if msg.contains("malformed sections")));
+        assert!(
+            matches!(&err.source, HarnessError::Provider(msg) if msg.contains("malformed sections"))
+        );
+        // post-completion failure: usage from the completed response is preserved
+        assert_eq!(err.usage, Usage { input_tokens: 77, output_tokens: 11 });
     }
 
     #[tokio::test]
@@ -336,7 +364,11 @@ mod tests {
         )]));
         let engine = ReflectionEngine::new(provider);
         let err = engine.reflect(&current_memory(), &[], 999).await.unwrap_err();
-        assert!(matches!(err, HarnessError::Provider(msg) if msg.contains("empty memory")));
+        assert!(
+            matches!(&err.source, HarnessError::Provider(msg) if msg.contains("empty memory"))
+        );
+        // write_memory_response uses Usage { input_tokens: 100, output_tokens: 50 }
+        assert_eq!(err.usage, Usage { input_tokens: 100, output_tokens: 50 });
     }
 
     #[tokio::test]

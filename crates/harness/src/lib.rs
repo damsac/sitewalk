@@ -8,7 +8,7 @@ pub mod providers;
 pub mod reflection;
 pub mod tool;
 
-pub use agent::{Agent, AgentConfig, TurnOutcome};
+pub use agent::{Agent, AgentConfig, RunError, TurnOutcome};
 pub use context::{approx_tokens, AssembledContext, ContextAssembler, ContextSection};
 pub use error::HarnessError;
 pub use llm::{

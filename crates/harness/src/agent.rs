@@ -25,6 +25,36 @@ pub struct TurnOutcome {
     pub stop_reason: StopReason,
 }
 
+/// An error from [`Agent::run`] or [`ReflectionEngine::reflect`] that carries
+/// whatever token usage accumulated before the failure. Callers that need to
+/// log cost on the error path (R9) read `usage`; callers that don't care can
+/// call `HarnessError::from(run_err)` which drops the usage field.
+#[derive(Debug)]
+pub struct RunError {
+    pub source: HarnessError,
+    /// Tokens burned up to (and including) the call that produced the error.
+    /// Zero when the provider call itself failed before returning a response.
+    pub usage: Usage,
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for RunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl From<RunError> for HarnessError {
+    fn from(e: RunError) -> Self {
+        e.source
+    }
+}
+
 pub struct Agent {
     provider: Arc<dyn LlmProvider>,
     tools: ToolRegistry,
@@ -40,7 +70,7 @@ impl Agent {
         self.tools.specs()
     }
 
-    pub async fn run(&self, mut messages: Vec<Message>) -> Result<TurnOutcome, HarnessError> {
+    pub async fn run(&self, mut messages: Vec<Message>) -> Result<TurnOutcome, RunError> {
         let mut usage = Usage::default();
 
         for _ in 0..self.config.max_turns {
@@ -53,7 +83,8 @@ impl Agent {
                     max_tokens: self.config.max_tokens,
                     tool_choice: None,
                 })
-                .await?;
+                .await
+                .map_err(|e| RunError { source: e, usage })?;
             usage.add(&response.usage);
             let stop_reason = response.stop_reason;
 
@@ -107,7 +138,7 @@ impl Agent {
             messages.push(Message { role: Role::User, content: results });
         }
 
-        Err(HarnessError::MaxTurns(self.config.max_turns))
+        Err(RunError { source: HarnessError::MaxTurns(self.config.max_turns), usage })
     }
 }
 
@@ -303,7 +334,9 @@ mod tests {
             .collect();
         let (agent, provider) = agent_with(responses, reg);
         let err = agent.run(vec![Message::user_text("go")]).await.unwrap_err();
-        assert!(matches!(err, HarnessError::MaxTurns(5)));
+        assert!(matches!(err.source, HarnessError::MaxTurns(5)));
+        // all 5 turns' usage is preserved in the error
+        assert_eq!(err.usage, Usage { input_tokens: 50, output_tokens: 100 });
         assert_eq!(provider.requests().len(), 5);
     }
 }
