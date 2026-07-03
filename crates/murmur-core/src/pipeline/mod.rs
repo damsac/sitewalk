@@ -67,8 +67,8 @@ impl SessionProcessor {
     /// (retry). On success: outputs written, summary set, status Processed.
     /// On LLM failure: status Failed, cost still logged (R9), error returned.
     pub async fn process(&self, session_id: &str) -> Result<ProcessOutcome, CoreError> {
-        // Phase 0: validate, clear prior outputs, snapshot inputs.
-        let (transcript, memory_prompt) = {
+        // Phase 0: validate, clear prior outputs, snapshot the transcript.
+        let transcript = {
             let store = self.locked()?;
             let session = store.get_session(session_id)?;
             if !matches!(
@@ -81,13 +81,15 @@ impl SessionProcessor {
                 )));
             }
             store.clear_session_outputs(session_id)?;
-            let memory_prompt = self
-                .memory
-                .lock()
-                .map_err(|_| CoreError::InvalidState("memory lock poisoned".into()))?
-                .to_prompt();
-            (session.transcript, memory_prompt)
+            session.transcript
         };
+        // Memory lock in its own scope — never held alongside the store guard
+        // (no store→memory lock ordering for a second caller to deadlock on).
+        let memory_prompt = self
+            .memory
+            .lock()
+            .map_err(|_| CoreError::InvalidState("memory lock poisoned".into()))?
+            .to_prompt();
 
         let assembled = ContextAssembler::assemble(&[ContextSection {
             title: "transcript".into(),
@@ -100,17 +102,17 @@ impl SessionProcessor {
         let result =
             self.run_llm_phases(session_id, &assembled.text, &memory_prompt, &mut usage).await;
 
-        // Exit: persist outcome + cost, success or not.
+        // Exit: persist outcome + cost atomically, success or not.
         let store = self.locked()?;
         match result {
             Ok(summary) => {
-                let session = store.mark_session_processed(session_id, &summary)?;
-                store.record_llm_usage(Some(session_id), "processing", &usage)?;
+                let session = store.finish_session_processed(session_id, &summary, &usage)?;
                 Ok(ProcessOutcome { session, usage })
             }
             Err(e) => {
-                store.mark_session_failed(session_id)?;
-                store.record_llm_usage(Some(session_id), "processing", &usage)?;
+                // Bookkeeping errors are secondary: the original LLM error is
+                // what the caller must see — never mask it with a DB failure.
+                let _ = store.finish_session_failed(session_id, &usage);
                 Err(e.into())
             }
         }
@@ -154,8 +156,12 @@ impl SessionProcessor {
             self.summary_max_tokens,
         )
         .await?;
+        // Count the summary call's tokens BEFORE judging its content (R9:
+        // a model that skipped the tool still cost us the call).
         usage.add(&summary_usage);
-        Ok(summary)
+        summary.ok_or_else(|| {
+            harness::HarnessError::Provider("summary response missing write_summary call".into())
+        })
     }
 
     /// Drains the awaiting_processing queue (spec §6: offline sessions queue
@@ -279,7 +285,10 @@ mod tests {
         assert_eq!(store.get_session(&sid).unwrap().status, SessionStatus::Failed);
         let usage_rows = store.list_llm_usage_for_session(&sid).unwrap();
         assert_eq!(usage_rows.len(), 1, "cost is logged even on failure (R9)");
-        assert_eq!(usage_rows[0].input_tokens, 50, "agent pass tokens counted");
+        // agent pass (50) + summary call that skipped the tool (50) — the
+        // failed summary call still cost tokens and they must be counted
+        assert_eq!(usage_rows[0].input_tokens, 100);
+        assert_eq!(usage_rows[0].output_tokens, 20);
     }
 
     #[tokio::test]
@@ -330,6 +339,42 @@ mod tests {
         processor.process(&session.id).await.unwrap();
         let reqs = provider.requests();
         assert!(reqs[0].system.contains("french drain"));
+    }
+
+    #[tokio::test]
+    async fn unknown_session_is_not_found() {
+        let (processor, _store, _sid) = processor_with(vec![]);
+        let err = processor.process("no-such-session").await.unwrap_err();
+        assert!(matches!(err, CoreError::NotFound { entity: "session", .. }));
+    }
+
+    #[tokio::test]
+    async fn empty_transcript_still_processes() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![
+                end_turn("nothing here"),
+                summary_response("Empty session."),
+            ])),
+            Arc::new(Mutex::new(store)),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        let outcome = processor.process(&session.id).await.unwrap();
+        assert_eq!(outcome.session.status, SessionStatus::Processed);
+    }
+
+    #[tokio::test]
+    async fn process_pending_on_empty_queue_is_ok_and_empty() {
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![])),
+            Arc::new(Mutex::new(Store::open_in_memory("device-a").unwrap())),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        assert!(processor.process_pending().await.unwrap().is_empty());
     }
 
     #[tokio::test]

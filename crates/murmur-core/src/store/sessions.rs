@@ -318,6 +318,36 @@ impl Store {
         Ok(session)
     }
 
+    /// Pipeline success exit: marks the session Processed AND records the LLM
+    /// cost in one transaction — a crash between the two can't leave a
+    /// Processed session with unlogged spend (or vice versa).
+    pub fn finish_session_processed(
+        &self,
+        session_id: &str,
+        summary: &str,
+        usage: &harness::Usage,
+    ) -> Result<Session, CoreError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let session = self.mark_session_processed(session_id, summary)?;
+        self.record_llm_usage(Some(session_id), "processing", usage)?;
+        tx.commit()?;
+        Ok(session)
+    }
+
+    /// Pipeline failure exit: marks the session Failed AND records the LLM
+    /// cost in one transaction (R9: cost is logged even on failure).
+    pub fn finish_session_failed(
+        &self,
+        session_id: &str,
+        usage: &harness::Usage,
+    ) -> Result<(), CoreError> {
+        let tx = self.conn.unchecked_transaction()?;
+        self.mark_session_failed(session_id)?;
+        self.record_llm_usage(Some(session_id), "processing", usage)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Tombstones all live items and artifacts of a session (one transaction).
     /// The processing pipeline calls this before (re)processing so a Failed
     /// retry can't duplicate extracted outputs. Returns rows tombstoned.

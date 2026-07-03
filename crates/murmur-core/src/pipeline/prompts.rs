@@ -52,35 +52,35 @@ fn summary_tool_spec() -> ToolSpec {
 }
 
 /// One-shot forced summary call (the Plan 02 reflection-engine pattern).
+///
+/// Provider errors stay `Err` (no tokens were incurred). A successful call
+/// that lacks a `write_summary` block returns `Ok((None, usage))` so the
+/// caller can log the spend (R9) before deciding it's a failure. The
+/// transcript excerpt is passed through as-is — it already carries its own
+/// `## transcript` header from the context assembler.
 pub(crate) async fn summarize(
     provider: Arc<dyn LlmProvider>,
     transcript_excerpt: &str,
     max_tokens: u32,
-) -> Result<(String, Usage), HarnessError> {
+) -> Result<(Option<String>, Usage), HarnessError> {
     let response = provider
         .complete(CompletionRequest {
             system: "Summarize one transcribed field-work session in 1-2 plain sentences \
                      for a session list. Lead with what happened; include key outcomes."
                 .into(),
-            messages: vec![Message::user_text(format!("Transcript:\n{transcript_excerpt}"))],
+            messages: vec![Message::user_text(transcript_excerpt)],
             tools: vec![summary_tool_spec()],
             max_tokens,
             tool_choice: Some(WRITE_SUMMARY.into()),
         })
         .await?;
 
-    let summary = response
-        .content
-        .iter()
-        .find_map(|b| match b {
-            ContentBlock::ToolUse { name, input, .. } if name == WRITE_SUMMARY => {
-                input.get("summary").and_then(|s| s.as_str()).map(str::to_string)
-            }
-            _ => None,
-        })
-        .ok_or_else(|| {
-            HarnessError::Provider("summary response missing write_summary call".into())
-        })?;
+    let summary = response.content.iter().find_map(|b| match b {
+        ContentBlock::ToolUse { name, input, .. } if name == WRITE_SUMMARY => {
+            input.get("summary").and_then(|s| s.as_str()).map(str::to_string)
+        }
+        _ => None,
+    });
     Ok((summary, response.usage))
 }
 
@@ -119,21 +119,27 @@ mod tests {
             usage: Usage { input_tokens: 40, output_tokens: 12 },
         }]));
         let (summary, usage) = summarize(provider.clone(), "transcript text", 512).await.unwrap();
-        assert_eq!(summary, "Walked the deck; two todos.");
+        assert_eq!(summary.as_deref(), Some("Walked the deck; two todos."));
         assert_eq!(usage, Usage { input_tokens: 40, output_tokens: 12 });
         let reqs = provider.requests();
         assert_eq!(reqs[0].tool_choice.as_deref(), Some("write_summary"));
         assert!(reqs[0].max_tokens >= 1);
+        // the excerpt is the user message verbatim — no extra prefix
+        assert_eq!(
+            reqs[0].messages[0].content,
+            vec![ContentBlock::Text { text: "transcript text".into() }]
+        );
     }
 
     #[tokio::test]
-    async fn summarize_without_tool_call_errors() {
+    async fn summarize_without_tool_call_returns_no_summary_but_usage() {
         let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
             content: vec![ContentBlock::Text { text: "no tool".into() }],
             stop_reason: StopReason::EndTurn,
-            usage: Usage::default(),
+            usage: Usage { input_tokens: 50, output_tokens: 10 },
         }]));
-        let err = summarize(provider, "t", 512).await.unwrap_err();
-        assert!(matches!(err, harness::HarnessError::Provider(msg) if msg.contains("write_summary")));
+        let (summary, usage) = summarize(provider, "t", 512).await.unwrap();
+        assert!(summary.is_none(), "missing tool call is not an Err — spend must be loggable");
+        assert_eq!(usage, Usage { input_tokens: 50, output_tokens: 10 });
     }
 }
