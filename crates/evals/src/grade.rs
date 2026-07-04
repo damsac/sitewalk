@@ -52,8 +52,8 @@ pub struct PrecisionRecall {
 
 impl PrecisionRecall {
     fn from_counts(tp: usize, fp: usize, fn_: usize) -> Self {
-        let precision = ratio(tp, tp + fp);
-        let recall = ratio(tp, tp + fn_);
+        let precision = ratio_or_one(tp, tp + fp);
+        let recall = ratio_or_one(tp, tp + fn_);
         let f1 = harmonic(precision, recall, 1.0);
         PrecisionRecall { true_positives: tp, false_positives: fp, false_negatives: fn_, precision, recall, f1 }
     }
@@ -96,6 +96,15 @@ pub struct ScenarioScore {
 
 fn ratio(num: usize, den: usize) -> f64 {
     if den == 0 { 0.0 } else { num as f64 / den as f64 }
+}
+
+/// Like `ratio`, but 0/0 is vacuously perfect (1.0) rather than 0.0. Precision
+/// with zero predictions has no wrong ones to count against it; recall with
+/// zero expected items has nothing to miss. Deliberately distinct from `ratio`
+/// (used for `distractor_fp_rate`, where 0/0 — no distractors to resist — must
+/// stay 0.0, not read as a perfect score).
+fn ratio_or_one(num: usize, den: usize) -> f64 {
+    if den == 0 { 1.0 } else { num as f64 / den as f64 }
 }
 
 fn harmonic(p: f64, r: f64, beta_sq: f64) -> f64 {
