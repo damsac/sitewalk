@@ -21,3 +21,11 @@ fixtures following these rules:
   should still normalize via memory — e.g. "french drain" heard as "trench
   rain").
 - Target 8–12 fixtures; the grader and runner are corpus-size-agnostic.
+- Give each expected item's `text` **≥3 content tokens** (after stopword
+  removal) — a 2-token item can Dice-match a wrong candidate on a single
+  shared token at exactly the 0.5 threshold, an accidental match rather than
+  a real one.
+- Distractors must not Dice-match (≥0.5) any expected item's `text` in the
+  same fixture — `load_corpus` enforces this and errors loudly if violated,
+  since an overlapping distractor would wrongly count a correct extraction as
+  an R6 false positive.

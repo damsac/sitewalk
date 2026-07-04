@@ -15,6 +15,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::grade::MATCH_THRESHOLD;
+use crate::normalize::{dice, token_set};
+
 /// One expected item: the kind it should be filed under and its gist. Matching
 /// is fuzzy (normalized-token Dice, see `normalize`/`grade`), so `text` is the
 /// *canonical* phrasing — the grader tolerates STT/phrasing drift.
@@ -113,17 +116,19 @@ pub fn load_corpus(dir: impl AsRef<Path>) -> io::Result<Vec<Scenario>> {
         let gt: FixtureGroundTruth = serde_json::from_str(&raw).map_err(|e| {
             io::Error::new(io::ErrorKind::InvalidData, format!("{stem}.json: {e}"))
         })?;
+        let truth = GroundTruth {
+            items: gt.items,
+            contacts: gt.contacts,
+            distractors: gt.distractors,
+            expects_summary: gt.expects_summary,
+        };
+        validate_distractors_disjoint_from_items(stem, &truth)?;
         scenarios.push(Scenario {
             id: stem.clone(),
             description: gt.description,
             tags: gt.tags,
             transcript,
-            truth: GroundTruth {
-                items: gt.items,
-                contacts: gt.contacts,
-                distractors: gt.distractors,
-                expects_summary: gt.expects_summary,
-            },
+            truth,
         });
     }
     // Any leftover .json without a .txt is also an authoring error.
@@ -135,6 +140,33 @@ pub fn load_corpus(dir: impl AsRef<Path>) -> io::Result<Vec<Scenario>> {
     }
     scenarios.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(scenarios)
+}
+
+/// Enforces the corpus invariant that no `distractor` Dice-matches (≥
+/// `MATCH_THRESHOLD`) any expected item's text. `grade::grade` counts ANY
+/// produced item that matches a distractor as an R6 false positive, with no
+/// regard for whether that same item also matched (and scored as a true
+/// positive for) an expected item — so an overlapping distractor would
+/// silently penalize a model for correctly extracting a real item. Enforced
+/// loudly at load time rather than left to corrupt scores quietly.
+fn validate_distractors_disjoint_from_items(id: &str, truth: &GroundTruth) -> io::Result<()> {
+    for d in &truth.distractors {
+        let dt = token_set(d);
+        for item in &truth.items {
+            if dice(&dt, &token_set(&item.text)) >= MATCH_THRESHOLD {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "fixture '{id}': distractor {d:?} Dice-matches expected item {:?} — \
+                         a correct extraction of that item would be wrongly counted as an R6 \
+                         false positive",
+                        item.text
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -207,6 +239,25 @@ mod tests {
         std::fs::write(dir.join("orphan.txt"), "some transcript").unwrap();
         let err = load_corpus(&dir).unwrap_err();
         assert!(err.to_string().contains("orphan"), "names the offending fixture");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn distractor_overlapping_an_expected_item_is_a_load_error() {
+        // A distractor that Dice-matches a real item would wrongly count a
+        // correct extraction of that item as an R6 false positive — must be
+        // rejected loudly at load time, not silently graded wrong.
+        let dir = fresh_dir("overlapping-distractor");
+        write_pair(
+            &dir,
+            "bad",
+            "t",
+            r#"{"description":"d","items":[{"kind":"todo","text":"order lumber for the deck"}],"distractors":["order some lumber"]}"#,
+        );
+        let err = load_corpus(&dir).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("bad"), "names the offending fixture: {msg}");
+        assert!(msg.contains("distractor"), "explains the invariant: {msg}");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
