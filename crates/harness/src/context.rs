@@ -7,6 +7,14 @@ pub fn approx_tokens(text: &str) -> usize {
     text.chars().count().div_ceil(4)
 }
 
+/// Inverse of `approx_tokens`: the char budget a token budget buys.
+/// The single source of truth for the chars-per-token approximation — callers
+/// that need to pre-clamp content to a token budget (rather than let
+/// `ContextAssembler` truncate it) should use this instead of a local `* 4`.
+pub fn budget_chars(tokens: usize) -> usize {
+    tokens * 4
+}
+
 /// One named, budgeted block of prompt context.
 pub struct ContextSection {
     pub title: String,
@@ -36,10 +44,10 @@ impl ContextAssembler {
             if section.content.is_empty() || section.budget_tokens == 0 {
                 continue;
             }
-            let budget_chars = section.budget_tokens * 4;
-            let content = if section.content.chars().count() > budget_chars {
+            let chars_budget = budget_chars(section.budget_tokens);
+            let content = if section.content.chars().count() > chars_budget {
                 truncated_sections.push(section.title.clone());
-                let cut: String = section.content.chars().take(budget_chars).collect();
+                let cut: String = section.content.chars().take(chars_budget).collect();
                 format!("{cut}\n…[truncated]")
             } else {
                 section.content.clone()

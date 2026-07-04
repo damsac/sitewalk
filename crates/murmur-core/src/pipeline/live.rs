@@ -65,7 +65,11 @@ pub struct LiveExtractor {
     memory: Arc<Mutex<Memory>>,
     session_id: String,
     /// Chars of transcript covered by a *successful* pass (in-memory: a crash
-    /// just re-extracts from 0 or waits for end-of-session truth — no migration).
+    /// just re-extracts from 0 or waits for end-of-session truth — no
+    /// migration). Advances by at most `transcript_window_tokens`' worth of
+    /// chars per pass — never past what was actually sent to the model — so a
+    /// tick whose unseen transcript exceeds the window budget picks up the
+    /// remainder on the next pass instead of silently skipping it.
     cursor: usize,
     /// Floor on new transcript before a pass is worth making. The *cadence* is
     /// app-shell policy; this only guards against passes on a few new chars.
@@ -126,9 +130,21 @@ impl LiveExtractor {
             if total_chars.saturating_sub(self.cursor) < self.min_new_chars {
                 return Ok(LiveExtractOutcome::Skipped);
             }
-            let window: String = session.transcript.chars().skip(self.cursor).collect();
+            // Clamp the window to what ContextAssembler will actually keep
+            // (it keeps the FIRST `budget_chars` chars and drops the rest).
+            // Without this, the cursor below would advance past content the
+            // assembler silently truncated away, permanently skipping it.
+            let window_budget_chars = harness::budget_chars(self.transcript_window_tokens);
+            let window: String =
+                session.transcript.chars().skip(self.cursor).take(window_budget_chars).collect();
+            let window_chars_included = window.chars().count();
             let items = store.list_items_for_session(&self.session_id)?;
-            (window, prompts::format_already_captured(&items), items.len(), total_chars)
+            (
+                window,
+                prompts::format_already_captured(&items),
+                items.len(),
+                self.cursor + window_chars_included,
+            )
         };
 
         // Memory guard in its own scope — no overlap with the store guard above.
@@ -479,6 +495,46 @@ mod tests {
             &reqs[0].messages[0].content[0],
             ContentBlock::Text { text }
                 if text.contains("already captured") && text.contains("order lumber")
+        ));
+    }
+
+    #[tokio::test]
+    async fn cursor_advances_only_by_the_window_budget_not_the_full_transcript() {
+        // Unseen transcript exceeds the window's char budget in one tick.
+        // The cursor must land at cursor_before + budget_chars, not at the
+        // full transcript length — otherwise the tail is skipped forever.
+        let budget_chars = harness::budget_chars(1); // transcript_window_tokens = 1 below
+        let head: String = "a".repeat(budget_chars);
+        let tail = "TAIL-CONTENT-NOT-YET-SEEN";
+        let transcript = format!("{head}{tail}");
+
+        let (mut extractor, store, _mem, sid) =
+            extractor_with(vec![end_turn("noted")], &transcript);
+        extractor.transcript_window_tokens = 1; // budget_chars() chars
+
+        let outcome = extractor.maybe_extract().await.unwrap();
+        assert!(matches!(outcome, LiveExtractOutcome::Extracted { .. }));
+        assert_eq!(extractor.cursor(), budget_chars, "cursor should stop at the window budget");
+
+        // Second pass, no new transcript appended, picks up the remainder.
+        let provider = Arc::new(MockProvider::new(vec![end_turn("noted again")]));
+        // Swap in a fresh single-response provider by rebuilding an extractor
+        // that shares the same store/cursor position but a fresh script.
+        let mut extractor2 = LiveExtractor::new(
+            provider.clone(),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            &sid,
+        );
+        extractor2.min_new_chars = 1;
+        // Default window budget (2_000 tokens ≈ 8_000 chars) comfortably fits
+        // the remainder — this pass just needs to prove the tail arrives.
+        extractor2.cursor = extractor.cursor();
+        extractor2.maybe_extract().await.unwrap();
+        let reqs = provider.requests();
+        assert!(matches!(
+            &reqs[0].messages[0].content[0],
+            ContentBlock::Text { text } if text.contains(tail)
         ));
     }
 
