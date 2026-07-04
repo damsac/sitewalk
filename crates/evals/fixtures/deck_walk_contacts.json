@@ -1,0 +1,20 @@
+{
+  "description": "Medium deck walk: contact w/ role, safety, decision, part, price, plus weather/lunch chatter that R6 must NOT extract.",
+  "tags": ["medium", "contacts", "safety", "r6"],
+  "items": [
+    { "kind": "safety", "text": "top railing loose, do not lean until re-anchored" },
+    { "kind": "todo", "text": "pull the two soft north-side joists and swap them out" },
+    { "kind": "part", "text": "two sixteen-foot pressure-treated two-by-tens" },
+    { "kind": "price", "text": "about ninety dollars for the lumber at the yard" },
+    { "kind": "todo", "text": "call Dev Thursday to schedule the joist swap" },
+    { "kind": "decision", "text": "use hidden fasteners on the decking instead of face screws" }
+  ],
+  "contacts": [
+    { "name": "Dev", "trade": "framer" }
+  ],
+  "distractors": [
+    "might rain later maybe",
+    "grab lunch after this"
+  ],
+  "expects_summary": true
+}

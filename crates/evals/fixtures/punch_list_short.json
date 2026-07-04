@@ -1,0 +1,12 @@
+{
+  "description": "Short punch-list walk: three crisp todos, no contacts, no chatter.",
+  "tags": ["short", "punch-list"],
+  "items": [
+    { "kind": "todo", "text": "replace kitchen faucet cartridge, still dripping" },
+    { "kind": "todo", "text": "electrician back on dead bedroom outlet by window" },
+    { "kind": "todo", "text": "fix closet door latch, sprung hinge" }
+  ],
+  "contacts": [],
+  "distractors": [],
+  "expects_summary": true
+}

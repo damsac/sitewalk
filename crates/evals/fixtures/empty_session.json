@@ -1,0 +1,8 @@
+{
+  "description": "Near-empty session: only filler. Nothing to extract; summary may be the placeholder.",
+  "tags": ["empty", "edge"],
+  "items": [],
+  "contacts": [],
+  "distractors": ["uh okay hmm yeah"],
+  "expects_summary": true
+}
