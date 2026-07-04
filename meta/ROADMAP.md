@@ -4,60 +4,43 @@ Shared priorities and sequencing. Who's doing what, what's next, what's blocked.
 
 Updated when priorities shift. Either person can propose changes via PR.
 
+**2026-07-01 pivot:** Murmur rebuilt from scratch as a field-work voice agent (site walks → documents). The pre-pivot roadmap is archived in this file's git history. Code: `damsac/sitewalk`. Docs/specs/plans: this repo, `pr/dam/rebuild-vision` → `docs/superpowers/`.
+
 ---
 
 ## Active
 
-| Work | Owner | Status | Branch |
-|------|-------|--------|--------|
-| TestFlight prep (checklist items 3, 6, 13–15, 20) | dam + sac | In progress | dam, PR pending |
-| Wire error views (MicDenied, OutOfCredits, APIError) | sac + dam | Not started | — |
+| Work | Owner | Status |
+|------|-------|--------|
+| sitewalk PR #1 — iOS app behind WalkEngine seam | sac | reviewed; small fixes then merge |
+| 06-spike — whisper-rs STT benchmark (GO/KILL) | dam | plan ready (`docs/superpowers/plans/2026-07-04-rust-core-06-spike-stt-benchmark.md`); needs an executor |
+| Harness patches: PPQ Bearer auth + `ANTHROPIC_BASE_URL` | sac | on sac's machine, needs a PR |
 
-## Up Next
+## Up Next (sequenced)
 
-- User-facing home view toggle (Settings: Scanner/Navigator) — Zones is now default, toggle for alternatives
-- VoiceOver accessibility + `accessibilityReduceMotion` broadly
-- Search (entries become unfindable at scale)
-- LLM cost visibility tool (usage log + Settings UI)
-- Conversation lifecycle: reset mechanism, context indicator
+1. **Plan 06 — STT** (dam; blocked on spike verdict). Also carries: items `source` column migration, swap-contract fix (clear live items only after successful process), template-keys alignment.
+2. **Plan 07 — layout protocol + FFI** (dam builds bridge, sac consumes). Replaces `DemoWalkEngine` behind `AppModel.init(engine:)`. FFI boundary at domain types; never hold the Store lock across `maybe_extract`.
+3. **Prompt-optimization loop** on the 05b eval suite (rank on F0.5, gate on recall).
+4. **Photo attachment schema** (rides a migration after `source`).
 
-## Open Questions
+## Decisions needed (joint)
 
-These need resolution. Either person can claim one and propose an answer via PR.
+- Template keys: adopt sac's `landscape | property | inspection` as canonical? (dam: yes — needs sac's ack)
+- STT DONE semantics: flush final utterance vs speed (old canon chose speed for quick-capture; site walks argue flush)
+- Fate of the Gallery/Screens static twins after design freeze
 
-- Token budget: how many active entries before truncating context?
-- Conversation lifecycle: when does multi-turn reset? Timer, explicit button, or N seconds of silence?
-- Undo stacking: independent undo for rapid actions?
-- ~~Home view default~~: resolved — Zones is now the default; SacHomeView removed
+## Completed (rebuild era)
 
-## Completed
-
-| Work | Date | Commits |
-|------|------|---------|
-| Agent protocol + action types in MurmurCore | 2026-02-22 | `c27110d..d7c53cf` |
-| Tool schemas (create, update, complete, archive entries) | 2026-02-22 | `c27110d..d7c53cf` |
-| Smart list with flat sorting, daily brief | 2026-02-22 | `49cb1bc..e0936cf` |
-| Gesture handlers (swipe right = complete, swipe left = snooze) | 2026-02-26 | `a2fc7e8..d2e2838` |
-| Response toast with undo support | 2026-02-26 | `a2fc7e8` |
-| Remove progressive disclosure system | 2026-02-22 | `f389a81..23125d9` |
-| App icon redesign | 2026-02-22 | `6ddc930..c4b8337` |
-| Focus strip + category sections | 2026-02-26 | PR #59 |
-| Resilient action parsing + multi-turn wiring | 2026-03-01 | PR #83 |
-| Unified home composition (delete DailyFocus, variant system) | 2026-03-04 | PR #93 |
-| Layout diff system (Phases 1–3) | 2026-03-04 | `30aebc6..ab40bf0` |
-| Three-zone focus screen + keyboard UX fixes | 2026-03-05 | PR #94 |
-| Card redesign (borderless rows, flow chips) | 2026-03-05 | `455f2d5` |
-| Launch screen | 2026-03-05 | `379f927` |
-| Reactive wave visualizer + processing glow | 2026-03-06 | `b9bb343` |
-| Color palette tightening | 2026-03-06 | `8871103` |
-| Inline editing in entry detail | 2026-03-06 | `f2658d8` |
-| Calendar view + habits by cadence | 2026-03-07 | PR #97 |
-| Tab swipe (TabView page style for zones) | 2026-03-07 | `1931934`, `23b46a5` |
-| Real token usage for credits + switch to Haiku | 2026-03-14 | `e8a4a46` |
-| TestFlight prep: export compliance, portrait lock | 2026-03-14 | `6512f3d` |
-| Error handling hardening design spec | 2026-03-14 | `5528c59` |
-| Due date formatting, layout animations, UI polish | 2026-03-14 | `24c4430` |
-| Simplify categories (remove `thought`, down to 7) | 2026-03-01 | various |
-| TestFlight prep: items 16–19 (export compliance, portrait lock, DevMode gate, privacy manifest) | 2026-03-22 | Phase 1 |
-| Remove SacHomeView, Zones as default home | 2026-03-22 | Phase 2 |
-| Dead code purge + code quality improvements | 2026-03-22 | Phase 3 |
+| Work | Date | Where |
+|------|------|-------|
+| Vision spec (4 revs) + UI mocks + user stories | 2026-07-01 | `docs/superpowers/specs/`, `docs/superpowers/mocks/` |
+| Plan 01 — harness foundation (agent loop, tools, providers) | 2026-07-01 | sitewalk, 14 commits |
+| Plan 02 — memory/reflection/context (provenance, snapshots) | 2026-07-02 | sitewalk, 15 commits |
+| Plan 03 — domain + SQLite store (tombstones, sync-ready) | 2026-07-02 | sitewalk, 14 commits |
+| Plan 04 — processing pipeline + reflection coordinator + R9 cost log | 2026-07-03 | sitewalk, 16 commits |
+| Plan 05 — live in-session extraction | 2026-07-03/04 | sitewalk, 6 commits |
+| Plan 05b — eval suite (corpus + deterministic grader + runners) | 2026-07-04 | sitewalk, 8 commits |
+| Memory frontier research | 2026-07-02 | `docs/research/` |
+| STT frontier research (SpeechAnalyzer biasing regression, engine survey) | 2026-07-04 | `docs/research/` |
+| sitewalk repo → damsac org, public | 2026-07-04 | github.com/damsac/sitewalk |
+| iOS app: design system + full flow behind WalkEngine seam | 2026-07-04 | sitewalk PR #1 (sac) |
