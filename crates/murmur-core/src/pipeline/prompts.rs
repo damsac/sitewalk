@@ -8,6 +8,8 @@ use harness::{
     CompletionRequest, ContentBlock, HarnessError, LlmProvider, Message, ToolSpec, Usage,
 };
 
+use crate::domain::CapturedItem;
+
 const WRITE_SUMMARY: &str = "write_summary";
 
 /// System prompt for the extraction pass. `memory_prompt` is
@@ -84,6 +86,51 @@ pub(crate) async fn summarize(
     Ok((summary, response.usage))
 }
 
+/// Formats a session's existing items as a newest-first dedup list for a live
+/// pass. Newest-first so budget truncation drops the *oldest* entries (least
+/// likely to be re-mentioned in the newest transcript slice). Empty string when
+/// there are no items — the context assembler elides empty sections.
+pub(crate) fn format_already_captured(items: &[CapturedItem]) -> String {
+    items
+        .iter()
+        .rev()
+        .map(|i| format!("- [{}] {}", i.kind, i.text))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// System prompt for a live in-session pass (spec Rev 2 §2). Even more
+/// conservative than `extraction_system_prompt`: the transcript is partial, so
+/// R6's under-extraction bias applies doubly. `add_item` is the only tool —
+/// reports, contacts, and memory are end-of-session concerns. `memory_prompt`
+/// is `Memory::to_prompt()` output ("" when empty).
+pub(crate) fn live_extraction_system_prompt(memory_prompt: &str) -> String {
+    let memory_block = if memory_prompt.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\nWhat you know about this user:\n{memory_prompt}")
+    };
+    format!(
+        "You extract items LIVE from an in-progress field-work session while the \
+         tradesperson is still talking. You see only the newest slice of a running \
+         transcript plus the items already captured so far.\n\
+         Rules:\n\
+         - Extract ONLY clearly-completed, unambiguous items with add_item (todos, \
+         decisions, notes, safety issues, parts, prices). This is a partial \
+         transcript: when a thought is mid-sentence, cut off, or unclear, SKIP it — \
+         the end-of-session pass is the source of truth and will catch it. Bias hard \
+         toward fewer items.\n\
+         - NEVER repeat anything under 'already captured'. When unsure whether it is \
+         a duplicate, skip it.\n\
+         - Never invent assignees, prices, dates, or details that were not spoken.\n\
+         - add_item is your only tool — do not summarize, write reports, or save \
+         contacts. When nothing new is worth capturing, reply with a short \
+         acknowledgement and call no tools.\n\
+         - Transcripts are speech-to-text: expect misrecognized jargon and names; \
+         prefer terms from what you know about the user.{memory_block}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -129,6 +176,41 @@ mod tests {
             reqs[0].messages[0].content,
             vec![ContentBlock::Text { text: "transcript text".into() }]
         );
+    }
+
+    #[test]
+    fn live_prompt_is_conservative_and_add_item_only() {
+        let p = live_extraction_system_prompt("## vocabulary\n- french drain\n");
+        assert!(p.contains("already captured"), "dedup instruction");
+        assert!(p.contains("partial transcript"), "names the partial-transcript risk");
+        assert!(p.contains("add_item is your only tool"));
+        assert!(p.contains("Bias hard toward fewer items"), "R6 doubly");
+        assert!(p.contains("french drain"), "memory is injected");
+        // live passes must NOT be told to write reports or save contacts
+        assert!(p.contains("do not summarize, write reports, or save"));
+    }
+
+    #[test]
+    fn live_prompt_without_memory_omits_the_block() {
+        let p = live_extraction_system_prompt("");
+        assert!(!p.contains("What you know about this user"));
+    }
+
+    #[test]
+    fn already_captured_is_newest_first_and_tagged() {
+        let s = crate::store::Store::open_in_memory("device-a").unwrap();
+        let session = s.start_session(None).unwrap();
+        s.add_item(&session.id, "todo", "order lumber").unwrap();
+        s.add_item(&session.id, "safety", "loose railing").unwrap();
+        let items = s.list_items_for_session(&session.id).unwrap();
+        let rendered = format_already_captured(&items);
+        // newest first: safety before todo
+        assert_eq!(rendered, "- [safety] loose railing\n- [todo] order lumber");
+    }
+
+    #[test]
+    fn already_captured_is_empty_for_no_items() {
+        assert_eq!(format_already_captured(&[]), "");
     }
 
     #[tokio::test]
