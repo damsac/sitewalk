@@ -318,16 +318,45 @@ impl Store {
         Ok(session)
     }
 
-    /// Pipeline success exit: marks the session Processed AND records the LLM
-    /// cost in one transaction — a crash between the two can't leave a
-    /// Processed session with unlogged spend (or vice versa).
+    /// Pipeline success exit. In ONE transaction: swap out the old board, mark
+    /// the session Processed, and log LLM cost. The swap tombstones every item
+    /// for the session that is `source = live` or `source = authoritative` but
+    /// was NOT created by this run (`run_item_ids`) — i.e. the prior live board
+    /// and any authoritative leftovers from a failed prior run. `manual` items
+    /// and this run's own items are never swept. A crash before this commit
+    /// leaves the live board intact (nothing was swept); the next successful
+    /// run sweeps the stragglers via the same rule.
     pub fn finish_session_processed(
         &self,
         session_id: &str,
         summary: &str,
         usage: &harness::Usage,
+        run_item_ids: &[String],
     ) -> Result<Session, CoreError> {
         let tx = self.conn.unchecked_transaction()?;
+        let now = self.now() as i64;
+
+        let mut sql = String::from(
+            "UPDATE items SET deleted_at = ?1, updated_at = ?1
+             WHERE session_id = ?2 AND deleted_at IS NULL
+               AND source IN ('live', 'authoritative')",
+        );
+        // params: [now, session_id, run_item_ids...]
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(now), Box::new(session_id.to_string())];
+        if !run_item_ids.is_empty() {
+            let placeholders: Vec<String> =
+                (0..run_item_ids.len()).map(|i| format!("?{}", i + 3)).collect();
+            sql.push_str(&format!(" AND id NOT IN ({})", placeholders.join(", ")));
+            for id in run_item_ids {
+                params.push(Box::new(id.clone()));
+            }
+        }
+        self.conn.execute(
+            &sql,
+            rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
+        )?;
+
         let session = self.mark_session_processed(session_id, summary)?;
         self.record_llm_usage(Some(session_id), "processing", usage)?;
         tx.commit()?;
@@ -348,19 +377,24 @@ impl Store {
         Ok(())
     }
 
-    /// Tombstones all live items and artifacts of a session (one transaction).
-    /// The processing pipeline calls this before (re)processing so a Failed
-    /// retry can't duplicate extracted outputs. Returns rows tombstoned.
-    pub fn clear_session_outputs(&self, session_id: &str) -> Result<usize, CoreError> {
+    /// Clears a session's AUTHORITATIVE outputs before a (re)processing attempt
+    /// (Phase 0): tombstones items with `source='authoritative'` and ALL
+    /// artifacts (artifacts are only ever written by processing, so every one is
+    /// authoritative-equivalent). NEVER touches `source='live'` (the safety-net
+    /// board that must survive a failed retry, Plan 06a) or `source='manual'`
+    /// (the user's own). Bounds duplicate accumulation across repeated FAILED
+    /// attempts to a single in-flight attempt's worth. Idempotent pure delete →
+    /// crash-safe on retry. Returns rows tombstoned.
+    pub fn clear_authoritative_outputs(&self, session_id: &str) -> Result<usize, CoreError> {
         let now = self.now() as i64;
         let tx = self.conn.unchecked_transaction()?;
-        self.get_session(session_id)?;
-        let items = tx.execute(
+        self.get_session(session_id)?; // NotFound if missing/tombstoned
+        let items = self.conn.execute(
             "UPDATE items SET deleted_at = ?1, updated_at = ?1
-             WHERE session_id = ?2 AND deleted_at IS NULL",
+             WHERE session_id = ?2 AND deleted_at IS NULL AND source = 'authoritative'",
             rusqlite::params![now, session_id],
         )?;
-        let artifacts = tx.execute(
+        let artifacts = self.conn.execute(
             "UPDATE artifacts SET deleted_at = ?1, updated_at = ?1
              WHERE session_id = ?2 AND deleted_at IS NULL",
             rusqlite::params![now, session_id],
@@ -692,33 +726,85 @@ mod tests {
     }
 
     #[test]
-    fn clear_session_outputs_tombstones_live_children() {
+    fn finish_processed_swaps_out_live_and_prior_authoritative_keeps_manual_and_this_run() {
+        use crate::domain::ItemSource;
         let s = store();
         let session = s.start_session(None).unwrap();
-        s.add_item(&session.id, "todo", "one").unwrap();
-        s.add_artifact(&session.id, "report", "t", "b").unwrap();
-        let cleared = s.clear_session_outputs(&session.id).unwrap();
-        assert_eq!(cleared, 2);
-        assert!(s.list_items_for_session(&session.id).unwrap().is_empty());
-        assert!(s.list_artifacts_for_session(&session.id).unwrap().is_empty());
-        // idempotent: nothing left to clear
-        assert_eq!(s.clear_session_outputs(&session.id).unwrap(), 0);
-        // missing session errors
-        assert!(matches!(
-            s.clear_session_outputs("nope"),
-            Err(CoreError::NotFound { entity: "session", .. })
-        ));
+        let sid = session.id.clone();
+        // Board before this run: a live item, a prior-run authoritative item,
+        // and a manual item.
+        let live = s.add_item_with_source(&sid, "todo", "live", ItemSource::Live).unwrap();
+        let prior = s.add_item_with_source(&sid, "todo", "prior auth", ItemSource::Authoritative).unwrap();
+        let manual = s.add_item_with_source(&sid, "note", "manual", ItemSource::Manual).unwrap();
+        // This run creates two authoritative items.
+        let a1 = s.add_item_with_source(&sid, "todo", "new 1", ItemSource::Authoritative).unwrap();
+        let a2 = s.add_item_with_source(&sid, "safety", "new 2", ItemSource::Authoritative).unwrap();
+
+        s.end_session(&sid).unwrap();
+        s.finish_session_processed(&sid, "done", &harness::Usage::default(), &[a1.id.clone(), a2.id.clone()]).unwrap();
+
+        let ids: Vec<String> = s.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        assert!(ids.contains(&manual.id), "manual survives the swap");
+        assert!(ids.contains(&a1.id) && ids.contains(&a2.id), "this-run authoritative survives");
+        assert!(!ids.contains(&live.id), "live is swept");
+        assert!(!ids.contains(&prior.id), "prior-run authoritative is swept");
+        assert_eq!(ids.len(), 3);
+        // status + cost still land in the same tx
+        assert_eq!(s.get_session(&sid).unwrap().status, SessionStatus::Processed);
+        assert_eq!(s.list_llm_usage_for_session(&sid).unwrap().len(), 1);
     }
 
     #[test]
-    fn clear_session_outputs_on_failed_session() {
+    fn finish_processed_with_no_run_ids_sweeps_all_live_and_authoritative() {
+        use crate::domain::ItemSource;
         let s = store();
         let session = s.start_session(None).unwrap();
-        s.end_session(&session.id).unwrap();
-        s.add_item(&session.id, "todo", "stale").unwrap();
-        s.mark_session_failed(&session.id).unwrap();
-        assert_eq!(s.clear_session_outputs(&session.id).unwrap(), 1);
-        assert_eq!(s.get_session(&session.id).unwrap().status, SessionStatus::Failed);
+        let sid = session.id.clone();
+        s.add_item_with_source(&sid, "todo", "live", ItemSource::Live).unwrap();
+        let manual = s.add_item_with_source(&sid, "note", "manual", ItemSource::Manual).unwrap();
+        s.end_session(&sid).unwrap();
+        s.finish_session_processed(&sid, "(empty session)", &harness::Usage::default(), &[]).unwrap();
+        let ids: Vec<String> = s.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![manual.id], "only manual survives an empty-run swap");
+    }
+
+    #[test]
+    fn finish_failed_leaves_the_live_board_intact() {
+        use crate::domain::ItemSource;
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        let sid = session.id.clone();
+        let live = s.add_item_with_source(&sid, "todo", "live", ItemSource::Live).unwrap();
+        s.end_session(&sid).unwrap();
+        s.finish_session_failed(&sid, &harness::Usage::default()).unwrap();
+        let ids: Vec<String> = s.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![live.id], "a failed process must not sweep the live board (the whole fix)");
+        assert_eq!(s.get_session(&sid).unwrap().status, SessionStatus::Failed);
+    }
+
+    #[test]
+    fn clear_authoritative_outputs_spares_live_and_manual_and_sweeps_artifacts() {
+        use crate::domain::ItemSource;
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        let sid = session.id.clone();
+        let live = s.add_item_with_source(&sid, "todo", "live", ItemSource::Live).unwrap();
+        let manual = s.add_item_with_source(&sid, "note", "manual", ItemSource::Manual).unwrap();
+        s.add_item_with_source(&sid, "todo", "stale auth", ItemSource::Authoritative).unwrap();
+        s.add_artifact(&sid, "report", "old", "body").unwrap();
+
+        let cleared = s.clear_authoritative_outputs(&sid).unwrap();
+        assert_eq!(cleared, 2, "one authoritative item + one artifact");
+        let ids: Vec<String> = s.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![live.id, manual.id], "live and manual are spared");
+        assert!(s.list_artifacts_for_session(&sid).unwrap().is_empty(), "all artifacts swept");
+        // idempotent: nothing left to clear
+        assert_eq!(s.clear_authoritative_outputs(&sid).unwrap(), 0);
+        // missing session errors
+        assert!(matches!(
+            s.clear_authoritative_outputs("nope"),
+            Err(CoreError::NotFound { entity: "session", .. })
+        ));
     }
 
     #[test]
