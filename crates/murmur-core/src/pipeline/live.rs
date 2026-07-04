@@ -6,11 +6,17 @@
 //! processing lands; the UI re-queries `list_items_for_session` on the session's
 //! status change (Recording → Processed).
 //!
-//! Serialization by construction: `maybe_extract` runs ONLY while the session is
-//! `Recording`; `SessionProcessor::process` accepts only
-//! `AwaitingProcessing | Failed`. The two are temporally disjoint — the status
-//! gate is the boundary. A pass that finds the session no longer recording skips
-//! silently (handles the stop-button race).
+//! `maybe_extract` snapshots the session as `Recording` before running its
+//! multi-turn agent loop; a pass that finds the session no longer recording at
+//! that snapshot skips silently (handles the stop-button race). But a session
+//! can end *during* the loop (`SessionProcessor::process` tombstones the live
+//! board and re-extracts), so the snapshot alone isn't enough — the real
+//! boundary is enforced at the write: `add_item` is registered gated to
+//! `SessionStatus::Recording` (`AddItemTool::gated`), and the status check and
+//! insert happen atomically (same `Store` call, no intervening await). A tool
+//! call that lands after the session has moved on errors harmlessly — the
+//! agent loop reports it as a normal tool failure and the pass ends without
+//! writing a stale item.
 //!
 //! Failure posture: a failed pass never disrupts recording. Non-zero usage is
 //! logged (R9), the cursor is NOT advanced, and the next tick retries the same
@@ -146,7 +152,11 @@ impl LiveExtractor {
         ]);
 
         let mut registry = ToolRegistry::new();
-        registry.register(AddItemTool::new(self.store.clone(), &self.session_id));
+        registry.register(AddItemTool::gated(
+            self.store.clone(),
+            &self.session_id,
+            SessionStatus::Recording,
+        ));
         let agent = Agent::new(
             self.provider.clone(),
             registry,
@@ -197,15 +207,42 @@ impl LiveExtractor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use harness::{
-        CompletionResponse, ContentBlock, FactSource, Memory, MockProvider, StopReason, Usage,
+        CompletionRequest, CompletionResponse, ContentBlock, FactSource, HarnessError, LlmProvider,
+        Memory, MockProvider, StopReason, Usage,
     };
 
     use crate::store::Store;
 
     use super::*;
+
+    /// Wraps a `MockProvider`, but on its FIRST `complete()` call — i.e. right
+    /// after `LiveExtractor::maybe_extract` has already read the session as
+    /// `Recording` and is mid-agent-loop — flips the session to
+    /// `AwaitingProcessing` and tombstones its live items, simulating
+    /// end-of-session processing racing ahead of a live pass. Exercises the
+    /// gate at the write (`AddItemTool::gated`), not the initial snapshot.
+    struct RacingProvider {
+        inner: MockProvider,
+        store: Arc<Mutex<Store>>,
+        session_id: String,
+        fired: AtomicBool,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for RacingProvider {
+        async fn complete(&self, req: CompletionRequest) -> Result<CompletionResponse, HarnessError> {
+            if !self.fired.swap(true, Ordering::SeqCst) {
+                let store = self.store.lock().unwrap();
+                store.end_and_record_session(&self.session_id).unwrap();
+                store.clear_session_outputs(&self.session_id).unwrap();
+            }
+            self.inner.complete(req).await
+        }
+    }
 
     // No NullMemoryStore stub here: unlike SessionProcessor, LiveExtractor takes
     // Arc<Mutex<Memory>> directly (no MemoryStore param) — a stub would be
@@ -369,6 +406,56 @@ mod tests {
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].purpose, "live_extraction");
         assert_eq!(usage[0].input_tokens, 30);
+    }
+
+    #[tokio::test]
+    async fn gated_add_item_blocks_a_stale_write_when_processing_races_ahead() {
+        // The session is Recording when maybe_extract snapshots it and starts
+        // the agent loop, but flips to AwaitingProcessing (and its live items
+        // are tombstoned, standing in for SessionProcessor::process's
+        // authoritative re-extract) DURING the loop — before the scripted
+        // add_item tool call actually executes. The gated tool must refuse
+        // the write; the pass still completes harmlessly (R7-style swallow,
+        // but this time at the write, not the LLM error).
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        store.append_transcript(&session.id, "we need to order lumber for the deck").unwrap();
+        let sid = session.id;
+        let store = Arc::new(Mutex::new(store));
+        let racing = Arc::new(RacingProvider {
+            inner: MockProvider::new(vec![
+                tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+                end_turn("captured"),
+            ]),
+            store: store.clone(),
+            session_id: sid.clone(),
+            fired: AtomicBool::new(false),
+        });
+        let mut extractor = LiveExtractor::new(
+            racing.clone(),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            &sid,
+        );
+        extractor.min_new_chars = 1;
+
+        let outcome = extractor.maybe_extract().await.unwrap();
+        // The agent loop absorbs the tool error as an is_error result and
+        // still reaches end_turn — the run succeeds, but nothing was added.
+        assert_eq!(
+            outcome,
+            LiveExtractOutcome::Extracted {
+                items_added: 0,
+                usage: Usage { input_tokens: 40, output_tokens: 10 },
+            }
+        );
+
+        let store = store.lock().unwrap();
+        assert!(
+            store.list_items_for_session(&sid).unwrap().is_empty(),
+            "the stale add_item must not have landed"
+        );
+        assert_eq!(store.get_session(&sid).unwrap().status, SessionStatus::AwaitingProcessing);
     }
 
     #[tokio::test]

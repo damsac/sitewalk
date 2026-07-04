@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use harness::{HarnessError, Tool};
 
+use crate::domain::SessionStatus;
 use crate::store::Store;
 
 fn tool_err(name: &str, message: impl Into<String>) -> HarnessError {
@@ -47,11 +48,27 @@ const VALID_KINDS: [&str; 6] = ["todo", "decision", "note", "safety", "part", "p
 pub struct AddItemTool {
     store: Arc<Mutex<Store>>,
     session_id: String,
+    /// When set, `execute` only writes if the session's CURRENT status
+    /// matches — checked atomically with the insert (see
+    /// `Store::add_item_if_status`). Used by `LiveExtractor` to close the
+    /// status-gate TOCTOU: a live pass that outlives end-of-session
+    /// processing must not insert a stale item (pipeline::live module docs).
+    required_status: Option<SessionStatus>,
 }
 
 impl AddItemTool {
     pub fn new(store: Arc<Mutex<Store>>, session_id: &str) -> Self {
-        AddItemTool { store, session_id: session_id.to_string() }
+        AddItemTool { store, session_id: session_id.to_string(), required_status: None }
+    }
+
+    /// An `AddItemTool` that only writes while the session's status matches
+    /// `required`, checked atomically with the write.
+    pub fn gated(store: Arc<Mutex<Store>>, session_id: &str, required: SessionStatus) -> Self {
+        AddItemTool {
+            store,
+            session_id: session_id.to_string(),
+            required_status: Some(required),
+        }
     }
 }
 
@@ -85,9 +102,20 @@ impl Tool for AddItemTool {
             ));
         }
         let text = req_nonempty_str(&input, "text", "add_item")?;
-        lock(&self.store, "add_item")?
-            .add_item(&self.session_id, kind, text)
-            .map_err(|e| tool_err("add_item", e.to_string()))?;
+        let guard = lock(&self.store, "add_item")?;
+        match self.required_status {
+            None => {
+                guard.add_item(&self.session_id, kind, text).map_err(|e| tool_err("add_item", e.to_string()))?;
+            }
+            Some(required) => {
+                let written = guard
+                    .add_item_if_status(&self.session_id, kind, text, required)
+                    .map_err(|e| tool_err("add_item", e.to_string()))?;
+                if written.is_none() {
+                    return Err(tool_err("add_item", "session no longer recording"));
+                }
+            }
+        }
         Ok(format!("added {kind}: {text}"))
     }
 }
@@ -294,6 +322,36 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(&err, HarnessError::Tool { message, .. } if message.contains("must not be empty")),
+            "got: {err}"
+        );
+        assert!(store.lock().unwrap().list_items_for_session(&sid).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn gated_add_item_writes_when_status_matches() {
+        use crate::domain::SessionStatus;
+        let (store, sid) = shared_store_with_session();
+        let tool = super::AddItemTool::gated(store.clone(), &sid, SessionStatus::Recording);
+        let out = tool
+            .execute(serde_json::json!({"kind": "todo", "text": "order lumber"}))
+            .await
+            .unwrap();
+        assert_eq!(out, "added todo: order lumber");
+        assert_eq!(store.lock().unwrap().list_items_for_session(&sid).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn gated_add_item_errors_and_writes_nothing_when_status_changed() {
+        use crate::domain::SessionStatus;
+        let (store, sid) = shared_store_with_session();
+        store.lock().unwrap().end_and_record_session(&sid).unwrap(); // Recording -> AwaitingProcessing
+        let tool = super::AddItemTool::gated(store.clone(), &sid, SessionStatus::Recording);
+        let err = tool
+            .execute(serde_json::json!({"kind": "todo", "text": "order lumber"}))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, HarnessError::Tool { message, .. } if message.contains("no longer recording")),
             "got: {err}"
         );
         assert!(store.lock().unwrap().list_items_for_session(&sid).unwrap().is_empty());

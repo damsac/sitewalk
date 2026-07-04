@@ -1,6 +1,6 @@
 use rusqlite::Row;
 
-use crate::domain::CapturedItem;
+use crate::domain::{CapturedItem, SessionStatus};
 use crate::error::CoreError;
 use crate::ids::new_id;
 use crate::store::Store;
@@ -26,6 +26,31 @@ impl Store {
     /// and manual entry alike (story 10: manual parity — nothing is agent-only).
     pub fn add_item(&self, session_id: &str, kind: &str, text: &str) -> Result<CapturedItem, CoreError> {
         self.get_session(session_id)?; // NotFound if missing/tombstoned
+        self.insert_item(session_id, kind, text)
+    }
+
+    /// Same as `add_item`, but only writes if the session's CURRENT status
+    /// matches `required` — the status read and the insert happen against
+    /// the same `&self` call with no intervening await, so as long as every
+    /// caller shares one `Store` behind a single lock (as `AddItemTool` and
+    /// `LiveExtractor` do), no window exists between the check and the
+    /// write. Returns `Ok(None)` on a status mismatch (nothing written);
+    /// `Ok(Some(item))` on success.
+    pub fn add_item_if_status(
+        &self,
+        session_id: &str,
+        kind: &str,
+        text: &str,
+        required: SessionStatus,
+    ) -> Result<Option<CapturedItem>, CoreError> {
+        let session = self.get_session(session_id)?; // NotFound if missing/tombstoned
+        if session.status != required {
+            return Ok(None);
+        }
+        self.insert_item(session_id, kind, text).map(Some)
+    }
+
+    fn insert_item(&self, session_id: &str, kind: &str, text: &str) -> Result<CapturedItem, CoreError> {
         let now = self.now();
         let item = CapturedItem {
             id: new_id(),
@@ -181,6 +206,25 @@ mod tests {
         s.set_item_done(&t1.id, true).unwrap();
         let open: Vec<_> = s.list_open_todos().unwrap().into_iter().map(|i| i.id).collect();
         assert_eq!(open, vec![t2.id]);
+    }
+
+    #[test]
+    fn add_item_if_status_writes_when_status_matches() {
+        use crate::domain::SessionStatus;
+        let (s, sid) = store_with_session();
+        let item = s.add_item_if_status(&sid, "todo", "order lumber", SessionStatus::Recording).unwrap();
+        assert!(item.is_some());
+        assert_eq!(s.list_items_for_session(&sid).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn add_item_if_status_no_ops_when_status_mismatches() {
+        use crate::domain::SessionStatus;
+        let (s, sid) = store_with_session();
+        s.end_and_record_session(&sid).unwrap(); // Recording -> AwaitingProcessing
+        let item = s.add_item_if_status(&sid, "todo", "order lumber", SessionStatus::Recording).unwrap();
+        assert!(item.is_none());
+        assert!(s.list_items_for_session(&sid).unwrap().is_empty());
     }
 
     #[test]
