@@ -80,3 +80,20 @@ async fn over_extracting_model_scores_lower_than_perfect() {
     assert!(over.score.distractor_fp_rate > 0.0, "distractors should be caught");
     assert!(over.score.f_half < perfect.score.f_half, "R6: over-extraction must score lower");
 }
+
+/// Gated real-API run of ONE scenario. Asserts the report is well-formed — never
+/// asserts score thresholds (real scores are non-deterministic). Costs tokens.
+#[tokio::test]
+#[ignore = "hits the real Anthropic API; set ANTHROPIC_API_KEY and run with --ignored"]
+async fn real_api_eval_is_well_formed() {
+    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("set ANTHROPIC_API_KEY");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures");
+    let deck = evals::corpus::load_corpus(dir).unwrap().into_iter()
+        .find(|s| s.id == "deck_walk_contacts").unwrap();
+    let provider = std::sync::Arc::new(harness::AnthropicProvider::new(api_key, "claude-haiku-4-5"));
+    let report = evals::run::run_scenario(&deck, provider, "claude-haiku-4-5").await.unwrap();
+    // well-formed: metrics in range, cost recorded (R9)
+    assert!((0.0..=1.0).contains(&report.score.f_half));
+    assert!((0.0..=1.0).contains(&report.score.distractor_fp_rate));
+    assert!(report.cost.input_tokens > 0, "R9: usage was logged and priced");
+}
