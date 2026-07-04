@@ -6,3 +6,4 @@
 pub mod corpus;
 pub mod grade;
 pub mod normalize;
+pub mod report;
