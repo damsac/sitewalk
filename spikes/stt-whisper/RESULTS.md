@@ -149,7 +149,57 @@ build recipe (whisper.cpp's bundled `examples/whisper.swiftui`, path B — no Un
 
 ## Decision
 
-_(Filled in Task 6 against the exit criteria.)_
+### **GO — commit Plan 06 to whisper.cpp Rust-side (Option B), with two named caveats.**
+
+Four of the five exit criteria are cleanly met on the Mac tier; the fifth (iPhone) is unrun and
+makes the GO **provisional pending a device check**. The evidence strongly favors Option B over
+the staged-hybrid Option C.
+
+| # | Criterion | Bar | Result | Verdict |
+|---|-----------|-----|--------|---------|
+| 1 | Feasibility | `whisper-rs` + `metal` builds & runs in nix on Apple Silicon | Built & ran; Metal engaged (M4 Max, `use gpu=1`) | **PASS** |
+| 2 | Performance | RTF < 0.5 **and** WER ≤10% clean / ≤20% noisy, **same model row** | `base.en`: RTF 0.009, WER 5.8% clean / 11.7% noisy. `small.en`: RTF 0.021, WER 4.7% / 11.7% | **PASS** |
+| 3 | Append-only | derivable, finalize ≤3 s, bounded dedup-able overlap | Invariant proven+tested; bounded overlap; 5 s/1 s → ≤3 s latency at 19% WER via LocalAgreement finalize | **PASS (caveat)** |
+| 4 | Biasing | `initial_prompt` recall lift ≥10 pp without runaway hallucination | +10 to +19 pp (base/small); 0 hallucinations flagged | **PASS** |
+| 5 | iPhone | RTF < 1.0 on device, survives 10 min sustained | **not run — no device** | **PENDING** |
+
+**Criterion 2 is satisfied from a single model row** (as required): `base.en` clears RTF < 0.5
+(0.009) *and* WER bars (5.8% clean, 11.7% noisy) simultaneously; `small.en` does too and is more
+accurate. We are not stitching a fast model to a separate accurate one.
+
+### The two caveats (the spike's real value — assumptions turned into measured cost)
+
+1. **Live-extraction finalize needs word-level LocalAgreement, and live WER is ~4× batch.** The
+   append-only stream (Plan 05 cursor contract) *is* derivable at ≤3 s latency, but only with a
+   LocalAgreement-style word/token finalize — the naive segment-level rule is lossy (80% WER at
+   5 s chunks vs. 19% with dedup). And even done right, live streaming WER (~19% at the ≤3 s point)
+   is materially worse than end-of-session batch (~5%). **Plan 06 should treat the live stream as a
+   *provisional preview* and keep end-of-session `process()` as the authoritative pass.** The
+   LocalAgreement finalizer is tractable (a 30-line prototype here already recovers most content),
+   but it is real Plan 06 work, not free.
+
+2. **`initial_prompt` biasing works better than expected — but the deep decoder is still the
+   ceiling.** Contrary to the survey's prediction, `initial_prompt` gave a solid, hallucination-free
+   recall lift (+10 to +19 pp). This means the cheap biasing surface is **usable for v1** — the
+   trie/logit-bias hotword decoder (survey §4, 19–22% lit. gains) is an **optimization, not a
+   prerequisite**. That lowers Option B's near-term cost. *Caveat on the caveat:* this was measured
+   on clean TTS audio with only the clip-relevant terms; a full 100-term list against real noisy
+   jobsite audio is the case most likely to hallucinate and remains untested.
+
+### Why not Option C (Apple `SpeechAnalyzer`)
+
+The performance and accuracy headroom is large, biasing works on the Rust path *today* (Apple has
+no contextual-biasing surface — the product's stated differentiator is undeliverable platform-side),
+and the cross-platform payoff (Android, Deferred 3) is preserved. The only unretired risk is
+on-device battery/thermal (criterion 5), which Option C would also have to prove. Nothing measured
+here favors deferring the Rust path.
+
+### Required next step before Plan 06 locks
+
+Run the **iPhone tier** (`ios/README.md`, ~1 hr with a device): confirm `base.en`/`small.en` at
+RTF < 1.0 and no thermal kill over 10 min. The Mac is a 3–5× optimistic proxy; the margins here
+(RTF 0.009–0.02) are wide enough that this is expected to pass, but it is the one unretired GO
+condition.
 
 ---
 
