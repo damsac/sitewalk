@@ -14,7 +14,7 @@
 //! can end *during* the loop (`SessionProcessor::process` tombstones the live
 //! board and re-extracts), so the snapshot alone isn't enough — the real
 //! boundary is enforced at the write: `add_item` is registered gated to
-//! `SessionStatus::Recording` (`AddItemTool::gated`), and the status check and
+//! `SessionStatus::Recording` (`AddItemTool::live`), and the status check and
 //! insert happen atomically (same `Store` call, no intervening await). A tool
 //! call that lands after the session has moved on errors harmlessly — the
 //! agent loop reports it as a normal tool failure and the pass ends without
@@ -236,9 +236,9 @@ mod tests {
     /// Wraps a `MockProvider`, but on its FIRST `complete()` call — i.e. right
     /// after `LiveExtractor::maybe_extract` has already read the session as
     /// `Recording` and is mid-agent-loop — flips the session to
-    /// `AwaitingProcessing` and tombstones its live items, simulating
-    /// end-of-session processing racing ahead of a live pass. Exercises the
-    /// gate at the write (`AddItemTool::gated`), not the initial snapshot.
+    /// `AwaitingProcessing`, simulating end-of-session processing racing
+    /// ahead of a live pass. Exercises the gate at the write
+    /// (`AddItemTool::live`), not the initial snapshot.
     struct RacingProvider {
         inner: MockProvider,
         store: Arc<Mutex<Store>>,
