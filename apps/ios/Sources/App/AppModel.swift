@@ -64,14 +64,14 @@ final class AppModel {
         items = []
         isPaused = false
         walkStart = Date()
-        engine.begin(trade: trade)
+        let events = engine.begin(trade: trade)
 
         let src: TranscriptSource = scripted ? ScriptedSource(trade: trade) : SpeechSource()
         source = src
 
         eventTask = Task { [weak self] in
             guard let self else { return }
-            for await event in self.engine.events {
+            for await event in events {
                 switch event {
                 case .itemCaptured(let item):
                     withAnimation(.easeOut(duration: 0.25)) { self.items.append(item) }

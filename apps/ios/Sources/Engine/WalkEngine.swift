@@ -42,11 +42,10 @@ struct DocumentModel {
 
 @MainActor
 protocol WalkEngine: AnyObject {
-    /// Item events from live extraction, delivered on the main actor.
-    var events: AsyncStream<WalkEvent> { get }
-
-    /// Start a session for a trade (template key).
-    func begin(trade: TradeFixture)
+    /// Start a session for a trade and return THAT SESSION's event stream.
+    /// Streams are per-session: consumers cancel freely at session end, and
+    /// the next begin() hands out a fresh stream. Events arrive on main.
+    func begin(trade: TradeFixture) -> AsyncStream<WalkEvent>
 
     /// Feed newly transcribed text. Called repeatedly during the walk.
     func append(transcript: String)

@@ -27,12 +27,16 @@ live — no UI changes needed.
 
 ```swift
 @MainActor protocol WalkEngine: AnyObject {
-    var events: AsyncStream<WalkEvent> { get }   // .itemCaptured(...)
-    func begin(trade: TradeFixture)
+    func begin(trade: TradeFixture) -> AsyncStream<WalkEvent>  // per-session stream
     func append(transcript: String)
     func finish() async -> DocumentModel
 }
 ```
+
+**Event streams are per-session, not per-engine** (learned the hard way: a
+single shared stream dies when the first session's consumer cancels, and every
+later walk goes silent). `begin()` hands out a fresh stream each session; the
+bridge should mirror that.
 
 `DemoWalkEngine.swift` is the placeholder implementation (keyword matcher).
 **The single swap point** is `AppModel.init(engine:)` — construct the bridge,

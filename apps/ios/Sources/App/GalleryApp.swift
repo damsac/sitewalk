@@ -27,7 +27,9 @@ struct RootRouter: View {
         } else {
             AppRoot(
                 live: Self.args.contains("live=1"),
-                autoflow: Self.args.contains("autoflow=1")
+                autoflowRounds: Self.args
+                    .first(where: { $0.hasPrefix("autoflow=") })
+                    .flatMap { Int($0.dropFirst("autoflow=".count)) } ?? 0
             )
         }
     }
@@ -36,11 +38,11 @@ struct RootRouter: View {
 struct AppRoot: View {
     @State private var model: AppModel
     private let live: Bool
-    private let autoflow: Bool
+    private let autoflowRounds: Int
 
-    init(live: Bool, autoflow: Bool) {
+    init(live: Bool, autoflowRounds: Int) {
         self.live = live
-        self.autoflow = autoflow
+        self.autoflowRounds = autoflowRounds
         _model = State(initialValue: AppModel(scripted: !live))
     }
 
@@ -65,7 +67,11 @@ struct AppRoot: View {
             if live {
                 _ = await SpeechSource.requestPermissions()
             }
-            if autoflow {
+            for round in 0..<autoflowRounds {
+                if round > 0 {
+                    model.completeSend()
+                    try? await Task.sleep(for: .seconds(1))
+                }
                 try? await Task.sleep(for: .seconds(1))
                 model.startWalk()
                 // Let the scripted walk play out, then finish it.
@@ -73,12 +79,13 @@ struct AppRoot: View {
                 if model.phase == .walking {
                     model.finishWalk()
                 }
-                // Screenshot-automation hook: render the PDF unattended.
-                if ProcessInfo.processInfo.arguments.contains("autopdf=1") {
-                    try? await Task.sleep(for: .seconds(4))
-                    if model.phase == .review {
-                        model.makePDF()
-                    }
+                try? await Task.sleep(for: .seconds(3))
+            }
+            // Screenshot-automation hook: render the PDF unattended.
+            if autoflowRounds > 0, ProcessInfo.processInfo.arguments.contains("autopdf=1") {
+                try? await Task.sleep(for: .seconds(1))
+                if model.phase == .review {
+                    model.makePDF()
                 }
             }
         }

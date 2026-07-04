@@ -8,8 +8,7 @@ import Foundation
 @MainActor
 final class DemoWalkEngine: WalkEngine {
 
-    let events: AsyncStream<WalkEvent>
-    private let continuation: AsyncStream<WalkEvent>.Continuation
+    private var continuation: AsyncStream<WalkEvent>.Continuation?
 
     private var trade: TradeFixture = Fixtures.landscape
     private var seenText = ""
@@ -22,16 +21,15 @@ final class DemoWalkEngine: WalkEngine {
         "inspection": ["shingles", "attic", "gfci", "furnace", "grading"],
     ]
 
-    init() {
-        var cont: AsyncStream<WalkEvent>.Continuation!
-        events = AsyncStream { cont = $0 }
-        continuation = cont
-    }
-
-    func begin(trade: TradeFixture) {
+    func begin(trade: TradeFixture) -> AsyncStream<WalkEvent> {
+        continuation?.finish()
         self.trade = trade
         seenText = ""
         firedItems = []
+        var cont: AsyncStream<WalkEvent>.Continuation!
+        let stream = AsyncStream<WalkEvent> { cont = $0 }
+        continuation = cont
+        return stream
     }
 
     func append(transcript: String) {
@@ -40,12 +38,14 @@ final class DemoWalkEngine: WalkEngine {
         for (index, phrase) in phrases.enumerated() where !firedItems.contains(index) {
             if seenText.contains(phrase), index < trade.captured.count {
                 firedItems.insert(index)
-                continuation.yield(.itemCaptured(trade.captured[index]))
+                continuation?.yield(.itemCaptured(trade.captured[index]))
             }
         }
     }
 
     func finish() async -> DocumentModel {
+        continuation?.finish()
+        continuation = nil
         // Simulate the document build beat (the real engine targets < 8 s).
         try? await Task.sleep(for: .seconds(1.6))
         return DocumentModel(
