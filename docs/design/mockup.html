@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SITEWALK — Design Study 01</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,600;0,8..60,700;1,8..60,400;1,8..60,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #FAFAF7;
+    --paper-deep: #F1F0EA;
+    --sheet: #FFFFFE;
+    --ink: #141412;
+    --ink-60: #5E5C54;
+    --ink-35: #A7A49A;
+    --hairline: rgba(20, 20, 18, 0.16);
+    --hairline-soft: rgba(20, 20, 18, 0.09);
+    --orange: #E8531F;
+    --orange-deep: #C43F12;
+    --orange-tint: #FCEAE2;
+    --red-tag: #A63A2E;
+    --red-tint: #F7E8E5;
+    --yellow-tag: #9A7213;
+    --yellow-tint: #F6EFD9;
+    --green-tag: #3E6B35;
+    --green-tint: #E9F0E4;
+    --ui: 'Barlow', sans-serif;
+    --cond: 'Barlow Semi Condensed', sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+    --serif: 'Source Serif 4', serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { background: var(--paper); }
+
+  body {
+    font-family: var(--ui);
+    color: var(--ink);
+    background:
+      repeating-linear-gradient(0deg, transparent 0 31px, var(--hairline-soft) 31px 32px),
+      repeating-linear-gradient(90deg, transparent 0 31px, var(--hairline-soft) 31px 32px),
+      var(--paper);
+    min-height: 100vh;
+    padding: 0 clamp(20px, 4vw, 64px) 48px;
+  }
+
+  /* grain */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+    z-index: 60;
+  }
+
+  /* ————— sheet header ————— */
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 24px;
+    padding: 34px 0 20px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .wordmark { display: flex; align-items: baseline; gap: 14px; }
+  .wordmark .mark {
+    width: 15px; height: 15px;
+    background: var(--orange);
+    align-self: center;
+    flex: none;
+  }
+  .wordmark h1 {
+    font-weight: 800;
+    font-size: 30px;
+    letter-spacing: .14em;
+  }
+  .stamp {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    color: var(--orange-deep);
+    border: 1.5px solid var(--orange-deep);
+    padding: 4px 8px 3px;
+    transform: rotate(-3deg) translateY(-4px);
+    align-self: center;
+  }
+  .tagline {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 19px;
+    color: var(--ink-60);
+    margin-top: 6px;
+  }
+
+  .switcher { display: flex; align-items: center; gap: 0; border: 1.5px solid var(--ink); }
+  .switcher button {
+    appearance: none; border: 0; cursor: pointer;
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    padding: 11px 18px 10px;
+    color: var(--ink-60);
+    border-left: 1.5px solid var(--ink);
+    transition: background .15s, color .15s;
+  }
+  .switcher button:first-child { border-left: 0; }
+  .switcher button:hover { color: var(--ink); }
+  .switcher button.active { background: var(--ink); color: var(--paper); }
+  .switcher button.active .dot { color: var(--orange); }
+  .switch-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+    color: var(--ink-60); margin-right: 12px;
+  }
+
+  /* ————— frames row ————— */
+  .frames {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(24px, 3vw, 44px);
+    justify-content: center;
+    padding: 44px 0 8px;
+  }
+  .frame-unit { width: 328px; flex: none; }
+  .frame-caption {
+    display: flex; gap: 10px; align-items: baseline;
+    margin: 16px 2px 0;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    color: var(--ink-60);
+    line-height: 1.55;
+  }
+  .frame-caption .idx { color: var(--orange-deep); font-weight: 600; flex: none; }
+  .frame-caption .t { text-transform: uppercase; letter-spacing: .14em; color: var(--ink); font-weight: 600; }
+
+  /* ————— the phone ————— */
+  .phone {
+    width: 328px; height: 704px;
+    background: #1B1B19;
+    border-radius: 52px;
+    padding: 9px;
+    box-shadow:
+      0 2px 3px rgba(20,20,18,.18),
+      0 18px 44px -14px rgba(20,20,18,.38),
+      inset 0 0 0 1.5px #3A3A36;
+    position: relative;
+  }
+  .screen {
+    width: 100%; height: 100%;
+    background: var(--paper);
+    border-radius: 43px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .island {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    width: 96px; height: 27px;
+    background: #100F0E;
+    border-radius: 20px;
+    z-index: 12;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-right: 10px;
+  }
+  .island .rec-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--orange);
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  .statusbar {
+    height: 58px;
+    flex: none;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 26px 6px;
+    font-family: var(--ui);
+    font-weight: 600; font-size: 14px;
+    position: relative; z-index: 11;
+  }
+  .sb-icons { display: flex; align-items: center; gap: 5px; }
+  .sb-bars { display: flex; align-items: flex-end; gap: 1.5px; height: 10px; }
+  .sb-bars i { width: 3px; background: var(--ink); border-radius: 1px; display: block; }
+  .sb-bars i:nth-child(1){height:4px} .sb-bars i:nth-child(2){height:6px}
+  .sb-bars i:nth-child(3){height:8px} .sb-bars i:nth-child(4){height:10px}
+  .sb-bars.weak i:nth-child(n+2){opacity:.22}
+  .sb-batt {
+    width: 22px; height: 11px;
+    border: 1.5px solid var(--ink);
+    border-radius: 3px;
+    position: relative; margin-left: 2px;
+  }
+  .sb-batt::before { content:''; position:absolute; inset: 1.5px; right: 6px; background: var(--ink); border-radius: 1px; }
+  .sb-batt::after { content:''; position:absolute; right:-4px; top: 2.5px; width: 2px; height: 4px; background: var(--ink); border-radius: 0 1px 1px 0; }
+
+  /* generic screen anatomy */
+  .meta-strip {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .1em;
+    color: var(--ink-60);
+    padding: 7px 20px;
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    display: flex; justify-content: space-between;
+    white-space: nowrap; overflow: hidden;
+  }
+  .meta-strip .offline { color: var(--yellow-tag); font-weight: 600; }
+  .sec-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: .22em;
+    color: var(--ink-60);
+    text-transform: uppercase;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    padding: 3px 6px 2px;
+    flex: none;
+  }
+  .tag.red    { color: var(--red-tag);    background: var(--red-tint); }
+  .tag.yellow { color: var(--yellow-tag); background: var(--yellow-tint); }
+  .tag.green  { color: var(--green-tag);  background: var(--green-tint); }
+  .tag.plain  { color: var(--ink-60);     background: var(--paper-deep); }
+
+  /* ————— screen 01 · jobs board ————— */
+  .board-head { padding: 14px 20px 12px; }
+  .board-head .date {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+    color: var(--orange-deep); font-weight: 600;
+  }
+  .board-head h2 { font-size: 26px; font-weight: 700; letter-spacing: -.01em; margin-top: 3px; }
+  .board-head .biz { font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; color: var(--ink-60); margin-top: 4px; }
+
+  .jobs { flex: 1; overflow: hidden; }
+  .jobs .sec-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 20px 8px;
+    border-bottom: 1.5px solid var(--ink);
+    margin: 0 0 0;
+  }
+  .job-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .job-row .time {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    color: var(--ink); width: 44px; flex: none;
+  }
+  .job-row .who { flex: 1; min-width: 0; }
+  .job-row .who .nm { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-row .who .sub {
+    font-family: var(--cond); font-size: 11.5px; color: var(--ink-60);
+    letter-spacing: .02em; margin-top: 1px;
+  }
+  .job-row.done { opacity: .45; }
+  .job-row.done .nm { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+  .board-foot { flex: none; padding: 14px 20px 12px; }
+  .btn-walk {
+    width: 100%; height: 62px;
+    background: var(--orange);
+    color: #FFF8F5;
+    border: none; border-radius: 14px;
+    font-family: var(--ui); font-weight: 700; font-size: 16px;
+    letter-spacing: .1em;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    box-shadow: 0 3px 0 var(--orange-deep);
+    cursor: pointer;
+  }
+  .btn-walk .mic {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #FFF8F5;
+  }
+  .home-bar {
+    width: 120px; height: 4px; border-radius: 2px;
+    background: var(--ink); opacity: .8;
+    margin: 6px auto 8px; flex: none;
+  }
+  .home-bar.lt { background: #fff; opacity: .9; }
+
+  /* ————— screen 02 · capture ————— */
+  .rec-banner {
+    flex: none;
+    background: var(--orange);
+    color: #FFF8F5;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 20px;
+  }
+  .rec-banner .lft { display: flex; align-items: center; gap: 9px; font-weight: 700; letter-spacing: .18em; font-size: 12px; }
+  .rec-banner .lft .d {
+    width: 9px; height: 9px; border-radius: 50%; background: #FFF8F5;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  .rec-banner .tm { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+
+  .transcript {
+    padding: 14px 20px 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.75;
+    color: var(--ink-60);
+    height: 148px;
+    overflow: hidden;
+    display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .transcript .twrap { display: block; }
+  .transcript .w { opacity: 0; }
+  .transcript .w.on { opacity: 1; transition: opacity .18s; }
+  .transcript .caret {
+    display: inline-block; width: 7px; height: 13px;
+    background: var(--orange);
+    vertical-align: -2px;
+    animation: blink .9s steps(1) infinite;
+    margin-left: 2px;
+  }
+
+  .captured { flex: 1; overflow: hidden; border-top: 1.5px solid var(--ink); }
+  .captured .sec-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 9px 20px 7px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .cap-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--hairline-soft);
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  .cap-row.on { opacity: 1; transform: none; transition: opacity .28s, transform .28s; }
+  .cap-row .tx { flex: 1; font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .01em; }
+  .cap-row .rt { font-family: var(--mono); font-size: 10.5px; color: var(--ink-60); }
+  .cap-row .ph {
+    font-family: var(--mono); font-size: 8px; font-weight: 600;
+    color: var(--ink-60); background: var(--paper-deep);
+    padding: 3px 5px 2px;
+    display: inline-flex; align-items: center; gap: 3px; flex: none;
+  }
+  .cap-row .ph svg { display: block; }
+
+  .cap-foot { flex: none; padding: 10px 20px 12px; border-top: 1px solid var(--hairline); }
+  .wave {
+    display: flex; align-items: center; gap: 2.5px;
+    height: 30px; margin-bottom: 12px;
+    justify-content: center;
+  }
+  .wave i {
+    width: 3px; background: var(--orange); border-radius: 2px; display: block;
+    animation: wv 1s ease-in-out infinite alternate;
+  }
+  @keyframes wv { from { height: 4px; } to { height: 26px; } }
+  .cap-btns { display: flex; gap: 9px; }
+  .btn-photo {
+    flex: none; width: 62px; height: 62px;
+    background: transparent;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    color: var(--ink);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-family: var(--mono); font-size: 7px; font-weight: 600; letter-spacing: .16em;
+    cursor: pointer;
+  }
+  .btn-pause {
+    flex: 2; height: 62px;
+    background: transparent;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    font-family: var(--ui); font-weight: 700; font-size: 13.5px; letter-spacing: .08em;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn-done {
+    flex: 3; height: 62px;
+    background: var(--ink);
+    border: none; border-radius: 14px;
+    font-family: var(--ui); font-weight: 700; font-size: 13.5px; letter-spacing: .08em;
+    color: var(--paper);
+    box-shadow: 0 3px 0 #000;
+    cursor: pointer;
+  }
+
+  /* ————— screen 03 · transformation ————— */
+  .xf-transcript {
+    padding: 16px 20px 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.8;
+    color: var(--ink-35);
+    flex: none;
+  }
+  .xf-strip {
+    flex: none;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 11px 20px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  }
+  .xf-strip .prog { color: var(--orange); font-weight: 600; }
+  .xf-strip .prog::after {
+    content: '▓▓░░░░░░';
+    animation: prog 2.8s steps(8) infinite;
+    margin-left: 8px;
+  }
+  @keyframes prog {
+    0%   { content: '░░░░░░░░'; }
+    25%  { content: '▓▓░░░░░░'; }
+    50%  { content: '▓▓▓▓░░░░'; }
+    75%  { content: '▓▓▓▓▓▓░░'; }
+    100% { content: '▓▓▓▓▓▓▓▓'; }
+  }
+  .xf-sheetwrap { flex: 1; position: relative; overflow: hidden; background: var(--paper-deep); }
+  .xf-sheet {
+    position: absolute; left: 16px; right: 16px; top: 22px; bottom: -30px;
+    background: var(--sheet);
+    box-shadow: 0 1px 2px rgba(20,20,18,.12), 0 12px 32px -12px rgba(20,20,18,.3);
+    padding: 18px 18px 0;
+    animation: rise 5.6s ease-out infinite;
+  }
+  @keyframes rise {
+    0% { transform: translateY(26px); }
+    30%, 100% { transform: translateY(0); }
+  }
+  .xf-row { opacity: 0; animation: rowin 5.6s infinite; }
+  .xf-row.r1 { animation-delay: .9s; }
+  .xf-row.r2 { animation-delay: 1.7s; }
+  .xf-row.r3 { animation-delay: 2.5s; }
+  .xf-row.r4 { animation-delay: 3.3s; }
+  @keyframes rowin {
+    0%, 12% { opacity: 0; transform: translateY(3px); }
+    20%, 100% { opacity: 1; transform: none; }
+  }
+
+  /* ————— the paper document (03 + 04) ————— */
+  .letterhead {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 14px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .letterhead > div:first-child { flex: 1; min-width: 0; }
+  .letterhead .doc-id { flex: none; }
+  .letterhead .biz-nm {
+    font-family: var(--serif); font-weight: 700; font-size: 14.5px; letter-spacing: .01em;
+    line-height: 1.2;
+  }
+  .letterhead .biz-sub {
+    font-family: var(--mono); font-size: 7.5px; letter-spacing: .08em;
+    color: var(--ink-60); margin-top: 4px;
+  }
+  .letterhead .doc-id { text-align: right; }
+  .letterhead .doc-id .k {
+    font-family: var(--mono); font-size: 8.5px; font-weight: 600; letter-spacing: .2em;
+    color: var(--orange-deep);
+  }
+  .letterhead .doc-id .n { font-family: var(--mono); font-size: 11px; font-weight: 600; margin-top: 3px; }
+  .letterhead .doc-id .dt { font-family: var(--mono); font-size: 8px; color: var(--ink-60); margin-top: 2px; }
+
+  .doc-row {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .doc-row .ds { flex: 1; min-width: 0; }
+  .doc-row .ds .d1 { font-family: var(--cond); font-weight: 600; font-size: 12.5px; }
+  .doc-row .ds .d2 { font-family: var(--mono); font-size: 8px; color: var(--ink-60); margin-top: 2px; letter-spacing: .04em; }
+  .doc-row .qy { font-family: var(--mono); font-size: 9.5px; color: var(--ink-60); flex: none; }
+  .doc-row .am { font-family: var(--mono); font-size: 12px; font-weight: 600; flex: none; font-variant-numeric: tabular-nums; }
+  .doc-row .am.edit {
+    color: var(--orange-deep);
+    border-bottom: 2px solid var(--orange);
+    position: relative;
+  }
+  .doc-row .am.edit::after {
+    content: ''; display: inline-block;
+    width: 2px; height: 11px; background: var(--orange);
+    vertical-align: -1px; margin-left: 1px;
+    animation: blink .9s steps(1) infinite;
+  }
+  .doc-row .am.gap, .doc-row .qy.gap {
+    color: var(--yellow-tag); font-weight: 600;
+    border-bottom: 2px dashed var(--yellow-tag);
+  }
+  .doc-row .ds .d2.warn { color: var(--yellow-tag); font-weight: 600; }
+  .doc-row .ds .d2.hint { color: var(--orange-deep); }
+  .gapchip {
+    font-family: var(--mono); font-size: 8.5px; font-weight: 600; letter-spacing: .1em;
+    color: var(--yellow-tag); background: var(--yellow-tint);
+    padding: 3px 6px 2px; margin-left: 8px;
+    vertical-align: 3px;
+  }
+  .doc-total {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-top: 2px solid var(--ink);
+    margin-top: 2px;
+    padding: 10px 0 0;
+  }
+  .doc-total .k { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: .22em; }
+  .doc-total .v { font-family: var(--mono); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .doc-total .v.sm { font-size: 11.5px; letter-spacing: .08em; }
+
+  /* ————— screen 04 · review ————— */
+  .rev-wrap { flex: 1; overflow: hidden; background: var(--paper-deep); padding: 14px 14px 0; }
+  .rev-sheet {
+    background: var(--sheet);
+    height: 100%;
+    box-shadow: 0 1px 2px rgba(20,20,18,.12), 0 10px 28px -10px rgba(20,20,18,.28);
+    padding: 18px 18px 0;
+    overflow: hidden;
+  }
+  .rev-note {
+    font-family: var(--mono); font-size: 8px; letter-spacing: .06em;
+    color: var(--ink-60);
+    background: var(--yellow-tint);
+    border-left: 3px solid var(--yellow-tag);
+    padding: 6px 9px;
+    margin-top: 10px;
+  }
+  .rev-foot { flex: none; padding: 12px 20px; border-top: 1px solid var(--hairline); display: flex; gap: 10px; background: var(--paper); }
+  .btn-adjust {
+    flex: 2; height: 58px;
+    background: transparent; border: 2px solid var(--ink); border-radius: 14px;
+    font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: .08em;
+    color: var(--ink); cursor: pointer;
+  }
+  .btn-send {
+    flex: 3; height: 58px;
+    background: var(--orange); border: none; border-radius: 14px;
+    font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: .08em;
+    color: #FFF8F5;
+    box-shadow: 0 3px 0 var(--orange-deep);
+    cursor: pointer;
+  }
+
+  /* ————— footer title block ————— */
+  .titleblock {
+    margin-top: 44px;
+    border: 2px solid var(--ink);
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+    background: var(--paper);
+  }
+  .tb-cell {
+    padding: 10px 14px 9px;
+    border-left: 1.5px solid var(--ink);
+  }
+  .tb-cell:first-child { border-left: 0; }
+  .tb-cell .k {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: .2em;
+    color: var(--ink-60); display: block; margin-bottom: 4px;
+  }
+  .tb-cell .v { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; }
+  .tb-cell .v .accent { color: var(--orange-deep); }
+
+  @media (max-width: 760px) {
+    .titleblock { grid-template-columns: 1fr 1fr; }
+    .tb-cell { border-top: 1.5px solid var(--ink); }
+    .tb-cell:nth-child(-n+2) { border-top: 0; }
+    .tb-cell:nth-child(odd) { border-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="wordmark">
+      <div class="mark"></div>
+      <h1>SITEWALK</h1>
+      <div class="stamp">WORKING&nbsp;TITLE</div>
+    </div>
+    <p class="tagline">Talk the walk. Send the paperwork.</p>
+  </div>
+  <div style="display:flex; align-items:center;">
+    <span class="switch-label">TEMPLATE&nbsp;/</span>
+    <div class="switcher" id="switcher">
+      <button data-trade="landscape" class="active">LANDSCAPE</button>
+      <button data-trade="property">PROPERTY&nbsp;MGMT</button>
+      <button data-trade="inspection">INSPECTION</button>
+    </div>
+  </div>
+</header>
+
+<div class="frames">
+
+  <!-- 01 · JOBS BOARD -->
+  <div class="frame-unit">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-icons"><span class="sb-bars"><i></i><i></i><i></i><i></i></span><span class="sb-batt"></span></span>
+      </div>
+      <div class="board-head">
+        <div class="date">TUE — JUL 01</div>
+        <h2 id="j-count">4 sites today</h2>
+        <div class="biz" id="j-biz">RIDGELINE LANDSCAPE CO.</div>
+      </div>
+      <div class="meta-strip"><span id="j-meta">CREW A · TRUCK 02</span><span>SYNCED 07:58</span></div>
+      <div class="jobs">
+        <div class="sec-head">
+          <span class="sec-label">Today</span>
+          <span class="sec-label" style="color:var(--orange-deep)" id="j-open">3 open</span>
+        </div>
+        <div id="j-rows"></div>
+      </div>
+      <div class="board-foot">
+        <button class="btn-walk"><span class="mic"></span>START WALK</button>
+      </div>
+      <div class="home-bar"></div>
+    </div></div>
+    <div class="frame-caption"><span class="idx">01</span><span><span class="t">Jobs board</span> — one line per site, airport-board discipline. 62pt primary action in the thumb zone.</span></div>
+  </div>
+
+  <!-- 02 · CAPTURE -->
+  <div class="frame-unit">
+    <div class="phone"><div class="screen">
+      <div class="island"><span class="rec-dot"></span></div>
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-icons"><span class="sb-bars weak"><i></i><i></i><i></i><i></i></span><span class="sb-batt"></span></span>
+      </div>
+      <div class="rec-banner">
+        <span class="lft"><span class="d"></span>RECORDING</span>
+        <span class="tm" id="c-timer">00:47</span>
+      </div>
+      <div class="meta-strip"><span id="c-site">1418 ALDER CT</span><span class="offline">NO BARS — SAVED LOCAL</span></div>
+      <div class="transcript" id="c-transcript"></div>
+      <div class="captured">
+        <div class="sec-head">
+          <span class="sec-label">Captured</span>
+          <span class="sec-label" id="c-count">0 items</span>
+        </div>
+        <div id="c-rows"></div>
+      </div>
+      <div class="cap-foot">
+        <div class="wave" id="c-wave"></div>
+        <div class="cap-btns">
+          <button class="btn-photo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="13" rx="1.5"/><path d="M8.5 7l2-3h3l2 3"/><circle cx="12" cy="13" r="3.5"/></svg>
+            PHOTO
+          </button>
+          <button class="btn-pause">PAUSE</button>
+          <button class="btn-done">DONE</button>
+        </div>
+      </div>
+      <div class="home-bar"></div>
+    </div></div>
+    <div class="frame-caption"><span class="idx">02</span><span><span class="t">Capture</span> — state readable at arm's length. Items tick in as spoken; photos pin to the item being spoken. No bars? Audio saves local, processes later.</span></div>
+  </div>
+
+  <!-- 03 · TRANSFORMATION -->
+  <div class="frame-unit">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-icons"><span class="sb-bars"><i></i><i></i><i></i><i></i></span><span class="sb-batt"></span></span>
+      </div>
+      <div class="xf-transcript" id="x-transcript"></div>
+      <div class="xf-strip">
+        <span id="x-building">BUILDING ESTIMATE</span>
+        <span class="prog"></span>
+      </div>
+      <div class="xf-sheetwrap">
+        <div class="xf-sheet">
+          <div class="letterhead">
+            <div>
+              <div class="biz-nm" id="x-biz">Ridgeline Landscape Co.</div>
+              <div class="biz-sub" id="x-bizsub">DENVER CO · LIC 44-0781</div>
+            </div>
+            <div class="doc-id">
+              <div class="k" id="x-dock">ESTIMATE</div>
+              <div class="n" id="x-docn">EST-0047</div>
+              <div class="dt">JUL 01 2026</div>
+            </div>
+          </div>
+          <div id="x-rows"></div>
+        </div>
+      </div>
+      <div class="home-bar"></div>
+    </div></div>
+    <div class="frame-caption"><span class="idx">03</span><span><span class="t">The transformation</span> — the showpiece beat: speech dims, the paper rises, line items land one by one. &lt;8s, no spinner.</span></div>
+  </div>
+
+  <!-- 04 · DOCUMENT REVIEW -->
+  <div class="frame-unit">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="sb-icons"><span class="sb-bars"><i></i><i></i><i></i><i></i></span><span class="sb-batt"></span></span>
+      </div>
+      <div class="rev-wrap">
+        <div class="rev-sheet">
+          <div class="letterhead">
+            <div>
+              <div class="biz-nm" id="r-biz">Ridgeline Landscape Co.</div>
+              <div class="biz-sub" id="r-bizsub">DENVER CO · LIC 44-0781</div>
+            </div>
+            <div class="doc-id">
+              <div class="k" id="r-dock">ESTIMATE</div>
+              <div class="n" id="r-docn">EST-0047</div>
+              <div class="dt">JUL 01 2026</div>
+            </div>
+          </div>
+          <div id="r-rows"></div>
+          <div class="doc-total" id="r-total"><span class="k">TOTAL</span><span class="v">$1,210</span></div>
+          <div class="rev-note" id="r-note">TAP ANY AMOUNT TO ADJUST — “make that fourteen hundred” works too</div>
+        </div>
+      </div>
+      <div class="rev-foot">
+        <button class="btn-adjust">ADJUST</button>
+        <button class="btn-send" id="r-send">SEND ESTIMATE</button>
+      </div>
+      <div class="home-bar"></div>
+    </div></div>
+    <div class="frame-caption"><span class="idx">04</span><span><span class="t">Document review</span> — it looks like paper because paper is the pitch. Unheard values stay dashed gaps, never guesses; your past rates autofill. Send is one thumb away.</span></div>
+  </div>
+
+</div>
+
+<div class="titleblock">
+  <div class="tb-cell"><span class="k">PROJECT</span><span class="v">SITEWALK <span class="accent">· FIELD STUDY</span></span></div>
+  <div class="tb-cell"><span class="k">SHEET</span><span class="v">DS-01</span></div>
+  <div class="tb-cell"><span class="k">DATE</span><span class="v">2026-07-01</span></div>
+  <div class="tb-cell"><span class="k">FRAME</span><span class="v">393×852 @1x</span></div>
+  <div class="tb-cell"><span class="k">DRAWN</span><span class="v">DAMSAC</span></div>
+</div>
+
+<script>
+const TRADES = {
+  landscape: {
+    biz: 'Ridgeline Landscape Co.',
+    bizCaps: 'RIDGELINE LANDSCAPE CO.',
+    bizSub: 'DENVER CO · LIC 44-0781',
+    boardMeta: 'CREW A · TRUCK 02',
+    count: '4 sites today', open: '3 open',
+    jobs: [
+      { time: '8:00',  nm: '1418 Alder Ct',   sub: 'Estimate walk · new client', tag: ['green', 'SENT'],  done: true },
+      { time: '9:30',  nm: 'Hollis Residence', sub: 'Spring cleanup · estimate',  tag: ['plain', 'NEXT'] },
+      { time: '11:00', nm: 'Marston HOA',      sub: 'Irrigation check · zone map', tag: ['yellow', 'F/U'] },
+      { time: '1:30',  nm: 'Beckwith Rental',  sub: 'Mulch + edging · quote',      tag: ['plain', 'EST'] },
+    ],
+    site: '1418 ALDER CT',
+    transcript: [
+      { t: 'front beds need mulch, call it ' }, { t: 'three yards… ', item: 0 },
+      { t: 'trim the four boxwoods ' }, { t: 'along the walk… ', item: 1 },
+      { t: 'zone two head is broken, ' }, { t: 'replace it… ', item: 2 },
+      { t: 'edge the beds while we’re in there… ', item: 3 },
+      { t: 'quote the whole thing ' }, { t: 'around twelve hundred', item: 4 },
+    ],
+    captured: [
+      { tag: ['plain', 'ITEM'], tx: 'BARK MULCH — FRONT BEDS', rt: '3 CU YD' },
+      { tag: ['plain', 'ITEM'], tx: 'TRIM BOXWOOD', rt: '× 4' },
+      { tag: ['yellow', 'PART'], tx: 'IRRIG. HEAD — ZONE 2', rt: 'REPLACE', ph: 1 },
+      { tag: ['plain', 'ITEM'], tx: 'BED EDGING — FRONT', rt: '~60 LF' },
+      { tag: ['green', 'PRICE'], tx: 'TARGET TOTAL', rt: '$1,200' },
+    ],
+    building: 'BUILDING ESTIMATE',
+    dock: 'ESTIMATE', docn: 'EST-0047',
+    rows: [
+      { d1: 'Premium bark mulch — front beds', d2: 'DELIVERED + INSTALLED', qy: '3 CU YD', am: '$285' },
+      { d1: 'Boxwood trim, walkway line', d2: 'SHAPE + HAUL CLIPPINGS', qy: '× 4', am: '$140' },
+      { d1: 'Irrigation head — zone 2', d2: 'PARTS + LABOR', hint: '↺ LAST 3: $110 · $120 · $125', qy: '× 1', am: '$120', edit: true },
+      { d1: 'Bed edging, front beds', d2: 'SPADE EDGE, RE-CUT', qy: '60 LF', am: '$310' },
+      { d1: 'Haul & disposal', d2: 'NOT HEARD — TAP OR SAY IT', warn: true, qy: '× 1', am: '——', gap: true },
+      { d1: 'Crew labor', d2: '2-MAN CREW · HALF DAY', qy: '4 HR', am: '$355' },
+    ],
+    total: ['TOTAL', '$1,210'],
+    note: '1 GAP LEFT — “haul and disposal, ninety-five” fills it. Never guessed for you.',
+    send: 'SEND ESTIMATE',
+  },
+  property: {
+    biz: 'Corbett Property Group',
+    bizCaps: 'CORBETT PROPERTY GROUP',
+    bizSub: 'PORTLAND OR · 214 UNITS',
+    boardMeta: 'MOVE-OUTS · Q3 TURNS',
+    count: '5 units today', open: '4 open',
+    jobs: [
+      { time: '8:30',  nm: 'Unit 204 — Gaslight', sub: 'Move-out walkthrough', tag: ['green', 'SENT'], done: true },
+      { time: '9:00',  nm: 'Unit 117 — Gaslight', sub: 'Move-out walkthrough', tag: ['plain', 'NEXT'] },
+      { time: '10:30', nm: '48 Fremont St',       sub: 'Annual condition',      tag: ['plain', 'ANN'] },
+      { time: '1:00',  nm: 'Unit 09 — Kern Bldg', sub: 'Move-in baseline',      tag: ['yellow', 'F/U'] },
+    ],
+    site: 'UNIT 117 · GASLIGHT',
+    transcript: [
+      { t: 'main bedroom carpet is stained ' }, { t: 'near the window, deduct cleaning… ', item: 0 },
+      { t: 'kitchen blinds missing ' }, { t: 'two slats… ', item: 1 },
+      { t: 'walls are normal wear ' }, { t: 'throughout… ', item: 2 },
+      { t: 'water heater tag reads ' }, { t: 'twenty-nineteen, note it… ', item: 3 },
+      { t: 'balcony door drags — ', }, { t: 'maintenance ticket', item: 4 },
+    ],
+    captured: [
+      { tag: ['red', 'DEDUCT'], tx: 'CARPET STAIN — BR 1', rt: 'CLEAN', ph: 2 },
+      { tag: ['red', 'DEDUCT'], tx: 'BLINDS, KITCHEN', rt: '2 SLATS', ph: 1 },
+      { tag: ['green', 'OK'], tx: 'WALLS — NORMAL WEAR', rt: 'ALL RMS' },
+      { tag: ['plain', 'NOTE'], tx: 'WATER HEATER — 2019', rt: 'LOGGED' },
+      { tag: ['yellow', 'MAINT'], tx: 'BALCONY DOOR DRAGS', rt: 'TICKET' },
+    ],
+    building: 'BUILDING CONDITION REPORT',
+    dock: 'MOVE-OUT REPORT', docn: 'MO-0112',
+    rows: [
+      { d1: 'Carpet — bedroom 1', d2: 'STAIN NEAR WINDOW · PHOTO ×2', hint: '↺ SCHEDULE: CARPET CLEAN $140', qy: 'DEDUCT', am: '$140', edit: true },
+      { d1: 'Blinds — kitchen', d2: '2 SLATS MISSING · PHOTO ×1', qy: 'DEDUCT', am: '$45' },
+      { d1: 'Walls — all rooms', d2: 'NORMAL WEAR AND TEAR', qy: 'OK', am: '—' },
+      { d1: 'Water heater', d2: 'MFG 2019 · SERIAL LOGGED', qy: 'NOTE', am: '—' },
+      { d1: 'Garage remote', d2: 'NOT HEARD — RETURNED? SAY IT', warn: true, qy: 'DEDUCT', am: '——', gap: true },
+    ],
+    total: ['DEPOSIT DEDUCTION', '$185'],
+    note: 'PHOTOS PIN TO THE LINE YOU’RE SPEAKING ABOUT — SAY “PHOTO” OR TAP',
+    send: 'SEND REPORT',
+  },
+  inspection: {
+    biz: 'TrueLine Home Inspection',
+    bizCaps: 'TRUELINE HOME INSPECTION',
+    bizSub: 'AUSTIN TX · TREC 24119',
+    boardMeta: 'PRE-PURCHASE · 2 BOOKED',
+    count: '2 inspections today', open: '1 open',
+    jobs: [
+      { time: '8:30',  nm: '212 Garfield Ave', sub: 'Pre-purchase · 1954 SFR',  tag: ['green', 'SENT'], done: true },
+      { time: '12:00', nm: '77 Larkspur Ln',   sub: 'Pre-purchase · 2001 SFR',  tag: ['plain', 'NEXT'] },
+      { time: '—',     nm: 'Report follow-up',  sub: 'Buyer Q — 212 Garfield',   tag: ['yellow', 'F/U'] },
+      { time: '—',     nm: 'Thu hold',          sub: '4-point · insurer req.',   tag: ['plain', 'HOLD'] },
+    ],
+    site: '77 LARKSPUR LN',
+    transcript: [
+      { t: 'roof: three lifted shingles ' }, { t: 'on the south slope… ', item: 0 },
+      { t: 'attic ventilation adequate… ', item: 1 },
+      { t: 'hall bath GFCI won’t trip — ' }, { t: 'safety item… ', item: 2 },
+      { t: 'furnace filter overdue, ' }, { t: 'maintenance… ', item: 3 },
+      { t: 'grading slopes to the ' }, { t: 'foundation, northeast corner', item: 4 },
+    ],
+    captured: [
+      { tag: ['yellow', 'REPAIR'], tx: 'ROOF — LIFTED SHINGLES ×3', rt: 'S SLOPE', ph: 3 },
+      { tag: ['green', 'OK'], tx: 'ATTIC VENTILATION', rt: 'ADEQ.' },
+      { tag: ['red', 'SAFETY'], tx: 'GFCI HALL BATH — NO TRIP', rt: 'ELEC' },
+      { tag: ['yellow', 'MAINT'], tx: 'FURNACE FILTER OVERDUE', rt: 'HVAC' },
+      { tag: ['yellow', 'REPAIR'], tx: 'GRADING AT FOUNDATION', rt: 'NE COR', ph: 1 },
+    ],
+    building: 'BUILDING INSPECTION REPORT',
+    dock: 'INSPECTION', docn: 'IR-0389',
+    rows: [
+      { d1: 'Roof covering — south slope', d2: '3 LIFTED SHINGLES · PHOTO ×3', qy: 'REPAIR', am: '§ 2.1' },
+      { d1: 'GFCI — hall bathroom', d2: 'FAILS TO TRIP ON TEST', hint: '↺ AUTO-FILED FROM YOUR LAST 12 REPORTS', qy: 'SAFETY', am: '§ 6.4', edit: true },
+      { d1: 'Attic ventilation', d2: 'RIDGE + SOFFIT, ADEQUATE', qy: 'OK', am: '§ 3.2' },
+      { d1: 'Furnace filter', d2: 'REPLACEMENT OVERDUE', qy: 'MAINT', am: '§ 5.1' },
+      { d1: 'Water heater TPR valve', d2: 'NOT ACCESSED — VERIFY OR EXCLUDE', warn: true, qy: '——', am: '§ 5.3', gap: true },
+    ],
+    total: ['FINDINGS', '1 SAFETY · 3 REPAIR'],
+    note: 'FINDINGS FILE INTO TREC SECTIONS AUTOMATICALLY — REORDER BY DRAG',
+    send: 'SEND REPORT',
+  },
+};
+
+const $ = id => document.getElementById(id);
+const tagEl = ([cls, label]) => `<span class="tag ${cls}">${label}</span>`;
+const CAM = '<svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="13" rx="1.5"/><path d="M8.5 7l2-3h3l2 3"/><circle cx="12" cy="13" r="3.5"/></svg>';
+const phEl = n => n ? `<span class="ph">${CAM}×${n}</span>` : '';
+
+function renderBoard(d) {
+  $('j-count').textContent = d.count;
+  $('j-biz').textContent = d.bizCaps;
+  $('j-meta').textContent = d.boardMeta;
+  $('j-open').textContent = d.open;
+  $('j-rows').innerHTML = d.jobs.map(j => `
+    <div class="job-row${j.done ? ' done' : ''}">
+      <span class="time">${j.time}</span>
+      <span class="who"><span class="nm">${j.nm}</span><br><span class="sub">${j.sub}</span></span>
+      ${tagEl(j.tag)}
+    </div>`).join('');
+}
+
+function renderCaptureStatic(d) {
+  $('c-site').textContent = d.site;
+  $('c-rows').innerHTML = d.captured.map(c => `
+    <div class="cap-row">
+      ${tagEl(c.tag)}
+      <span class="tx">${c.tx}</span>
+      ${phEl(c.ph)}
+      <span class="rt">${c.rt}</span>
+    </div>`).join('');
+  const wave = $('c-wave');
+  wave.innerHTML = '';
+  for (let i = 0; i < 44; i++) {
+    const bar = document.createElement('i');
+    bar.style.animationDuration = (0.5 + Math.random() * 0.7).toFixed(2) + 's';
+    bar.style.animationDelay = (-Math.random()).toFixed(2) + 's';
+    wave.appendChild(bar);
+  }
+}
+
+function renderTransform(d) {
+  $('x-transcript').innerHTML = d.transcript.map(s => s.t).join('');
+  $('x-building').textContent = d.building;
+  $('x-biz').textContent = d.biz;
+  $('x-bizsub').textContent = d.bizSub;
+  $('x-dock').textContent = d.dock;
+  $('x-docn').textContent = d.docn;
+  $('x-rows').innerHTML = d.rows.slice(0, 4).map((r, i) => `
+    <div class="doc-row xf-row r${i + 1}">
+      <span class="ds"><span class="d1">${r.d1}</span><span class="d2" style="display:block">${r.d2}</span></span>
+      <span class="qy">${r.qy}</span>
+      <span class="am">${r.am}</span>
+    </div>`).join('');
+}
+
+function renderReview(d) {
+  $('r-biz').textContent = d.biz;
+  $('r-bizsub').textContent = d.bizSub;
+  $('r-dock').textContent = d.dock;
+  $('r-docn').textContent = d.docn;
+  $('r-rows').innerHTML = d.rows.map(r => `
+    <div class="doc-row">
+      <span class="ds">
+        <span class="d1">${r.d1}</span>
+        <span class="d2${r.warn ? ' warn' : ''}" style="display:block">${r.d2}</span>
+        ${r.hint ? `<span class="d2 hint" style="display:block">${r.hint}</span>` : ''}
+      </span>
+      <span class="qy${r.gap && r.qy === '——' ? ' gap' : ''}">${r.qy}</span>
+      <span class="am${r.edit ? ' edit' : ''}${r.gap && r.am === '——' ? ' gap' : ''}">${r.am}</span>
+    </div>`).join('');
+  const gaps = d.rows.filter(r => r.gap).length;
+  $('r-total').innerHTML = `<span class="k">${d.total[0]}</span><span class="v${d.total[1].length > 9 ? ' sm' : ''}">${d.total[1]}${gaps ? `<span class="gapchip">+${gaps} GAP</span>` : ''}</span>`;
+  $('r-note').textContent = d.note;
+  $('r-send').textContent = d.send;
+}
+
+/* live transcript loop on screen 02 */
+let loopTimer = null;
+function runCaptureLoop(d) {
+  clearTimeout(loopTimer);
+  const box = $('c-transcript');
+  const rows = Array.from(document.querySelectorAll('#c-rows .cap-row'));
+  const countEl = $('c-count');
+  const timerEl = $('c-timer');
+
+  // tokenize into words, carrying item-reveal on a segment's last word
+  const words = [];
+  d.transcript.forEach(seg => {
+    const ws = seg.t.split(/\s+/).filter(Boolean);
+    ws.forEach((w, i) => words.push({ w, item: (i === ws.length - 1) ? seg.item : undefined }));
+  });
+
+  let i = 0, shown = 0, sec = 32, spans = [];
+  function reset() {
+    i = 0; shown = 0; sec = 32;
+    box.innerHTML = '<span class="twrap">' + words.map(x => `<span class="w">${x.w} </span>`).join('') + '<span class="caret"></span></span>';
+    spans = box.querySelectorAll('.w');
+    rows.forEach(r => r.classList.remove('on'));
+    countEl.textContent = '0 ITEMS';
+  }
+  function tick() {
+    if (i >= words.length) { loopTimer = setTimeout(() => { reset(); loopTimer = setTimeout(tick, 500); }, 2600); return; }
+    spans[i].classList.add('on');
+    const it = words[i].item;
+    if (it !== undefined && rows[it]) {
+      rows[it].classList.add('on');
+      shown = Math.max(shown, it + 1);
+      countEl.textContent = shown + ' ITEMS';
+    }
+    if (i % 3 === 0) { sec++; timerEl.textContent = '00:' + String(sec).padStart(2, '0'); }
+    i++;
+    loopTimer = setTimeout(tick, 190 + Math.random() * 120);
+  }
+  reset();
+  loopTimer = setTimeout(tick, 600);
+}
+
+function render(trade) {
+  const d = TRADES[trade];
+  renderBoard(d);
+  renderCaptureStatic(d);
+  renderTransform(d);
+  renderReview(d);
+  runCaptureLoop(d);
+}
+
+function activate(trade) {
+  document.querySelectorAll('#switcher button').forEach(b =>
+    b.classList.toggle('active', b.dataset.trade === trade));
+  render(trade);
+}
+
+document.querySelectorAll('#switcher button').forEach(btn => {
+  btn.addEventListener('click', () => activate(btn.dataset.trade));
+});
+
+const urlTrade = new URLSearchParams(location.search).get('trade');
+activate(TRADES[urlTrade] ? urlTrade : 'landscape');
+</script>
+</body>
+</html>

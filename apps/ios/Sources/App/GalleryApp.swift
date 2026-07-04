@@ -1,0 +1,165 @@
+import SwiftUI
+
+// Default launch: the real app flow (board → walk → build → review → sent),
+// running on DemoWalkEngine + ScriptedSource until the FFI bridge lands.
+//
+// Launch arguments (used by design QA and screenshot automation):
+//   screen=components|jobs|capture|document  → static design gallery pages
+//   live=1                                   → real mic + on-device STT
+//   autoflow=1                               → auto-starts a scripted walk and
+//                                              auto-finishes it (state machine demo)
+
+@main
+struct GalleryApp: App {
+    var body: some Scene {
+        WindowGroup {
+            RootRouter()
+        }
+    }
+}
+
+struct RootRouter: View {
+    private static let args = ProcessInfo.processInfo.arguments
+
+    var body: some View {
+        if Self.args.contains(where: { $0.hasPrefix("screen=") }) {
+            GalleryRoot()
+        } else {
+            AppRoot(
+                live: Self.args.contains("live=1"),
+                autoflow: Self.args.contains("autoflow=1")
+            )
+        }
+    }
+}
+
+struct AppRoot: View {
+    @State private var model: AppModel
+    private let live: Bool
+    private let autoflow: Bool
+
+    init(live: Bool, autoflow: Bool) {
+        self.live = live
+        self.autoflow = autoflow
+        _model = State(initialValue: AppModel(scripted: !live))
+    }
+
+    var body: some View {
+        NavigationStack(path: Bindable(model).path) {
+            BoardView(model: model)
+                .navigationDestination(for: AppModel.Phase.self) { phase in
+                    switch phase {
+                    case .walking:
+                        WalkView(model: model, scriptedLabel: !live)
+                    case .building:
+                        BuildView(model: model)
+                    case .review:
+                        ReviewView(model: model)
+                    case .board:
+                        BoardView(model: model)
+                    }
+                }
+        }
+        .tint(Theme.C.ink)
+        .task {
+            if live {
+                _ = await SpeechSource.requestPermissions()
+            }
+            if autoflow {
+                try? await Task.sleep(for: .seconds(1))
+                model.startWalk()
+                // Let the scripted walk play out, then finish it.
+                try? await Task.sleep(for: .seconds(16))
+                if model.phase == .walking {
+                    model.finishWalk()
+                }
+                // Screenshot-automation hook: render the PDF unattended.
+                if ProcessInfo.processInfo.arguments.contains("autopdf=1") {
+                    try? await Task.sleep(for: .seconds(4))
+                    if model.phase == .review {
+                        model.makePDF()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Static design gallery (kept for design QA and previews)
+
+struct GalleryRoot: View {
+    enum Dest: String, Hashable, CaseIterable {
+        case components, jobs, capture, document
+
+        var title: String {
+            switch self {
+            case .components: return "COMPONENT KIT"
+            case .jobs: return "01 · JOBS BOARD"
+            case .capture: return "02 · CAPTURE"
+            case .document: return "04 · DOCUMENT REVIEW"
+            }
+        }
+    }
+
+    static func initialPath() -> [Dest] {
+        if let arg = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("screen=") }),
+           let dest = Dest(rawValue: String(arg.dropFirst("screen=".count))) {
+            return [dest]
+        }
+        return []
+    }
+
+    @State private var path: [Dest] = GalleryRoot.initialPath()
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        Rectangle().fill(Theme.C.orange).frame(width: 13, height: 13)
+                        Text("SITEWALK")
+                            .font(Theme.F.ui(24, .extraBold))
+                            .tracking(3.5)
+                    }
+                    Text("Design system gallery — DS-01")
+                        .font(Theme.F.mono(9))
+                        .foregroundStyle(Theme.C.ink60)
+                }
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.top, 18)
+                .padding(.bottom, 16)
+                .overlay(alignment: .bottom) { Theme.C.ink.frame(height: 2) }
+
+                ForEach(Dest.allCases, id: \.self) { dest in
+                    NavigationLink(value: dest) {
+                        HStack {
+                            Text(dest.title)
+                                .font(Theme.F.mono(11, .medium))
+                                .tracking(1.2)
+                                .foregroundStyle(Theme.C.ink)
+                            Spacer()
+                            Text("→")
+                                .font(Theme.F.mono(11))
+                                .foregroundStyle(Theme.C.orangeDeep)
+                        }
+                        .padding(.horizontal, Theme.S.screenPad)
+                        .padding(.vertical, 16)
+                        .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
+                    }
+                }
+
+                Spacer()
+            }
+            .background(Theme.C.paper.ignoresSafeArea())
+            .navigationDestination(for: Dest.self) { dest in
+                switch dest {
+                case .components: ComponentsPage()
+                case .jobs: JobsBoardScreen(trade: Fixtures.landscape)
+                case .capture: CaptureScreen(trade: Fixtures.landscape)
+                case .document: DocumentReviewScreen(trade: Fixtures.landscape)
+                }
+            }
+        }
+        .tint(Theme.C.ink)
+    }
+}
