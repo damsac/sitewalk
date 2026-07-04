@@ -71,13 +71,21 @@ fn build_providers(config: &EngineConfig) -> Providers {
 /// per-session `WalkSession`s.
 // Fields are read by `begin_walk` (Task 7), which is deliberately deferred
 // out of this task so `cargo test -p ffi engine` compiles standalone.
-#[allow(dead_code)]
 #[derive(uniffi::Object)]
 pub struct MurmurEngine {
     pub(crate) store: Arc<Mutex<Store>>,
     pub(crate) memory: Arc<Mutex<Memory>>,
     pub(crate) memory_store: Arc<dyn MemoryStore>,
     pub(crate) providers: Providers,
+    /// Handle used to spawn live-extraction ticks from the SYNC
+    /// `append_transcript` export (D7: fire-and-forget — the tick runs off
+    /// whatever executor called us, which for a plain sync FFI export is not
+    /// guaranteed to be a tokio context). Production owns the `Runtime` that
+    /// backs this handle (`_runtime`, kept alive for the engine's lifetime);
+    /// tests borrow the `#[tokio::test]` runtime instead of spinning up a
+    /// second one.
+    pub(crate) runtime_handle: tokio::runtime::Handle,
+    _runtime: Option<Arc<tokio::runtime::Runtime>>,
 }
 
 #[uniffi::export]
@@ -90,11 +98,17 @@ impl MurmurEngine {
             Arc::new(FileMemoryStore::new(format!("{}.memory.json", config.db_path)));
         let memory = memory_store.load().unwrap_or_default();
         let providers = build_providers(&config);
+        let runtime = Arc::new(
+            tokio::runtime::Runtime::new().expect("cannot start the bridge's tokio runtime"),
+        );
+        let runtime_handle = runtime.handle().clone();
         Arc::new(MurmurEngine {
             store: Arc::new(Mutex::new(store)),
             memory: Arc::new(Mutex::new(memory)),
             memory_store,
             providers,
+            runtime_handle,
+            _runtime: Some(runtime),
         })
     }
 }
@@ -103,9 +117,8 @@ impl MurmurEngine {
 impl MurmurEngine {
     /// Test-only constructor injecting mock providers (never crosses FFI —
     /// no `#[uniffi::export]`). Lets `engine`/`session` tests exercise the
-    /// bridge without a network provider. Unused until Task 7's
-    /// `begin_walk`/`WalkSession` tests call it.
-    #[allow(dead_code)]
+    /// bridge without a network provider. Borrows the calling `#[tokio::test]`
+    /// runtime rather than spinning up a second one.
     pub(crate) fn with_providers(
         store: Store,
         memory: Memory,
@@ -117,6 +130,8 @@ impl MurmurEngine {
             memory: Arc::new(Mutex::new(memory)),
             memory_store,
             providers,
+            runtime_handle: tokio::runtime::Handle::current(),
+            _runtime: None,
         })
     }
 }

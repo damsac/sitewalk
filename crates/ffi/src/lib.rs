@@ -9,8 +9,10 @@ pub mod convert;
 pub mod document;
 pub mod engine;
 pub mod events;
+pub mod session;
 
 pub use convert::{document_payload, partial_document_from_items};
 pub use document::{DocLine, DocumentPayload};
 pub use engine::{EngineConfig, MurmurEngine};
 pub use events::{BoardItem, WalkEvent, WalkEventListener};
+pub use session::WalkSession;

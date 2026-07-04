@@ -27,7 +27,7 @@ use tools::{AddItemTool, BuildDocumentTool, UpsertContactTool, WriteReportTool};
 /// `inspection`) that `BuildDocumentTool` and document-number minting use.
 /// `None`/unrecognized defaults to `report` — the safest shape (mixed
 /// dollar/non-dollar lines, gaps only where explicitly flagged).
-fn doc_kind_for_template(template: Option<&str>) -> &'static str {
+pub fn doc_kind_for_template(template: Option<&str>) -> &'static str {
     match template {
         Some("landscape") => "estimate",
         Some("inspection") => "inspection",
