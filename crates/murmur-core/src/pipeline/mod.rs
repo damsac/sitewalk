@@ -4,6 +4,8 @@
 
 pub mod tools;
 
+pub mod live;
+
 pub(crate) mod prompts;
 
 use std::sync::{Arc, Mutex};
