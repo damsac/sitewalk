@@ -67,6 +67,15 @@ final class MurmurEngine: WalkEngine {
     private let engine: FFIMurmurEngine
     private var session: FFIWalkSession?
     private var continuation: AsyncStream<WalkEvent>.Continuation?
+    /// The document built by the most recent `finish()` call. `session` is
+    /// nil'd out once `finish()` has run (below) — a re-entrant `finish()`
+    /// call (e.g. a double-tap racing the UI transition) has no session left
+    /// to call into, so it returns this instead of a blank document. Rust's
+    /// `WalkSession.finish()` is itself safe to call twice (it degrades
+    /// rather than panicking — see crates/ffi/src/session.rs), but nothing
+    /// on the Swift side should ever issue that second call in the first
+    /// place once we already have the answer.
+    private var lastDocument: DocumentModel?
 
     init(config: FFIEngineConfig) {
         self.engine = FFIMurmurEngine(config: config)
@@ -82,6 +91,7 @@ final class MurmurEngine: WalkEngine {
         continuation?.finish()
         let (stream, cont) = AsyncStream<WalkEvent>.makeStream()
         continuation = cont
+        lastDocument = nil
 
         let newSession = engine.beginWalk(jobId: nil, template: trade.key) // template key = trade.key (D4)
         newSession.setEventListener(listener: BoardListener { [weak self] items in
@@ -99,11 +109,22 @@ final class MurmurEngine: WalkEngine {
     }
 
     func finish() async -> DocumentModel {
+        // Re-entrant call: `session` was already nil'd out by a prior
+        // `finish()` (or none ever began). Harmless no-op — hand back
+        // whatever we already built instead of calling into a session that
+        // no longer exists on this side.
+        guard let session else { return lastDocument ?? Self.emptyDocument() }
+
         continuation?.finish()
         continuation = nil
-        guard let session else { return Self.emptyDocument() }
         let payload = await session.finish()
-        return Self.document(payload)
+        // Drop the session now that it's finished — this is what makes the
+        // guard above fire on any subsequent call, instead of issuing a
+        // second `finish()` down through the FFI.
+        self.session = nil
+        let document = Self.document(payload)
+        lastDocument = document
+        return document
     }
 
     // MARK: - Formatting layer (D2): core is display-copy-free; this is

@@ -61,9 +61,19 @@ pub fn document_payload(artifact: &Artifact) -> Result<DocumentPayload, ConvertE
     })
 }
 
-/// Builds a partial, all-gaps `DocumentPayload` from the live board when
-/// `finish()` degrades offline (D9) — capture is never lost.
-pub fn partial_document_from_items(doc_kind: &str, items: &[CapturedItem]) -> DocumentPayload {
+/// Builds a partial, all-gaps `DocumentPayload` from the live board.
+///
+/// Two callers, two truths for `queued`:
+/// - `finish()` degrading offline (D9): phase B never ran and the session is
+///   still pending processing, so `queued: true`.
+/// - `finish()` on an empty/whitespace-only transcript, or a second
+///   (already-finished) `finish()` call: the session IS genuinely done —
+///   there is nothing left to process — so `queued: false`.
+pub fn partial_document_from_items(
+    doc_kind: &str,
+    items: &[CapturedItem],
+    queued: bool,
+) -> DocumentPayload {
     DocumentPayload {
         doc_kind: doc_kind.to_string(),
         doc_number: 0,
@@ -83,7 +93,7 @@ pub fn partial_document_from_items(doc_kind: &str, items: &[CapturedItem]) -> Do
                 is_gap: true,
             })
             .collect(),
-        queued: true,
+        queued,
     }
 }
 

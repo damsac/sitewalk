@@ -65,6 +65,45 @@ impl WalkSession {
         let board_items = items.iter().map(convert::board_item).collect();
         listener.on_event(WalkEvent::BoardUpdated { items: board_items });
     }
+
+    /// Builds a partial, all-gaps document from whatever is on the current
+    /// live board. Shared by: the offline-degrade path (`queued: true`, D9)
+    /// and the "nothing left to process" paths below (`queued: false`) — the
+    /// empty-transcript short circuit and the double-finish degrade.
+    fn partial_document(&self, queued: bool) -> DocumentPayload {
+        let doc_kind = doc_kind_for_template(self.template.as_deref());
+        let items = self
+            .store
+            .lock()
+            .unwrap()
+            .list_items_for_session(&self.session_id)
+            .unwrap_or_default();
+        convert::partial_document_from_items(doc_kind, &items, queued)
+    }
+
+    /// Degrade path for a `finish()` call that can't transition the session
+    /// out of `Recording` — in practice, almost always a second `finish()`
+    /// call on a session that already finished. This call has already
+    /// crossed into async/FFI territory, so there is no safe panic here: any
+    /// unwind here is fatal to the host app. Every failure mode (already
+    /// ended, or a genuinely unexpected store error) degrades the same way:
+    /// return the document that's already there if phase B built one, else
+    /// project the current board into a partial (non-queued — there is
+    /// nothing left pending) document.
+    fn degraded_document(&self) -> DocumentPayload {
+        let existing = {
+            let store = self.store.lock().unwrap();
+            store
+                .list_artifacts_for_session(&self.session_id)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|a| a.kind == "document")
+        };
+        match existing.as_ref().map(convert::document_payload) {
+            Some(Ok(payload)) => payload,
+            _ => self.partial_document(false),
+        }
+    }
 }
 
 #[uniffi::export]
@@ -133,19 +172,30 @@ impl WalkSession {
     }
 
     /// D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
-    /// the terminal swap snapshot + the structured document. Offline
-    /// degradation (a partial, all-gaps `queued: true` payload) lands in
-    /// Task 8.
+    /// the terminal swap snapshot + the structured document.
+    ///
+    /// Three degrade paths, none of which may panic across the FFI boundary
+    /// (a `uniffi::export`ed async fn returns a bare `DocumentPayload`, not a
+    /// `Result` — an unwind here is a fatal crash in the host app, not a
+    /// catchable error):
+    /// - `end_and_record_session` fails (most commonly: a second `finish()`
+    ///   call on an already-ended session) -> `degraded_document()`.
+    /// - phase B ran but the transcript was empty/whitespace-only, so
+    ///   `murmur-core`'s pipeline short-circuited before building a document
+    ///   artifact -> a truthful, non-queued `partial_document`.
+    /// - phase B failed outright (offline/LLM-down, D9) -> a queued partial
+    ///   document built from the live board — capture is never lost.
     pub async fn finish(self: Arc<Self>) -> DocumentPayload {
         // D3b: hold the extractor mutex across the whole call so no live tick
         // can interleave with end-of-session processing.
         let _tick_guard = self.extractor.lock().await;
 
-        {
+        let ended = {
             let store = self.store.lock().unwrap();
-            store
-                .end_and_record_session(&self.session_id)
-                .expect("end_and_record_session");
+            store.end_and_record_session(&self.session_id)
+        };
+        if ended.is_err() {
+            return self.degraded_document();
         }
 
         let processor = SessionProcessor::new(
@@ -157,27 +207,30 @@ impl WalkSession {
         match processor.process(&self.session_id).await {
             Ok(_) => {
                 self.emit_board_snapshot();
-                let store = self.store.lock().unwrap();
-                let artifacts = store
-                    .list_artifacts_for_session(&self.session_id)
-                    .expect("list_artifacts_for_session");
-                let doc = artifacts
-                    .iter()
-                    .find(|a| a.kind == "document")
-                    .expect("phase B always builds a document artifact on success");
-                convert::document_payload(doc).expect("document artifact body is valid JSON")
+                let doc = {
+                    let store = self.store.lock().unwrap();
+                    store
+                        .list_artifacts_for_session(&self.session_id)
+                        .expect("list_artifacts_for_session")
+                        .into_iter()
+                        .find(|a| a.kind == "document")
+                };
+                match doc {
+                    // The common case: phase B ran and built a document.
+                    Some(doc) => {
+                        convert::document_payload(&doc).expect("document artifact body is valid JSON")
+                    }
+                    // The empty-transcript short circuit (murmur-core's
+                    // pipeline skips phase B entirely for a
+                    // whitespace-only/empty transcript): the session is
+                    // genuinely Processed with nothing pending, so this is a
+                    // truthful zero/items-only document — not queued.
+                    None => self.partial_document(false),
+                }
             }
-            Err(_) => {
-                // Offline / LLM-down degradation lands in Task 8.
-                let doc_kind = doc_kind_for_template(self.template.as_deref());
-                let items = self
-                    .store
-                    .lock()
-                    .unwrap()
-                    .list_items_for_session(&self.session_id)
-                    .unwrap_or_default();
-                convert::partial_document_from_items(doc_kind, &items)
-            }
+            // Offline / LLM-down degradation (D9): the session did NOT reach
+            // Processed, so there's real pending work — queued: true.
+            Err(_) => self.partial_document(true),
         }
     }
 }

@@ -241,6 +241,106 @@ async fn a_tick_mid_finish_never_observes_an_empty_board() {
     }
 }
 
+/// A genuinely silent walk (no `append_transcript` at all): `murmur-core`'s
+/// pipeline short-circuits on an empty transcript before phase B ever runs,
+/// so no `document` artifact exists. `finish()` must not panic on the
+/// now-false "phase B always builds a document" invariant — it must degrade
+/// to a truthful, non-queued (nothing pending — the session IS Processed)
+/// empty document.
+#[tokio::test]
+async fn finish_on_a_silent_walk_returns_a_truthful_empty_document_without_panicking() {
+    let store = Store::open_in_memory("device-a").unwrap();
+    let engine = MurmurEngine::with_providers(
+        store,
+        Memory::default(),
+        Arc::new(NullMemoryStore),
+        Providers {
+            live: Arc::new(MockProvider::new(vec![])),
+            processing: Arc::new(MockProvider::new(vec![])),
+            reflection: Arc::new(MockProvider::new(vec![])),
+        },
+    );
+
+    let session = engine.begin_walk(None, "landscape".into());
+    // No append_transcript call whatsoever.
+    let payload = session.finish().await;
+
+    assert!(!payload.queued, "an empty session is genuinely Processed — nothing pending");
+    assert_eq!(payload.lines.len(), 0);
+    // Phase B (and doc-number minting, which only phase B triggers) never
+    // ran, so the mint never happened — 0 is the honest value, not a real
+    // document number.
+    assert_eq!(payload.doc_number, 0);
+}
+
+/// Same short circuit, reached via whitespace-only content instead of a
+/// total absence of transcript.
+#[tokio::test]
+async fn finish_on_a_whitespace_only_transcript_also_skips_phase_b() {
+    let store = Store::open_in_memory("device-a").unwrap();
+    let engine = MurmurEngine::with_providers(
+        store,
+        Memory::default(),
+        Arc::new(NullMemoryStore),
+        Providers {
+            live: Arc::new(MockProvider::new(vec![])),
+            processing: Arc::new(MockProvider::new(vec![])),
+            reflection: Arc::new(MockProvider::new(vec![])),
+        },
+    );
+
+    let session = engine.begin_walk(None, "landscape".into());
+    session.clone().append_transcript("   \n\t  ".into());
+    let payload = session.finish().await;
+
+    assert!(!payload.queued);
+    assert_eq!(payload.lines.len(), 0);
+    assert_eq!(payload.doc_number, 0);
+}
+
+/// A second `finish()` call on an already-finished session used to panic
+/// (`end_and_record_session`'s `.expect` on an `InvalidState` error, since
+/// the session already left `Recording`). It must now return the
+/// already-built document — a harmless, idempotent re-finish — not crash.
+#[tokio::test]
+async fn a_second_finish_call_returns_the_already_built_document_instead_of_panicking() {
+    let store = Store::open_in_memory("device-a").unwrap();
+    let engine = MurmurEngine::with_providers(
+        store,
+        Memory::default(),
+        Arc::new(NullMemoryStore),
+        Providers {
+            live: Arc::new(MockProvider::new(vec![
+                tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+                end_turn("captured"),
+            ])),
+            processing: Arc::new(MockProvider::new(vec![
+                tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order 12 2x10 joists"})),
+                end_turn("done"),
+                summary_response("Landscape walk: mulch and haul planned."),
+                document_response_with_a_gap(),
+            ])),
+            reflection: Arc::new(MockProvider::new(vec![])),
+        },
+    );
+
+    let session = engine.begin_walk(None, "landscape".into());
+    let listener = Arc::new(CollectingListener(StdMutex::new(Vec::new())));
+    session.clone().set_event_listener(listener.clone());
+
+    let long_text = "order twelve two by tens for the deck framing today. ".repeat(3);
+    session.clone().append_transcript(long_text);
+    wait_for(&listener, 1).await;
+
+    let first = session.clone().finish().await;
+    let second = session.clone().finish().await;
+
+    assert_eq!(first.doc_kind, second.doc_kind);
+    assert_eq!(first.doc_number, second.doc_number);
+    assert_eq!(first.lines.len(), second.lines.len());
+    assert!(!second.queued, "the already-built document was never queued");
+}
+
 async fn wait_for(listener: &Arc<CollectingListener>, count: usize) -> Vec<WalkEvent> {
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
