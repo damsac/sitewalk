@@ -1090,6 +1090,8 @@ mod tests {
             stt_model_path: Some(model),
             stt_flush_on_finish: true,
             stt_use_gpu: true, // host-side smoke — Metal is fine here
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
         };
         let engine = MurmurEngine::new(cfg).expect("engine construction");
         let session =

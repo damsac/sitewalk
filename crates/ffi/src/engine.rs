@@ -51,6 +51,16 @@ pub struct EngineConfig {
     /// assumption); CPU/BLAS decode on sim is proven working. Swift derives
     /// this from `#if targetEnvironment(simulator)`.
     pub stt_use_gpu: bool,
+    /// Per-window RMS-energy pre-gate for STT (see `SttConfig::vad_rms_threshold`).
+    /// Default `0.0` = decode everything. Device tuning sweeps this (~0.01) to
+    /// suppress construction-noise decodes without dropping speech. Not secret:
+    /// fine to print in `Debug`. Swift `sttvad=<float>` launch arg overrides it.
+    pub stt_vad_rms_threshold: f32,
+    /// no_speech_prob post-check for STT (see `SttConfig::no_speech_prob_threshold`).
+    /// Default `0.6`. Higher = keep more borderline segments; lower = drop more
+    /// suspected hallucinations. Not secret: fine to print in `Debug`. Swift
+    /// `sttnsp=<float>` launch arg overrides it.
+    pub stt_no_speech_prob_threshold: f32,
 }
 
 impl std::fmt::Debug for EngineConfig {
@@ -66,6 +76,8 @@ impl std::fmt::Debug for EngineConfig {
             .field("stt_model_path", &self.stt_model_path)
             .field("stt_flush_on_finish", &self.stt_flush_on_finish)
             .field("stt_use_gpu", &self.stt_use_gpu)
+            .field("stt_vad_rms_threshold", &self.stt_vad_rms_threshold)
+            .field("stt_no_speech_prob_threshold", &self.stt_no_speech_prob_threshold)
             .finish()
     }
 }
@@ -134,6 +146,12 @@ pub struct MurmurEngine {
     /// GPU toggle for the whisper backend (see `EngineConfig::stt_use_gpu`).
     #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
     pub(crate) stt_use_gpu: bool,
+    /// RMS pre-gate for the whisper backend (see `EngineConfig::stt_vad_rms_threshold`).
+    #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
+    pub(crate) stt_vad_rms_threshold: f32,
+    /// no_speech_prob post-check (see `EngineConfig::stt_no_speech_prob_threshold`).
+    #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
+    pub(crate) stt_no_speech_prob_threshold: f32,
     _runtime: Option<Arc<tokio::runtime::Runtime>>,
 }
 
@@ -163,6 +181,8 @@ impl MurmurEngine {
             stt_model_path: config.stt_model_path.clone(),
             stt_flush_on_finish: config.stt_flush_on_finish,
             stt_use_gpu: config.stt_use_gpu,
+            stt_vad_rms_threshold: config.stt_vad_rms_threshold,
+            stt_no_speech_prob_threshold: config.stt_no_speech_prob_threshold,
             _runtime: Some(runtime),
         }))
     }
@@ -178,7 +198,12 @@ impl MurmurEngine {
     pub(crate) fn build_stt_stream(&self, bias: &[String]) -> Result<Option<Arc<stt::SttStream>>, EngineError> {
         match &self.stt_model_path {
             Some(path) => {
-                let cfg = stt::SttConfig { use_gpu: self.stt_use_gpu, ..stt::SttConfig::default() };
+                let cfg = stt::SttConfig {
+                    use_gpu: self.stt_use_gpu,
+                    vad_rms_threshold: self.stt_vad_rms_threshold,
+                    no_speech_prob_threshold: self.stt_no_speech_prob_threshold,
+                    ..stt::SttConfig::default()
+                };
                 let stream = stt::SttStream::with_model(std::path::Path::new(path), cfg, bias)
                 // Never print a key here (it isn't in scope, but keep the
                 // message store/model-only — Plan 07 R6 redaction posture).
@@ -225,6 +250,8 @@ impl MurmurEngine {
             stt_model_path: None,
             stt_flush_on_finish: true,
             stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
             _runtime: None,
         })
     }
@@ -247,6 +274,8 @@ mod tests {
             stt_model_path: Some("/bundle/ggml-base.en-q5_1.bin".into()),
             stt_flush_on_finish: true,
             stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
         };
         let printed = format!("{cfg:?}");
         assert!(!printed.contains("sk-super-secret"), "api key must never be printable");
@@ -254,6 +283,11 @@ mod tests {
         assert!(printed.contains("ggml-base.en-q5_1.bin"), "model path is fine to print");
         assert!(printed.contains("stt_flush_on_finish"));
         assert!(printed.contains("stt_use_gpu"), "gpu knob is plumbed and printable");
+        assert!(printed.contains("stt_vad_rms_threshold"), "vad knob is plumbed and printable");
+        assert!(
+            printed.contains("stt_no_speech_prob_threshold"),
+            "no_speech_prob knob is plumbed and printable"
+        );
     }
 
     #[test]
@@ -271,9 +305,38 @@ mod tests {
             stt_model_path: None,
             stt_flush_on_finish: true,
             stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
         };
         let providers = build_providers(&cfg);
         assert!(Arc::ptr_eq(&providers.live, &providers.reflection));
+    }
+
+    #[test]
+    fn stt_threshold_knobs_thread_from_config_onto_the_engine() {
+        // The two noise-gate knobs must survive the EngineConfig -> MurmurEngine
+        // hop so build_stt_stream can hand them to SttConfig (device tuning).
+        // Non-default values prove it's real plumbing, not a defaulted field.
+        let cfg = EngineConfig {
+            db_path: ":memory:".into(),
+            device_id: "dev".into(),
+            api_key: "sk-test".into(),
+            base_url: None,
+            model_live: "claude-haiku-4-5".into(),
+            model_processing: "claude-sonnet-4-5".into(),
+            model_reflection: "claude-haiku-4-5".into(),
+            stt_model_path: None,
+            stt_flush_on_finish: true,
+            stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.01,
+            stt_no_speech_prob_threshold: 0.42,
+        };
+        let engine = MurmurEngine::new(cfg).expect("engine construction with :memory: store");
+        assert_eq!(engine.stt_vad_rms_threshold, 0.01, "vad threshold threaded onto the engine");
+        assert_eq!(
+            engine.stt_no_speech_prob_threshold, 0.42,
+            "no_speech_prob threshold threaded onto the engine"
+        );
     }
 
     #[test]
@@ -292,6 +355,8 @@ mod tests {
             stt_model_path: None,
             stt_flush_on_finish: true,
             stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
         };
         assert!(matches!(MurmurEngine::new(cfg), Err(EngineError::Store(_))));
     }
@@ -309,6 +374,8 @@ mod tests {
             stt_model_path: None,
             stt_flush_on_finish: true,
             stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
         };
         let providers = build_providers(&cfg);
         assert!(Arc::ptr_eq(&providers.live, &providers.reflection), "same model shares one Arc");

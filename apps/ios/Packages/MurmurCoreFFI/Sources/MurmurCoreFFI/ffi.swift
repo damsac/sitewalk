@@ -1521,6 +1521,20 @@ public struct EngineConfig {
      * this from `#if targetEnvironment(simulator)`.
      */
     public var sttUseGpu: Bool
+    /**
+     * Per-window RMS-energy pre-gate for STT (see `SttConfig::vad_rms_threshold`).
+     * Default `0.0` = decode everything. Device tuning sweeps this (~0.01) to
+     * suppress construction-noise decodes without dropping speech. Not secret:
+     * fine to print in `Debug`. Swift `sttvad=<float>` launch arg overrides it.
+     */
+    public var sttVadRmsThreshold: Float
+    /**
+     * no_speech_prob post-check for STT (see `SttConfig::no_speech_prob_threshold`).
+     * Default `0.6`. Higher = keep more borderline segments; lower = drop more
+     * suspected hallucinations. Not secret: fine to print in `Debug`. Swift
+     * `sttnsp=<float>` launch arg overrides it.
+     */
+    public var sttNoSpeechProbThreshold: Float
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1539,7 +1553,19 @@ public struct EngineConfig {
          * in ggml_metal_buffer_set_tensor) instead of degrading (falsified D7
          * assumption); CPU/BLAS decode on sim is proven working. Swift derives
          * this from `#if targetEnvironment(simulator)`.
-         */sttUseGpu: Bool) {
+         */sttUseGpu: Bool, 
+        /**
+         * Per-window RMS-energy pre-gate for STT (see `SttConfig::vad_rms_threshold`).
+         * Default `0.0` = decode everything. Device tuning sweeps this (~0.01) to
+         * suppress construction-noise decodes without dropping speech. Not secret:
+         * fine to print in `Debug`. Swift `sttvad=<float>` launch arg overrides it.
+         */sttVadRmsThreshold: Float, 
+        /**
+         * no_speech_prob post-check for STT (see `SttConfig::no_speech_prob_threshold`).
+         * Default `0.6`. Higher = keep more borderline segments; lower = drop more
+         * suspected hallucinations. Not secret: fine to print in `Debug`. Swift
+         * `sttnsp=<float>` launch arg overrides it.
+         */sttNoSpeechProbThreshold: Float) {
         self.dbPath = dbPath
         self.deviceId = deviceId
         self.apiKey = apiKey
@@ -1550,6 +1576,8 @@ public struct EngineConfig {
         self.sttModelPath = sttModelPath
         self.sttFlushOnFinish = sttFlushOnFinish
         self.sttUseGpu = sttUseGpu
+        self.sttVadRmsThreshold = sttVadRmsThreshold
+        self.sttNoSpeechProbThreshold = sttNoSpeechProbThreshold
     }
 }
 
@@ -1587,6 +1615,12 @@ extension EngineConfig: Equatable, Hashable {
         if lhs.sttUseGpu != rhs.sttUseGpu {
             return false
         }
+        if lhs.sttVadRmsThreshold != rhs.sttVadRmsThreshold {
+            return false
+        }
+        if lhs.sttNoSpeechProbThreshold != rhs.sttNoSpeechProbThreshold {
+            return false
+        }
         return true
     }
 
@@ -1601,6 +1635,8 @@ extension EngineConfig: Equatable, Hashable {
         hasher.combine(sttModelPath)
         hasher.combine(sttFlushOnFinish)
         hasher.combine(sttUseGpu)
+        hasher.combine(sttVadRmsThreshold)
+        hasher.combine(sttNoSpeechProbThreshold)
     }
 }
 
@@ -1621,7 +1657,9 @@ public struct FfiConverterTypeEngineConfig: FfiConverterRustBuffer {
                 modelReflection: FfiConverterString.read(from: &buf), 
                 sttModelPath: FfiConverterOptionString.read(from: &buf), 
                 sttFlushOnFinish: FfiConverterBool.read(from: &buf), 
-                sttUseGpu: FfiConverterBool.read(from: &buf)
+                sttUseGpu: FfiConverterBool.read(from: &buf), 
+                sttVadRmsThreshold: FfiConverterFloat.read(from: &buf), 
+                sttNoSpeechProbThreshold: FfiConverterFloat.read(from: &buf)
         )
     }
 
@@ -1636,6 +1674,8 @@ public struct FfiConverterTypeEngineConfig: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.sttModelPath, into: &buf)
         FfiConverterBool.write(value.sttFlushOnFinish, into: &buf)
         FfiConverterBool.write(value.sttUseGpu, into: &buf)
+        FfiConverterFloat.write(value.sttVadRmsThreshold, into: &buf)
+        FfiConverterFloat.write(value.sttNoSpeechProbThreshold, into: &buf)
     }
 }
 

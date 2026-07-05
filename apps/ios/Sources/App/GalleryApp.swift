@@ -18,6 +18,11 @@ private let engineLog = Logger(subsystem: "com.damsac.sitewalk", category: "engi
 //                                              auto-finishes it (state machine demo)
 //   demo=1                                   → force DemoWalkEngine even if a
 //                                              key is configured (D10)
+//   sttgpu=0|1                               → force whisper CPU / GPU (Metal)
+//   sttvad=<float>                           → STT per-window RMS pre-gate
+//                                              (default 0.0; ~0.01 cuts noise)
+//   sttnsp=<float>                           → STT no_speech_prob drop
+//                                              threshold (default 0.6)
 
 /// Engine selection (Plan 07 D10/Task 11): real `MurmurEngine` when an API
 /// key + config resolve, `DemoWalkEngine` when launched with `demo=1` OR
@@ -25,6 +30,51 @@ private let engineLog = Logger(subsystem: "com.damsac.sitewalk", category: "engi
 /// demos still run with zero backend. `nil` here means "use AppModel's
 /// DemoWalkEngine default." Delete nothing (D10) — every existing launch arg
 /// keeps working.
+/// Reads the value of a `<prefix><float>` launch arg (e.g. `sttvad=0.01`),
+/// falling back to `fallback` when the arg is absent OR its value doesn't
+/// parse as a Float. A malformed arg logs a breadcrumb and keeps the default —
+/// a typo in a QA/device launch arg must never crash the app.
+private func floatLaunchArg(_ prefix: String, in args: [String], default fallback: Float) -> Float {
+    guard let arg = args.first(where: { $0.hasPrefix(prefix) }) else { return fallback }
+    let raw = String(arg.dropFirst(prefix.count))
+    guard let parsed = Float(raw) else {
+        engineLog.notice("ignoring malformed \(prefix, privacy: .public) launch arg (kept default)")
+        return fallback
+    }
+    return parsed
+}
+
+/// Resolves the three whisper knobs from launch args (all overridable for the
+/// on-device sweep and design QA):
+///   `sttgpu=0|1` — force whisper CPU / GPU (Metal). Default: GPU on device,
+///     CPU on the simulator (Metal hard-crashes on sim — SIGTRAP in
+///     ggml_metal_buffer_set_tensor via MTLSimDevice; D7's "degrades to CPU"
+///     assumption was falsified, so a sim build can never crash by default).
+///   `sttvad=<float>` — per-window RMS pre-gate (default 0.0 = decode
+///     everything; ~0.01 suppresses construction noise without dropping speech).
+///   `sttnsp=<float>` — no_speech_prob drop threshold (default 0.6).
+/// Float args parse defensively (see floatLaunchArg): a typo keeps the default.
+private struct SttKnobs {
+    var useGpu: Bool
+    var vadRms: Float
+    var noSpeechProb: Float
+}
+
+private func resolveSttKnobs(_ args: [String]) -> SttKnobs {
+    #if targetEnvironment(simulator)
+    var useGpu = false
+    #else
+    var useGpu = true
+    #endif
+    if args.contains("sttgpu=0") { useGpu = false }
+    if args.contains("sttgpu=1") { useGpu = true }
+    let vadRms = floatLaunchArg("sttvad=", in: args, default: 0.0)
+    let noSpeechProb = floatLaunchArg("sttnsp=", in: args, default: 0.6)
+    engineLog.notice("stt gpu=\(useGpu, privacy: .public)")
+    engineLog.notice("stt vad_rms=\(vadRms, privacy: .public) no_speech_prob=\(noSpeechProb, privacy: .public)")
+    return SttKnobs(useGpu: useGpu, vadRms: vadRms, noSpeechProb: noSpeechProb)
+}
+
 @MainActor
 private func resolveEngine(demo: Bool) -> WalkEngine? {
     if demo {
@@ -56,22 +106,7 @@ private func resolveEngine(demo: Bool) -> WalkEngine? {
     if sttModelPath == nil {
         engineLog.notice("stt model not bundled — live walk will run text-only")
     }
-    // GPU (Metal) for whisper: DEVICE only. On the iOS SIMULATOR Metal
-    // hard-crashes (SIGTRAP in ggml_metal_buffer_set_tensor via MTLSimDevice)
-    // instead of degrading — the D7 "falls back to CPU" assumption was
-    // falsified by sim verification. Compile-time targetEnvironment is the
-    // signal (a sim build can never crash by default); CPU/BLAS decode on sim
-    // is proven working. `sttgpu=0` / `sttgpu=1` launch args override for
-    // testing (e.g. forcing CPU on device to compare decode paths).
-    #if targetEnvironment(simulator)
-    var sttUseGpu = false
-    #else
-    var sttUseGpu = true
-    #endif
-    let launchArgs = ProcessInfo.processInfo.arguments
-    if launchArgs.contains("sttgpu=0") { sttUseGpu = false }
-    if launchArgs.contains("sttgpu=1") { sttUseGpu = true }
-    engineLog.notice("stt gpu=\(sttUseGpu, privacy: .public)")
+    let stt = resolveSttKnobs(ProcessInfo.processInfo.arguments)
     let config = EngineConfig(
         dbPath: dbPath,
         deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown-device",
@@ -82,7 +117,9 @@ private func resolveEngine(demo: Bool) -> WalkEngine? {
         modelReflection: "claude-haiku-4-5",
         sttModelPath: sttModelPath,
         sttFlushOnFinish: true, // D6 default: flush the last utterance on DONE
-        sttUseGpu: sttUseGpu
+        sttUseGpu: stt.useGpu,
+        sttVadRmsThreshold: stt.vadRms,
+        sttNoSpeechProbThreshold: stt.noSpeechProb
     )
     engineLog.notice("engine=real (murmur-core MurmurEngine, key len=\(apiKey.count, privacy: .public))")
     // Throwing constructor (no panics across FFI): if the store can't open,
