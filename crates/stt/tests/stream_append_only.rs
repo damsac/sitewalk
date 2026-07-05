@@ -8,7 +8,7 @@
 use stt::{RawSegment, ScriptedDecoder, SttConfig, SttStream};
 
 fn seg(cs0: i64, cs1: i64, t: &str) -> RawSegment {
-    RawSegment { start_cs: cs0, end_cs: cs1, text: t.into() }
+    RawSegment { start_cs: cs0, end_cs: cs1, text: t.into(), no_speech_prob: 0.0 }
 }
 
 #[test]

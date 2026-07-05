@@ -7,6 +7,14 @@ pub struct RawSegment {
     pub start_cs: i64,
     pub end_cs: i64,
     pub text: String,
+    /// whisper's per-segment "no speech" probability (Plan 08 Task 11b, R3).
+    /// High values mean the model thinks this span is silence/noise it
+    /// fluently hallucinated text over; the `Finalizer` drops segments above
+    /// `SttConfig.no_speech_prob_threshold`. Default `0.0` (always keep) so the
+    /// field is additive — non-whisper decoders (`ScriptedDecoder`) and all
+    /// Plan-06 tests are unaffected. `WhisperDecoder` populates it from
+    /// `whisper_state`.
+    pub no_speech_prob: f32,
 }
 
 /// The one seam that touches whisper. Everything above it (chunk cutting,
@@ -52,8 +60,8 @@ mod tests {
     #[test]
     fn scripted_decoder_returns_scripts_in_order_and_captures_prompts() {
         let mut d = ScriptedDecoder::new(vec![
-            vec![RawSegment { start_cs: 0, end_cs: 200, text: "hello world".into() }],
-            vec![RawSegment { start_cs: 0, end_cs: 150, text: "again now".into() }],
+            vec![RawSegment { start_cs: 0, end_cs: 200, text: "hello world".into(), no_speech_prob: 0.0 }],
+            vec![RawSegment { start_cs: 0, end_cs: 150, text: "again now".into(), no_speech_prob: 0.0 }],
         ]);
         let a = d.decode(&[0.0; 16], Some("french drain, ledger")).unwrap();
         assert_eq!(a[0].text, "hello world");

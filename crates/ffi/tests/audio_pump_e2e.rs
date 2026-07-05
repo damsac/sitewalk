@@ -53,7 +53,7 @@ fn end_turn(text: &str) -> CompletionResponse {
 /// 9 s of PCM -> two 5 s/1 s windows (drained in one poll); the final "today"
 /// straddles the horizon and is only finalized by end() (the finish() flush).
 fn scripted_stt() -> Arc<SttStream> {
-    let seg = |cs0: i64, cs1: i64, t: &str| RawSegment { start_cs: cs0, end_cs: cs1, text: t.into() };
+    let seg = |cs0: i64, cs1: i64, t: &str| RawSegment { start_cs: cs0, end_cs: cs1, text: t.into(), no_speech_prob: 0.0 };
     let decoder = ScriptedDecoder::new(vec![
         vec![seg(0, 180, "order twelve"), seg(180, 360, "two by tens"), seg(360, 480, "for the")],
         vec![seg(0, 80, "for the"), seg(80, 300, "deck framing"), seg(300, 480, "today")],

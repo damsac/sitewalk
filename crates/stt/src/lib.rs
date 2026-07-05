@@ -7,6 +7,7 @@ mod bias;
 mod chunk;
 mod decoder;
 mod finalize;
+mod vad;
 #[cfg(feature = "whisper")]
 mod whisper;
 
@@ -43,6 +44,23 @@ pub struct SttConfig {
     /// FALSIFIED by sim verification; CPU/BLAS decode on sim is proven working.
     /// Ignored by non-whisper decoders (`ScriptedDecoder`).
     pub use_gpu: bool,
+    /// Per-window RMS-energy pre-gate (Plan 08 Task 11a, R3). A ready window
+    /// whose RMS amplitude is below this is NOT decoded (skip the Metal decode,
+    /// emit nothing) — but its samples still entered the Chunker and advanced
+    /// the window cursor, so the "absolute ms from stream start" timestamp
+    /// contract does NOT drift (pre-Chunker sample dropping is the rejected
+    /// option). Default `0.0` = decode everything (conservative: never elides
+    /// speech); the Task 12 SNR eval sets a measured value. `f32` RMS of
+    /// [-1,1] PCM.
+    pub vad_rms_threshold: f32,
+    /// no_speech_prob post-check (Plan 08 Task 11b, R3). Finalized segments
+    /// whose `RawSegment.no_speech_prob` exceeds this are dropped before they
+    /// reach the committed transcript — the guard against whisper fluently
+    /// hallucinating text over machinery drone. Default `0.6` (whisper's own
+    /// customary no-speech threshold); the Task 12 eval tunes it. Segments with
+    /// the default `no_speech_prob = 0.0` (ScriptedDecoder, Plan-06 tests) are
+    /// always kept.
+    pub no_speech_prob_threshold: f32,
 }
 
 impl Default for SttConfig {
@@ -54,6 +72,8 @@ impl Default for SttConfig {
             language: "en".into(),
             max_bias_terms: 100,
             use_gpu: true,
+            vad_rms_threshold: 0.0,
+            no_speech_prob_threshold: 0.6,
         }
     }
 }
@@ -114,7 +134,7 @@ impl SttStream {
             engine: Mutex::new(Engine {
                 decoder,
                 chunker,
-                finalizer: Finalizer::new(),
+                finalizer: Finalizer::with_no_speech_threshold(cfg.no_speech_prob_threshold),
                 #[cfg(test)]
                 captured_prompts: Vec::new(),
             }),
@@ -186,6 +206,16 @@ impl SttStream {
 
     fn decode_window(&self, eng: &mut Engine, w: chunk::Window, out: &mut Vec<FinalizedSegment>)
         -> Result<(), SttError> {
+        // Per-window energy pre-gate (Task 11a, R3): skip the DECODE for a
+        // below-threshold (silence/quiet) NON-FINAL window — emit nothing, don't
+        // call the decoder. The window's samples already entered the Chunker and
+        // advanced `next_start` (in take_ready_window), so the absolute-ms
+        // timestamp clock does NOT drift: the next window's start_sample is
+        // unaffected. The final flush window is never gated (it may carry the
+        // operator's last words; a truly-silent flush decodes to nothing anyway).
+        if !w.is_final && !vad::is_speech(&w.samples, self.cfg.vad_rms_threshold) {
+            return Ok(());
+        }
         let window_start_ms = self.sample_to_ms(w.start_sample);
         let horizon_ms = if w.is_final {
             u64::MAX
@@ -239,7 +269,7 @@ mod tests {
     use super::*;
 
     fn seg(cs0: i64, cs1: i64, t: &str) -> RawSegment {
-        RawSegment { start_cs: cs0, end_cs: cs1, text: t.into() }
+        RawSegment { start_cs: cs0, end_cs: cs1, text: t.into(), no_speech_prob: 0.0 }
     }
     fn text(v: &[FinalizedSegment]) -> Vec<&str> {
         v.iter().map(|s| s.text.as_str()).collect()
@@ -300,6 +330,48 @@ mod tests {
             Box::new(ScriptedDecoder::new(vec![])), SttConfig::default(), &[]);
         stream.push_pcm(&vec![0.0; 1000]); // far short of a window
         assert!(stream.poll().unwrap().is_empty(), "no decode, no scripted panic");
+    }
+
+    #[test]
+    fn low_energy_window_is_not_decoded_but_cursor_still_advances() {
+        // ScriptedDecoder has ONE script; it must be consumed by the SPEECH
+        // window, NOT the silence window (energy-gated before the decoder runs).
+        let decoder = ScriptedDecoder::new(vec![vec![seg(0, 100, "hello")]]);
+        let cfg = SttConfig { vad_rms_threshold: 0.05, ..SttConfig::default() };
+        let stream = SttStream::with_decoder(Box::new(decoder), cfg, &[]);
+
+        // Window 0: one full window of silence → RMS 0 < 0.05 → NOT decoded.
+        stream.push_pcm(&vec![0.0; 80_000]);
+        let out0 = stream.poll().unwrap();
+        assert!(out0.is_empty(), "silence window emits nothing (decode skipped)");
+
+        // Window 1: speech-level energy → decoded. Its start_sample is 64_000
+        // (advanced one step) — proving the skipped window still advanced the
+        // Chunker cursor, so the absolute-ms timestamp contract holds.
+        stream.push_pcm(&vec![0.3; 64_000]);
+        let out1 = stream.poll().unwrap();
+        assert_eq!(text(&out1), vec!["hello"], "speech window decodes the one script");
+        assert!(out1[0].start_ms >= 4_000, "start_ms reflects the advanced cursor (64k samples = 4s)");
+    }
+
+    #[test]
+    fn high_no_speech_prob_segment_is_not_finalized() {
+        // One window, two segments: a machinery-drone hallucination (0.95) and
+        // real speech (0.05). Only the speech reaches the committed stream (R3).
+        let decoder = ScriptedDecoder::new(vec![vec![
+            RawSegment { start_cs: 0, end_cs: 100, text: "machinery drone".into(), no_speech_prob: 0.95 },
+            RawSegment { start_cs: 100, end_cs: 200, text: "order lumber".into(), no_speech_prob: 0.05 },
+        ]]);
+        let cfg = SttConfig { no_speech_prob_threshold: 0.6, ..SttConfig::default() };
+        let stream = SttStream::with_decoder(Box::new(decoder), cfg, &[]);
+        stream.push_pcm(&vec![0.3; 80_000]); // one full window (RMS gate is a no-op at default 0.0)
+        let live = stream.poll().unwrap();
+        let words = text(&live);
+        assert!(
+            !words.contains(&"machinery") && !words.contains(&"drone"),
+            "high no_speech_prob segment dropped before commit (R3)"
+        );
+        assert_eq!(words, vec!["order", "lumber"], "the real-speech segment is kept");
     }
 
     #[test]

@@ -14,15 +14,25 @@ pub struct Word {
 /// (`RESULTS.md` Table 2: 19% WER at ≤3 s latency, vs 80% for naive segment
 /// finalize). `pending` is bounded to ~one chunk; the emitted stream is
 /// append-only (a finalized word is never revised).
-#[derive(Default)]
 pub struct Finalizer {
     pending: Vec<Word>,
     flushed: bool,
+    /// Segments with `no_speech_prob` above this are dropped at ingest (Plan 08
+    /// Task 11b, R3). Default keeps the pre-Plan-08 behavior for scripted
+    /// segments (which carry `no_speech_prob = 0.0`).
+    no_speech_threshold: f32,
+}
+
+impl Default for Finalizer {
+    fn default() -> Self {
+        Self { pending: Vec::new(), flushed: false, no_speech_threshold: 0.6 }
+    }
 }
 
 impl Finalizer {
-    pub fn new() -> Self {
-        Self::default()
+    /// Construct with an explicit no-speech drop threshold (from `SttConfig`).
+    pub fn with_no_speech_threshold(no_speech_threshold: f32) -> Self {
+        Self { no_speech_threshold, ..Self::default() }
     }
 
     /// Merge one decoded window (`window_start_ms` + its segments) into `pending`
@@ -30,7 +40,7 @@ impl Finalizer {
     /// segment ends at/before `horizon_ms` (= next window's start for a normal
     /// window; `u64::MAX` for the flush window). Returns newly finalized words.
     pub fn ingest(&mut self, window_start_ms: u64, segs: &[RawSegment], horizon_ms: u64) -> Vec<Word> {
-        let new_words = words_from_segments(window_start_ms, segs);
+        let new_words = words_from_segments(window_start_ms, segs, self.no_speech_threshold);
         self.merge(new_words);
         self.finalize_before(horizon_ms)
     }
@@ -107,9 +117,15 @@ impl Finalizer {
     }
 }
 
-fn words_from_segments(window_start_ms: u64, segs: &[RawSegment]) -> Vec<Word> {
+fn words_from_segments(window_start_ms: u64, segs: &[RawSegment], no_speech_threshold: f32) -> Vec<Word> {
     let mut out = Vec::new();
     for s in segs {
+        // Task 11b (R3): drop segments whisper flags as probably-not-speech
+        // (machinery drone it hallucinated text over) before they can reach the
+        // committed transcript. Scripted/Plan-06 segments carry 0.0 → kept.
+        if s.no_speech_prob > no_speech_threshold {
+            continue;
+        }
         let start_ms = window_start_ms + (s.start_cs.max(0) as u64) * 10;
         let end_ms = window_start_ms + (s.end_cs.max(0) as u64) * 10;
         for tok in s.text.split_whitespace() {
@@ -125,7 +141,7 @@ mod tests {
     use crate::decoder::RawSegment;
 
     fn seg(cs0: i64, cs1: i64, t: &str) -> RawSegment {
-        RawSegment { start_cs: cs0, end_cs: cs1, text: t.into() }
+        RawSegment { start_cs: cs0, end_cs: cs1, text: t.into(), no_speech_prob: 0.0 }
     }
     fn words(ws: &[Word]) -> Vec<&str> {
         ws.iter().map(|w| w.text.as_str()).collect()
@@ -133,7 +149,7 @@ mod tests {
 
     #[test]
     fn finalizes_incrementally_across_time_shifted_windows() {
-        let mut f = Finalizer::new();
+        let mut f = Finalizer::default();
         // window 0 [0,5s], horizon 4000: last segment straddles 4s → held.
         let e0 = f.ingest(0, &[seg(0, 180, "order twelve"), seg(180, 360, "two by tens"),
                                seg(360, 480, "for the")], 4_000);
@@ -149,7 +165,7 @@ mod tests {
 
     #[test]
     fn overlap_word_is_finalized_exactly_once() {
-        let mut f = Finalizer::new();
+        let mut f = Finalizer::default();
         let e0 = f.ingest(0, &[seg(0, 180, "hello there"), seg(360, 480, "friend")], 4_000);
         // "friend" ends 4800 > horizon 4000 → held for the overlap.
         let e1 = f.ingest(4_000, &[seg(0, 80, "friend"), seg(80, 300, "good day")], 8_000);
@@ -159,7 +175,7 @@ mod tests {
 
     #[test]
     fn append_only_holds_under_overlap_disagreement() {
-        let mut f = Finalizer::new();
+        let mut f = Finalizer::default();
         let e0 = f.ingest(0, &[seg(0, 180, "the french drain"), seg(180, 480, "needs work")], 4_000);
         assert_eq!(words(&e0), vec!["the", "french", "drain"]); // ends ≤4000; "needs work" held
         // Window 1 re-decodes the overlap "needs work" DIFFERENTLY as "needs word":
@@ -180,8 +196,24 @@ mod tests {
     }
 
     #[test]
+    fn no_speech_segments_are_dropped_and_append_only_still_holds() {
+        // Threshold 0.6: a mid-stream machinery-drone segment (0.9) is dropped;
+        // the real-speech segments around it finalize normally and in order.
+        let mut f = Finalizer::with_no_speech_threshold(0.6);
+        let mut noisy = seg(180, 300, "phantom words"); // whisper hallucination
+        noisy.no_speech_prob = 0.9;
+        let e0 = f.ingest(0, &[seg(0, 180, "pour the footing"), noisy], 4_000);
+        assert_eq!(words(&e0), vec!["pour", "the", "footing"], "drone segment dropped, speech kept");
+        // A later window's real speech still appends after — append-only intact.
+        let e1 = f.ingest(4_000, &[seg(0, 120, "before noon")], 8_000);
+        let all: Vec<&str> = words(&e0).into_iter().chain(words(&e1)).collect();
+        assert_eq!(all, vec!["pour", "the", "footing", "before", "noon"]);
+        assert!(!all.contains(&"phantom"), "hallucinated words never committed (R3)");
+    }
+
+    #[test]
     fn flush_emits_only_the_bounded_tail() {
-        let mut f = Finalizer::new();
+        let mut f = Finalizer::default();
         let e0 = f.ingest(0, &[seg(0, 180, "alpha beta"), seg(360, 480, "gamma delta")], 4_000);
         assert_eq!(words(&e0), vec!["alpha", "beta"]);
         assert_eq!(f.preview(), "gamma delta", "tail bounded to the straddling segment");

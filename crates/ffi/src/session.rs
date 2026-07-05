@@ -908,7 +908,7 @@ mod tests {
         // Realistic time-shifted composition (Plan 06): window k+1 restarts at
         // chunk-relative cs=0; only the 1 s overlap repeats. 9 s of PCM → both
         // 5 s/1 s windows drained in one poll().
-        let seg = |cs0: i64, cs1: i64, t: &str| RawSegment { start_cs: cs0, end_cs: cs1, text: t.into() };
+        let seg = |cs0: i64, cs1: i64, t: &str| RawSegment { start_cs: cs0, end_cs: cs1, text: t.into(), no_speech_prob: 0.0 };
         let decoder = ScriptedDecoder::new(vec![
             vec![seg(0, 180, "order twelve"), seg(180, 360, "two by tens"), seg(360, 480, "for the")],
             vec![seg(0, 80, "for the"), seg(80, 300, "deck framing"), seg(300, 480, "today")],
@@ -1124,7 +1124,7 @@ mod tests {
     /// not. Mirrors the stt crate's `poll_finalizes_incrementally_and_end_flushes`.
     fn scripted_flush_stt() -> Arc<stt::SttStream> {
         use stt::{RawSegment, ScriptedDecoder, SttConfig, SttStream};
-        let seg = |cs0: i64, cs1: i64, t: &str| RawSegment { start_cs: cs0, end_cs: cs1, text: t.into() };
+        let seg = |cs0: i64, cs1: i64, t: &str| RawSegment { start_cs: cs0, end_cs: cs1, text: t.into(), no_speech_prob: 0.0 };
         let decoder = ScriptedDecoder::new(vec![
             vec![seg(0, 180, "order twelve"), seg(180, 360, "two by tens"), seg(360, 480, "for the")],
             vec![seg(0, 80, "for the"), seg(80, 300, "deck framing"), seg(300, 480, "today")],

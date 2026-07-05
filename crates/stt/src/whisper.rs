@@ -59,6 +59,10 @@ impl Decoder for WhisperDecoder {
                     start_cs: seg.start_timestamp(),
                     end_cs: seg.end_timestamp(),
                     text: text.trim().to_string(),
+                    // Task 11b (R3): whisper's per-segment no-speech probability
+                    // feeds the Finalizer's drop gate. Only compiled with the
+                    // `whisper` feature, so it never affects the hermetic build.
+                    no_speech_prob: seg.no_speech_probability(),
                 });
             }
         }
