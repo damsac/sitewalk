@@ -153,13 +153,12 @@ impl MurmurEngine {
                 .store
                 .lock()
                 .map_err(|_| EngineError::BeginWalk("store lock poisoned".into()))?;
-            let session = store
-                .start_session(job_id.as_deref())
-                .map_err(|e| EngineError::BeginWalk(e.to_string()))?;
+            // One transaction (review follow-up): a template failure after the
+            // insert must not leak an unreachable Recording row.
             store
-                .set_session_template(&session.id, &template)
-                .map_err(|e| EngineError::BeginWalk(e.to_string()))?;
-            session.id
+                .start_session_with_template(job_id.as_deref(), &template)
+                .map_err(|e| EngineError::BeginWalk(e.to_string()))?
+                .id
         };
         let extractor = LiveExtractor::new(
             self.providers.live.clone(),
