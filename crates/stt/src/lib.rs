@@ -61,6 +61,14 @@ pub struct SttConfig {
     /// the default `no_speech_prob = 0.0` (ScriptedDecoder, Plan-06 tests) are
     /// always kept.
     pub no_speech_prob_threshold: f32,
+    /// Enable whisper `token_timestamps` → per-word timing on `RawSegment.words`
+    /// (Plan 09 D5). Default `true`. Crate-internal: backend-agnostic (works on
+    /// CPU/BLAS and Metal alike) with no sim hazard, so it is NOT surfaced to
+    /// `EngineConfig`/Swift (unlike `use_gpu`). Reversible without a code change —
+    /// if the SNR sweep (Task 7) shows an unacceptable WER/RTF delta, flip to
+    /// `false`: the `Finalizer` already degrades to segment-coarse, so nothing
+    /// else changes. Ignored by non-whisper decoders (`ScriptedDecoder`).
+    pub word_timestamps: bool,
 }
 
 impl Default for SttConfig {
@@ -74,6 +82,7 @@ impl Default for SttConfig {
             use_gpu: true,
             vad_rms_threshold: 0.0,
             no_speech_prob_threshold: 0.6,
+            word_timestamps: true,
         }
     }
 }
@@ -382,6 +391,14 @@ mod tests {
         let sim = SttConfig { use_gpu: false, ..SttConfig::default() };
         assert!(!sim.use_gpu);
         assert!(sim.validate().is_ok(), "the knob is orthogonal to config validity");
+    }
+
+    #[test]
+    fn word_timestamps_defaults_on_and_is_overridable() {
+        assert!(SttConfig::default().word_timestamps);
+        let off = SttConfig { word_timestamps: false, ..SttConfig::default() };
+        assert!(!off.word_timestamps);
+        assert!(off.validate().is_ok(), "orthogonal to config validity");
     }
 
     #[test]
