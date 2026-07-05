@@ -5,8 +5,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use harness::{HarnessError, LlmProvider, Memory, MemoryStore};
-use murmur_core::{SessionProcessor, Store};
+use harness::{ContentBlock, HarnessError, LlmProvider, Memory, MemoryStore, MockProvider};
+use murmur_core::{LiveExtractOutcome, LiveExtractor, SessionProcessor, Store};
 
 use crate::corpus::Scenario;
 use crate::grade::{grade, Observed, ObservedContact, ObservedItem, ScenarioScore};
@@ -53,6 +53,62 @@ pub async fn run_scenario(
     let (observed, cost) = observe(&store, &sid, model)?;
     let score: ScenarioScore = grade(&scenario.truth, &observed);
     Ok(ScenarioReport { id: scenario.id.clone(), score, cost })
+}
+
+/// Drives the LIVE path (`LiveExtractor`) over a scenario, hermetically, with a
+/// deterministic `MockProvider` (Plan 09 D7). The session stays `Recording` (the
+/// live path only extracts while recording), the transcript is appended once,
+/// and `maybe_extract` is looped to catch up to the transcript end (mirroring
+/// `carried_scenarios.rs`). Returns the graded live board PLUS the ASSEMBLED
+/// live prompt — the first turn's user text, the true regression signal a
+/// prompt edit moves (D7). `MockProvider` is concrete (not `dyn`) so we can read
+/// `requests()`.
+pub async fn run_live_scenario(
+    scenario: &Scenario,
+    provider: Arc<MockProvider>,
+    model: &str,
+) -> Result<(ScenarioScore, String), murmur_core::CoreError> {
+    let store = Store::open_in_memory("eval-live-device")?;
+    let session = store.start_session(None)?;
+    if !scenario.transcript.trim().is_empty() {
+        store.append_transcript(&session.id, &scenario.transcript)?;
+    }
+    let sid = session.id.clone();
+    let total_chars = scenario.transcript.chars().count();
+    let store = Arc::new(Mutex::new(store));
+
+    let mut live = LiveExtractor::new(
+        provider.clone(),
+        store.clone(),
+        Arc::new(Mutex::new(Memory::default())),
+        &sid,
+    );
+    live.min_new_chars = 1; // deterministic: extract even short corpus scenarios
+    // Catch up: loop until the cursor reaches the transcript end. Bounded so a
+    // non-advancing pass (Skipped) can't spin.
+    let mut passes = 0;
+    while live.cursor() < total_chars && passes < 16 {
+        if matches!(live.maybe_extract().await?, LiveExtractOutcome::Skipped) {
+            break;
+        }
+        passes += 1;
+    }
+
+    let (observed, _cost) = observe(&store, &sid, model)?;
+    let score = grade(&scenario.truth, &observed);
+
+    // The honest regression gate (D7): the assembled live prompt the extractor
+    // sent — first request, first user text block (same access as carried_scenarios).
+    let reqs = provider.requests();
+    let assembled_prompt = match reqs
+        .first()
+        .and_then(|r| r.messages.first())
+        .and_then(|m| m.content.first())
+    {
+        Some(ContentBlock::Text { text }) => text.clone(),
+        _ => String::new(),
+    };
+    Ok((score, assembled_prompt))
 }
 
 /// Reads the store into a grader `Observed` plus a priced `CostReport`.
