@@ -1,3 +1,9 @@
+# ⚠️ ERA-I PIPELINE — builds the retired Swift app (project.yml/Makefile removed in
+# the 2026-07-05 re-unification). It will NOT succeed against the current Rust +
+# apps/ios tree. Trigger reduced to manual-only (workflow_dispatch) so it never
+# auto-fires; kept as reference. A rebuild-era TestFlight pipeline (apps/ios via
+# xcodegen/build-ffi.sh) must replace this before the next external build.
+#
 # TestFlight release pipeline.
 #
 # Two release lanes:
@@ -21,9 +27,7 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
+  workflow_dispatch:   # manual only — Era-I; see header. Was: push to main + v* tags.
 
 concurrency:
   group: release-${{ github.ref }}

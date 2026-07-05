@@ -1,81 +1,69 @@
 # Murmur
 
-Voice-to-structured-data iOS app. Speak into your phone, get organized entries (todos, notes, ideas) extracted by an LLM.
+Field-work voice agent. Speak through a site walk; an on-device agent turns it
+into a structured document (landscape / property / inspection report). Audio never
+leaves the device — local-first, sync-ready.
+
+A Rust core workspace with a native SwiftUI iOS shell. (Murmur began as a
+Swift/SwiftUI second-brain app, pivoted to field work on 2026-07-01, and was
+rebuilt on Rust — the full arc lives in this one repo; see `docs/HISTORY.md`.)
 
 ## Quick Start
 
 ```bash
-direnv allow              # Enter Nix dev shell (provides xcodegen, swiftlint, xcbeautify)
-make setup                # Check tools + create project.local.yml from template
-# Edit project.local.yml with your Apple Team ID
-make build                # Generate Xcode project + build for simulator
-make run                  # Build, install, and launch on simulator
+direnv allow                 # Enter the Nix dev shell (Rust toolchain, xcodegen, ...)
+cargo build --workspace      # Build the Rust core
+cargo test --workspace       # Run the workspace tests
 ```
 
 ## Architecture
 
-Two-layer project:
+Rust workspace at the repo root, native shell under `apps/`:
 
-- **Murmur/** — SwiftUI iOS app (Xcode via XcodeGen)
-- **Packages/MurmurCore/** — Swift package with transcription pipeline, LLM service, and data models
+```
+crates/
+  harness/       agent loop, tools, LLM providers (Anthropic + mock) — app-agnostic
+  murmur-core/   domain + SQLite store (jobs, sessions, items, contacts;
+                 tombstones, UUIDv7, single-writer, sync-ready)
+  stt/           speech-to-text (whisper-rs) + vocabulary→STT biasing
+  ffi/           UniFFI boundary — WalkEngine protocol, domain types only
+  evals/         synthetic site-walk corpus + deterministic grader (F0.5)
+apps/
+  ios/           SwiftUI shell (WalkEngine seam; demo engine + real-core mode)
+docs/            specs, plans, research, design, history
+meta/            dam + sac collaboration hub (CANON, ROADMAP, STATE)
+```
 
-The Xcode project (`Murmur.xcodeproj`) is generated from `project.yml` — never edit it directly. Per-developer settings (Team ID, bundle ID, API keys) live in `project.local.yml` (gitignored).
+Workspace members are declared in `Cargo.toml`; `spikes/` is excluded. Product
+rules (R1–R9) live in `docs/superpowers/specs/2026-07-01-murmur-rebuild-vision-design.md`.
 
-## Make Targets
+## Dev Commands
 
-All development commands go through `make`. Run `make help` to see everything.
+Rust (run inside the Nix dev shell — `direnv` / `nix develop`):
 
-### App (Xcode)
 | Command | What it does |
 |---------|-------------|
-| `make setup` | First-time setup: check tools, create config |
-| `make generate` | Generate Xcode project from project.yml |
-| `make build` | Generate + build for simulator |
-| `make test` | Generate + run unit tests |
-| `make run` | Build + install + launch on simulator |
-| `make lint` | Lint Swift sources with SwiftLint |
-| `make clean` | Remove build artifacts |
+| `cargo build --workspace` | Build all crates |
+| `cargo test --workspace` | Run all tests |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Lint (warnings are errors) |
 
-### Simulator
+iOS shell (`apps/ios/` — see `apps/ios/README.md` for detail):
+
 | Command | What it does |
 |---------|-------------|
-| `make sim-boot` | Boot the iOS simulator |
-| `make sim-shutdown` | Shutdown all running simulators |
-| `make sim-list` | List available iPhone simulators |
-| `make sim-screenshot` | Screenshot the running simulator to `screenshots/` |
+| `cd apps/ios && xcodegen generate` | Generate the **demo** project (no FFI dep; clean-checkout build) |
+| `./build-ffi.sh` | Build the gitignored `MurmurCoreFFI` xcframework (real-core mode; slow first run) |
+| `./generate.sh` | Generate the **real-core** project (needs the xcframework + API key) |
+| `xcodebuild -project SitewalkGallery.xcodeproj -scheme SitewalkGallery -destination 'platform=iOS Simulator,name=iPhone 17' build` | Build for the simulator |
 
-### MurmurCore (SPM)
-| Command | What it does |
-|---------|-------------|
-| `make core-build` | Build MurmurCore package |
-| `make core-test` | Run MurmurCore unit tests |
-| `make core-repl` | Interactive REPL for transcription testing |
-| `make core-scenarios` | Run LLM scenario tests (needs PPQ_API_KEY) |
-| `make core-clean` | Clean MurmurCore build artifacts |
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `project.yml` | XcodeGen project spec (source of truth for Xcode project) |
-| `project.local.yml` | Per-developer settings: Team ID, bundle IDs, API keys (gitignored) |
-| `project.local.yml.template` | Template for project.local.yml |
-| `flake.nix` | Nix dev shell: provides xcodegen, swiftlint, xcbeautify, git hooks |
-| `Packages/MurmurCore/swift-clean` | Wrapper script that runs Swift without Nix SDK interference |
-
-## Dev Shell (Nix)
-
-The project uses a Nix flake for reproducible tooling. `direnv allow` activates it automatically. The dev shell provides:
-- **xcodegen** — generates Xcode project from project.yml
-- **swiftlint** — Swift linter
-- **xcbeautify** — pretty xcodebuild output
-- **git hooks** — pre-commit (lint + entitlements check), post-merge (auto-regenerate)
+A fresh clone builds and runs on the scripted demo engine with zero setup — the
+base `project.yml` has no `MurmurCoreFFI` dependency, so `#if canImport(MurmurCoreFFI)`
+is false and real-core code compiles out.
 
 ## Collaboration (dam + sac)
 
-This project is built by **damsac** — two collaborators (dam and sac) working with Claude Code.
-
-The `meta/` directory at the project root is the collaboration hub:
+Built by **damsac** — dam (harness / murmur-core / STT / FFI) and sac (renderers /
+component library / visual direction). The `meta/` directory is the hub:
 
 | File | Purpose |
 |------|---------|
@@ -83,18 +71,20 @@ The `meta/` directory at the project root is the collaboration hub:
 | `meta/ROADMAP.md` | Shared priorities and sequencing |
 | `meta/WORKFLOWS.md` | How dam and sac work together |
 | `meta/RECONCILIATION.md` | PR review protocol (review thinking, not code) |
-| `meta/dam/STATE.md` | What dam is working on right now |
-| `meta/sac/STATE.md` | What sac is working on right now |
-| `meta/dam/PROCESS.md` | How dam works with Claude |
-| `meta/sac/PROCESS.md` | How sac works with Claude |
+| `meta/dam/STATE.md` · `meta/sac/STATE.md` | What each is working on right now |
+| `meta/dam/PROCESS.md` · `meta/sac/PROCESS.md` | How each works with Claude |
 
-**Key principle:** PRs must include a **Thinking** section. Reviewers read thinking first, code second. If the thinking is sound, the code follows.
+**Key principle:** PRs must include a **Thinking** section. Reviewers read thinking
+first, code second. If the thinking is sound, the code follows.
 
-**Session start:** Always read the other person's STATE.md and check CANON.md before working.
+**Session start:** read the other person's STATE.md and check CANON.md before working.
 
 ## Conventions
 
-- Default simulator: **iPhone 17 Pro** (override with `make build SIM_NAME="iPhone 16"`)
-- Xcode project is always regenerated before build/test (the `generate` target is a dependency)
-- MurmurCore uses `swift-clean` wrapper to avoid Nix SDK conflicts with Xcode's toolchain
-- `PPQ_API_KEY` in project.local.yml is passed to the app at build time via Info.plist
+- Default simulator: **iPhone 17** (iOS shell).
+- Run `xcodebuild` **outside** the Nix dev shell — inside it, Nix injects linker env
+  that breaks Xcode's `ld` (`-objc_abi_version` error). Run `xcodegen`/`cargo` inside.
+- Switching iOS demo↔real-core in an existing checkout can leave a stale SwiftPM
+  graph in DerivedData; if a build errors with `Unable to find module dependency:
+  'ffiFFI'`, delete DerivedData and rebuild. A clean checkout is unaffected.
+- No `Co-Authored-By` footers on commits. GitHub org: `damsac`.
