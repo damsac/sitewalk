@@ -11,6 +11,7 @@ mod vad;
 #[cfg(feature = "whisper")]
 mod whisper;
 
+pub use bias::build_bias_prompt;
 pub use decoder::{Decoder, RawSegment, ScriptedDecoder, WordTiming};
 #[cfg(feature = "whisper")]
 pub use whisper::WhisperDecoder;

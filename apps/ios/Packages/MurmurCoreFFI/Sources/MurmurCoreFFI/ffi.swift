@@ -535,12 +535,32 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol MurmurEngineProtocol : AnyObject {
     
     /**
+     * Add one user vocabulary term (`FactSource::Stated`, D3). Idempotent
+     * (case-insensitive). Errors: `Full` at 100 terms, `Empty` for blank input,
+     * a poisoned lock, or a persistence failure. Returns the resulting list so
+     * the editor updates in one round-trip.
+     */
+    func addVocabularyTerm(term: String) throws  -> [String]
+    
+    /**
      * `Store::start_session` + persists the template key, hands back a
      * fresh per-session `WalkSession` (D4). Fallible across FFI (no panics):
      * a poisoned store lock or a store error surfaces to Swift as
      * `EngineError::BeginWalk` rather than crashing the host app.
      */
     func beginWalk(jobId: String?, template: String) throws  -> WalkSession
+    
+    /**
+     * The user's vocabulary terms, insertion order. Read-only — no lock held
+     * across FFI beyond the clone.
+     */
+    func listVocabulary() throws  -> [String]
+    
+    /**
+     * Remove one vocabulary term (case-insensitive). Returns the resulting list.
+     * Removing a term that isn't present is not an error (idempotent).
+     */
+    func removeVocabularyTerm(term: String) throws  -> [String]
     
 }
 
@@ -612,6 +632,20 @@ public convenience init(config: EngineConfig)throws  {
 
     
     /**
+     * Add one user vocabulary term (`FactSource::Stated`, D3). Idempotent
+     * (case-insensitive). Errors: `Full` at 100 terms, `Empty` for blank input,
+     * a poisoned lock, or a persistence failure. Returns the resulting list so
+     * the editor updates in one round-trip.
+     */
+open func addVocabularyTerm(term: String)throws  -> [String] {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_add_vocabulary_term(self.uniffiClonePointer(),
+        FfiConverterString.lower(term),$0
+    )
+})
+}
+    
+    /**
      * `Store::start_session` + persists the template key, hands back a
      * fresh per-session `WalkSession` (D4). Fallible across FFI (no panics):
      * a poisoned store lock or a store error surfaces to Swift as
@@ -622,6 +656,29 @@ open func beginWalk(jobId: String?, template: String)throws  -> WalkSession {
     uniffi_ffi_fn_method_murmurengine_begin_walk(self.uniffiClonePointer(),
         FfiConverterOptionString.lower(jobId),
         FfiConverterString.lower(template),$0
+    )
+})
+}
+    
+    /**
+     * The user's vocabulary terms, insertion order. Read-only — no lock held
+     * across FFI beyond the clone.
+     */
+open func listVocabulary()throws  -> [String] {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_list_vocabulary(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Remove one vocabulary term (case-insensitive). Returns the resulting list.
+     * Removing a term that isn't present is not an error (idempotent).
+     */
+open func removeVocabularyTerm(term: String)throws  -> [String] {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_remove_vocabulary_term(self.uniffiClonePointer(),
+        FfiConverterString.lower(term),$0
     )
 })
 }
@@ -1721,6 +1778,13 @@ public enum EngineError {
      */
     case BeginWalk(message: String)
     
+    /**
+     * A memory / vocabulary mutation failed (lock poisoned, vocabulary full, or
+     * an empty term). Recoverable by the host — surface, don't crash. Never
+     * contains an api key (memory/vocab strings only).
+     */
+    case Memory(message: String)
+    
 }
 
 
@@ -1749,6 +1813,10 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 4: return .Memory(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1766,6 +1834,8 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         case .BeginWalk(_ /* message is ignored*/):
             writeInt(&buf, Int32(3))
+        case .Memory(_ /* message is ignored*/):
+            writeInt(&buf, Int32(4))
 
         
         }
@@ -1951,6 +2021,31 @@ fileprivate struct FfiConverterSequenceFloat: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeBoardItem: FfiConverterRustBuffer {
     typealias SwiftType = [BoardItem]
 
@@ -2059,7 +2154,16 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_ffi_checksum_method_murmurengine_add_vocabulary_term() != 28855) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_murmurengine_begin_walk() != 41375) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_list_vocabulary() != 10809) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_remove_vocabulary_term() != 40682) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walkeventlistener_on_event() != 10314) {

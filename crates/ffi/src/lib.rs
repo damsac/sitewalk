@@ -10,6 +10,7 @@ pub mod document;
 pub mod engine;
 pub mod events;
 pub mod session;
+pub mod vocabulary;
 
 pub use convert::{document_payload, partial_document_from_items};
 pub use document::{DocLine, DocumentPayload};

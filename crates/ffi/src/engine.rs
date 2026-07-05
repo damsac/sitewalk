@@ -25,6 +25,11 @@ pub enum EngineError {
     /// A walk could not be started (store lock, session insert, template set).
     #[error("failed to begin walk: {0}")]
     BeginWalk(String),
+    /// A memory / vocabulary mutation failed (lock poisoned, vocabulary full, or
+    /// an empty term). Recoverable by the host — surface, don't crash. Never
+    /// contains an api key (memory/vocab strings only).
+    #[error("memory error: {0}")]
+    Memory(String),
 }
 
 /// Config crossing the FFI boundary. `api_key` is an opaque `String` from the

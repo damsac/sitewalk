@@ -19,6 +19,13 @@ final class DemoWalkEngine: WalkEngine {
     /// per event (Task 10).
     private var board: [CapturedFixture] = []
 
+    /// In-memory vocabulary so the editor is usable with no backend (Plan 10
+    /// D8). Seeded with a couple of demo terms. Mirrors the Rust semantics
+    /// loosely — normalize + case-insensitive dedup + a 100-term cap — enough
+    /// to drive the editor; the real semantics live in `harness::Memory`.
+    private var vocabulary: [String] = ["french drain", "ledger board"]
+    private static let maxVocabularyTerms = 100
+
     /// Per-trade trigger phrases, index-aligned with `trade.captured`.
     private static let triggers: [String: [String]] = [
         "landscape": ["mulch", "boxwood", "zone two", "edge the beds", "twelve hundred"],
@@ -59,6 +66,34 @@ final class DemoWalkEngine: WalkEngine {
 
     // No Rust session to tear down in the demo path.
     func cancel() async {}
+
+    // MARK: Vocabulary (Plan 10) — in-memory demo conformance.
+
+    private func normalize(_ term: String) -> String {
+        term.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    func listVocabulary() -> [String] { vocabulary }
+
+    func addVocabularyTerm(_ term: String) -> [String] {
+        let normalized = normalize(term)
+        guard !normalized.isEmpty else { return vocabulary }
+        // Case-insensitive dedup (keep first-seen casing); cap; reject silently
+        // in the demo (the real engine throws — the editor surfaces that).
+        if vocabulary.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            return vocabulary
+        }
+        if vocabulary.count < Self.maxVocabularyTerms {
+            vocabulary.append(normalized)
+        }
+        return vocabulary
+    }
+
+    func removeVocabularyTerm(_ term: String) -> [String] {
+        let normalized = normalize(term)
+        vocabulary.removeAll { $0.caseInsensitiveCompare(normalized) == .orderedSame }
+        return vocabulary
+    }
 
     func finish() async -> DocumentModel {
         continuation?.finish()

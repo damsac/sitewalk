@@ -44,6 +44,11 @@ final class AppModel {
     /// lands, "most-recently-captured id" is the honest interim rule.
     var lastCapturedID: UUID?
 
+    // Vocabulary editor state (Plan 10). The list is the source of truth the
+    // editor renders; `vocabularyError` carries a thrown FFI error for display.
+    private(set) var vocabulary: [String] = []
+    var vocabularyError: String?
+
     // Review state
     var document: DocumentModel?
     var editingRowID: UUID?
@@ -222,6 +227,44 @@ final class AppModel {
             self.document = doc
             self.phase = .review
             self.path = [.review]
+        }
+    }
+
+    // MARK: Vocabulary (Plan 10) — the write half of the vocabulary → STT
+    // biasing loop. Defensive: a thrown FFI error becomes a logged breadcrumb +
+    // an unchanged list, never a crash (the editor may show `vocabularyError`).
+
+    private var vocabularyLogger: Logger {
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "vocabulary")
+    }
+
+    func loadVocabulary() {
+        do {
+            vocabulary = try engine.listVocabulary()
+        } catch {
+            vocabularyLogger.error("loadVocabulary failed: \(error, privacy: .public)")
+            vocabularyError = "\(error)"
+        }
+    }
+
+    func addVocabulary(_ term: String) {
+        do {
+            vocabulary = try engine.addVocabularyTerm(term)
+            vocabularyError = nil
+        } catch {
+            // sac: how errors surface (full-at-100, empty) is a design call.
+            vocabularyLogger.error("addVocabulary failed: \(error, privacy: .public)")
+            vocabularyError = "\(error)"
+        }
+    }
+
+    func removeVocabulary(_ term: String) {
+        do {
+            vocabulary = try engine.removeVocabularyTerm(term)
+            vocabularyError = nil
+        } catch {
+            vocabularyLogger.error("removeVocabulary failed: \(error, privacy: .public)")
+            vocabularyError = "\(error)"
         }
     }
 

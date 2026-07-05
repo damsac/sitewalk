@@ -200,6 +200,24 @@ final class MurmurEngine: WalkEngine {
         return document
     }
 
+    // MARK: - Vocabulary (Plan 10): forward to the FFI CRUD methods. Each is
+    // throwing across the boundary (vocabulary full, empty term, poisoned lock,
+    // persistence failure); the thrown error propagates to AppModel, which logs
+    // a breadcrumb and leaves the list unchanged (never crashes). add/remove
+    // return the resulting list so the editor updates in one round-trip.
+
+    func listVocabulary() throws -> [String] {
+        try engine.listVocabulary()
+    }
+
+    func addVocabularyTerm(_ term: String) throws -> [String] {
+        try engine.addVocabularyTerm(term: term)
+    }
+
+    func removeVocabularyTerm(_ term: String) throws -> [String] {
+        try engine.removeVocabularyTerm(term: term)
+    }
+
     // MARK: - Formatting layer (D2): core is display-copy-free; this is
     // where cents → "$285", doc_number → "EST-0047", job_date_unix →
     // "JUL 01 2026", and label keys → display copy happen.

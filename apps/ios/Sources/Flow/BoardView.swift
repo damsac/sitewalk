@@ -5,14 +5,27 @@ import SwiftUI
 
 struct BoardView: View {
     @Bindable var model: AppModel
+    // sac: entry point + presentation (sheet vs. a new AppModel.Phase) is your
+    // call; a gear → .sheet is a functional default, not a design decision.
+    @State private var showVocabulary = false
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.trade.dateLabel)
-                    .font(Theme.F.mono(10, .semibold))
-                    .tracking(2.0)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                HStack(alignment: .top) {
+                    Text(model.trade.dateLabel)
+                        .font(Theme.F.mono(10, .semibold))
+                        .tracking(2.0)
+                        .foregroundStyle(Theme.C.orangeDeep)
+                    Spacer()
+                    // sac: placement/glyph/affordance for the vocabulary editor
+                    // entry point is yours — this gear is a functional default.
+                    Button { showVocabulary = true } label: {
+                        Image(systemName: "gearshape")
+                            .foregroundStyle(Theme.C.ink60)
+                    }
+                    .buttonStyle(.plain)
+                }
                 Text(model.trade.countTitle)
                     .font(Theme.F.ui(26, .bold))
                 Menu {
@@ -61,5 +74,9 @@ struct BoardView: View {
         }
         .background(Theme.C.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        // sac: sheet vs. push, chrome, and dismissal affordance are yours.
+        .sheet(isPresented: $showVocabulary) {
+            VocabularyView(model: model)
+        }
     }
 }

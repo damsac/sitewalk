@@ -82,4 +82,15 @@ protocol WalkEngine: AnyObject {
     /// joins the pump (a decode can be in flight) — callers run it from a
     /// detached `Task` so the main actor never blocks. `DemoWalkEngine` no-ops.
     func cancel() async
+
+    // Vocabulary → STT biasing loop, write half (Plan 10). These mutate the
+    // `Memory` "vocabulary" section the engine reads at `begin_walk` to bias
+    // whisper. Throwing: the real FFI methods are fallible across the boundary
+    // (vocabulary full, empty term, a poisoned lock, a persistence failure) —
+    // the editor surfaces the error and leaves its list unchanged rather than
+    // crashing. add/remove return the RESULTING list so the editor updates in
+    // one round-trip. `DemoWalkEngine` conforms with an in-memory list.
+    func listVocabulary() throws -> [String]
+    func addVocabularyTerm(_ term: String) throws -> [String]
+    func removeVocabularyTerm(_ term: String) throws -> [String]
 }

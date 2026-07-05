@@ -17,7 +17,10 @@ pub use llm::{
 };
 pub use mock::MockProvider;
 pub use providers::AnthropicProvider;
-pub use memory::{FactSource, Memory, MemoryEntry, DEFAULT_WORD_CAP};
+pub use memory::{
+    FactSource, Memory, MemoryEntry, VocabAdd, DEFAULT_WORD_CAP, MAX_VOCABULARY_TERMS,
+    MAX_VOCABULARY_TERM_WORDS, VOCABULARY_SECTION,
+};
 pub use memory::store::{FileMemoryStore, MemoryStore};
 pub use memory::tool::{Clock, UpdateMemoryTool};
 pub use reflection::engine::{ReflectionEngine, ReflectionOutcome};

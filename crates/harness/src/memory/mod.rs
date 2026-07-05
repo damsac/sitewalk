@@ -8,6 +8,33 @@ use serde::{Deserialize, Serialize};
 /// Default word cap for a whole memory (spec §7: reflection compresses, never accumulates).
 pub const DEFAULT_WORD_CAP: usize = 500;
 
+/// The one memory section read by the STT biasing layer (`collect_bias_terms`
+/// → `build_bias_prompt` → whisper `initial_prompt`). Canonical name — every
+/// crate references this constant rather than the bare string "vocabulary".
+pub const VOCABULARY_SECTION: &str = "vocabulary";
+
+/// Write-time cap on vocabulary terms. MUST equal `stt::SttConfig::max_bias_terms`
+/// (the read-side cap); `harness` cannot depend on `stt`, so this mirrors it —
+/// a Task 6 FFI test asserts they are numerically equal. iOS `contextualStrings`
+/// / whisper `initial_prompt` budget (spec Rev 2 amendment F: ≤100 curated terms).
+pub const MAX_VOCABULARY_TERMS: usize = 100;
+
+/// Max words in a single vocabulary term. Vocabulary is jargon/hotwords, not
+/// sentences; this bounds the word budget (Plan 10 D3) and keeps the whisper
+/// `initial_prompt` a clean glossary. A longer input is a paste error.
+pub const MAX_VOCABULARY_TERM_WORDS: usize = 6;
+
+/// Outcome of [`Memory::add_vocabulary_term`]. Total (no `Result` needed):
+/// `Added`/`Duplicate` are success (idempotent); `Full`/`Empty`/`TooLong` are refusals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VocabAdd {
+    Added,
+    Duplicate,
+    Full,
+    Empty,
+    TooLong,
+}
+
 /// Where a fact came from — drives eviction priority and debuggability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -47,6 +74,14 @@ pub struct MemoryEntry {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Memory {
     pub sections: BTreeMap<String, Vec<MemoryEntry>>,
+}
+
+/// Normalize a vocabulary term for storage AND comparison: trim ends, collapse
+/// internal whitespace runs to a single space. Case is preserved. Used on BOTH
+/// the query and the stored text before comparing (D4, finding 1), because the
+/// pre-existing writers (`UpdateMemoryTool`, reflection) store verbatim.
+fn normalize_term(term: &str) -> String {
+    term.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 impl Memory {
@@ -190,6 +225,60 @@ impl Memory {
         }
         removed
     }
+
+    /// The user's vocabulary terms in insertion order, stored text AS-IS
+    /// (alias for `section_texts(VOCABULARY_SECTION)`). No normalization on read.
+    pub fn vocabulary_terms(&self) -> Vec<&str> {
+        self.section_texts(VOCABULARY_SECTION)
+    }
+
+    /// Stored casing of the term that matches `normalized` case-insensitively,
+    /// normalizing the STORED side too (finding 1). `None` if absent.
+    fn matching_vocabulary_term(&self, normalized: &str) -> Option<String> {
+        self.section_texts(VOCABULARY_SECTION)
+            .into_iter()
+            .find(|t| normalize_term(t).eq_ignore_ascii_case(normalized))
+            .map(str::to_string)
+    }
+
+    /// Add one vocabulary term. Normalizes (trim + collapse whitespace), rejects
+    /// empty (`Empty`) and >`MAX_VOCABULARY_TERM_WORDS` (`TooLong`), dedups
+    /// case-insensitively across BOTH sides (keeps first-seen stored casing),
+    /// and enforces `MAX_VOCABULARY_TERMS` at write time (`Full` — reject, never
+    /// silent-evict). `source` is `Stated` for user/onboarding terms; a future
+    /// auto-harvester (D9) passes `Inferred`. Does NOT enforce the 500-word cap —
+    /// callers clamp globally (the FFI layer / `UpdateMemoryTool` do).
+    pub fn add_vocabulary_term(&mut self, term: &str, now: u64, source: FactSource) -> VocabAdd {
+        let normalized = normalize_term(term);
+        if normalized.is_empty() {
+            return VocabAdd::Empty;
+        }
+        if normalized.split_whitespace().count() > MAX_VOCABULARY_TERM_WORDS {
+            return VocabAdd::TooLong;
+        }
+        if let Some(stored) = self.matching_vocabulary_term(&normalized) {
+            // Duplicate (even at cap): touch/upgrade provenance on the STORED
+            // casing via remember_from; never add a second variant.
+            self.remember_from(VOCABULARY_SECTION, &stored, now, source, None);
+            return VocabAdd::Duplicate;
+        }
+        if self.vocabulary_terms().len() >= MAX_VOCABULARY_TERMS {
+            return VocabAdd::Full;
+        }
+        self.remember_from(VOCABULARY_SECTION, &normalized, now, source, None);
+        VocabAdd::Added
+    }
+
+    /// Remove one vocabulary term (case-insensitive; normalizes BOTH sides so a
+    /// verbatim-stored term written by another path is still removable — finding
+    /// 1). Returns whether anything was removed.
+    pub fn remove_vocabulary_term(&mut self, term: &str) -> bool {
+        let normalized = normalize_term(term);
+        let Some(stored) = self.matching_vocabulary_term(&normalized) else {
+            return false;
+        };
+        self.forget(VOCABULARY_SECTION, &stored)
+    }
 }
 
 #[cfg(test)]
@@ -319,5 +408,85 @@ mod tests {
         assert_eq!(removed, 1, "oldest corrected entry is evicted");
         assert!(m.word_count() <= 4);
         assert_eq!(m.section_texts("people"), vec!["prefers text over calls"]);
+    }
+
+    #[test]
+    fn add_vocabulary_term_normalizes_and_defaults_stated() {
+        let mut m = Memory::default();
+        assert_eq!(m.add_vocabulary_term("  french   drain ", 10, FactSource::Stated), VocabAdd::Added);
+        // normalized: trimmed + internal whitespace collapsed
+        assert_eq!(m.vocabulary_terms(), vec!["french drain"]);
+        let e = &m.sections[VOCABULARY_SECTION][0];
+        assert_eq!(e.source, FactSource::Stated, "user vocabulary is Stated (survives casual eviction)");
+        assert_eq!(e.last_touched, 10);
+    }
+
+    #[test]
+    fn add_vocabulary_term_is_case_insensitively_idempotent() {
+        let mut m = Memory::default();
+        assert_eq!(m.add_vocabulary_term("French Drain", 1, FactSource::Stated), VocabAdd::Added);
+        assert_eq!(m.add_vocabulary_term("french drain", 2, FactSource::Stated), VocabAdd::Duplicate);
+        assert_eq!(m.vocabulary_terms(), vec!["French Drain"], "first-seen casing kept, one slot used");
+    }
+
+    #[test]
+    fn add_vocabulary_term_rejects_empty_and_overlong() {
+        let mut m = Memory::default();
+        assert_eq!(m.add_vocabulary_term("   ", 1, FactSource::Stated), VocabAdd::Empty);
+        // > MAX_VOCABULARY_TERM_WORDS (6): a sentence, not a term.
+        assert_eq!(
+            m.add_vocabulary_term("one two three four five six seven", 1, FactSource::Stated),
+            VocabAdd::TooLong,
+        );
+        assert!(m.vocabulary_terms().is_empty());
+        // exactly 6 words is allowed
+        assert_eq!(m.add_vocabulary_term("a b c d e f", 1, FactSource::Stated), VocabAdd::Added);
+    }
+
+    #[test]
+    fn matching_normalizes_the_stored_side_too() {
+        // finding 1: a pre-existing term written by another path (update_memory /
+        // reflection) with un-collapsed whitespace must still dedupe AND be removable.
+        let mut m = Memory::default();
+        m.remember_from(VOCABULARY_SECTION, "french   drain", 1, FactSource::Stated, None); // double space, verbatim
+        assert_eq!(m.vocabulary_terms(), vec!["french   drain"], "stored text is listed as-is");
+        // dedupe: adding the normalized form does not create a near-duplicate
+        assert_eq!(m.add_vocabulary_term("french drain", 2, FactSource::Stated), VocabAdd::Duplicate);
+        assert_eq!(m.vocabulary_terms().len(), 1);
+        // removable despite the whitespace/casing mismatch
+        assert!(m.remove_vocabulary_term("French Drain"), "normalize both sides before compare");
+        assert!(m.vocabulary_terms().is_empty());
+    }
+
+    #[test]
+    fn add_vocabulary_term_enforces_the_hundred_term_cap() {
+        let mut m = Memory::default();
+        for i in 0..MAX_VOCABULARY_TERMS {
+            assert_eq!(m.add_vocabulary_term(&format!("term{i}"), 1, FactSource::Stated), VocabAdd::Added);
+        }
+        assert_eq!(m.vocabulary_terms().len(), MAX_VOCABULARY_TERMS);
+        assert_eq!(m.add_vocabulary_term("one too many", 1, FactSource::Stated), VocabAdd::Full);
+        assert_eq!(m.vocabulary_terms().len(), MAX_VOCABULARY_TERMS, "cap holds; nothing silently evicted");
+        // a duplicate is NOT rejected as full — idempotent even at cap
+        assert_eq!(m.add_vocabulary_term("term0", 2, FactSource::Stated), VocabAdd::Duplicate);
+    }
+
+    #[test]
+    fn remove_vocabulary_term_is_case_insensitive_and_reports() {
+        let mut m = Memory::default();
+        m.add_vocabulary_term("French Drain", 1, FactSource::Stated);
+        assert!(m.remove_vocabulary_term("french drain"), "case-insensitive match");
+        assert!(m.vocabulary_terms().is_empty());
+        assert!(!m.remove_vocabulary_term("french drain"), "already gone");
+    }
+
+    #[test]
+    fn inferred_vocabulary_is_evicted_before_stated_vocabulary() {
+        // D3: an auto-harvested (Inferred) term goes before a user (Stated) term under cap pressure.
+        let mut m = Memory::default();
+        m.add_vocabulary_term("user term one", 100, FactSource::Stated);   // 3 words
+        m.add_vocabulary_term("harvested term", 200, FactSource::Inferred); // 2 words, newer
+        m.clamp_to_cap(3); // must drop the Inferred one despite it being newer
+        assert_eq!(m.vocabulary_terms(), vec!["user term one"]);
     }
 }
