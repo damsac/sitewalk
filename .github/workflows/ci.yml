@@ -1,0 +1,93 @@
+# Rebuild-era CI (Rust core + iOS demo shell).
+#
+# The Swift-era workflows were deleted in PR #157; this is the first CI for the
+# Rust workspace. The workspace is HERMETIC feature-off — `cargo test/clippy
+# --workspace` pull in no model files, no cmake-built whisper, no Metal — so the
+# Rust gates run on a plain Linux runner inside the Nix dev shell (which supplies
+# the pinned 1.95 toolchain via rust-overlay). Verified locally: both gates exit 0.
+#
+# release.yml (manual-only TestFlight) is intentionally left untouched.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One in-flight run per ref; a new push supersedes the old.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust (test + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fast, maintained Nix installer. Enables flakes + nix-command and wires up
+      # cache.nixos.org so the dev-shell toolchain comes down as prebuilt binaries.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      # Persist /nix/store across runs (successor to the sunset magic-nix-cache).
+      # Keyed on the flake lock so a flake bump busts it.
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+
+      # Cargo registry + build artifacts. Keyed on Cargo.lock so a dependency
+      # change rebuilds; otherwise the heavy deps (bundled SQLite, reqwest,
+      # tokio) are restored instead of recompiled — this is what keeps the job
+      # off the ~30-minute cold-build path.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: cargo test --workspace
+        run: nix develop -c cargo test --workspace
+
+      - name: cargo clippy --workspace --all-targets -- -D warnings
+        run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+
+  ios-demo:
+    name: iOS demo build (simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Standalone binary that writes the .xcodeproj; it does not need Nix, and
+      # xcodebuild must run OUTSIDE any Nix shell (Nix's linker env breaks Xcode's
+      # ld), so we install it via Homebrew and never enter `nix develop` here.
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # Demo path only: base project.yml has no MurmurCoreFFI dependency, so
+      # `#if canImport(MurmurCoreFFI)` is false and real-core code compiles out.
+      # No FFI xcframework, no PPQ_API_KEY, no signing. Verified locally: BUILD SUCCEEDED.
+      - name: Generate demo Xcode project
+        working-directory: apps/ios
+        run: xcodegen generate
+
+      - name: Build for simulator
+        working-directory: apps/ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project SitewalkGallery.xcodeproj \
+            -scheme SitewalkGallery \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
