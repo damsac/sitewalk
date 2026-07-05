@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Murmur — First run &amp; setup</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+  <a class="backlink" href="index.html">&larr; All screens</a>
+  <h1>6 · First run &amp; BYOK setup</h1>
+  <p class="sub">Direction: <b>Jobsite</b>. The hardest flow: a non-technical user has to connect an AI
+  key. The approach — never say "API key" first; sell the value, hand-hold the fetch, and paste with
+  a live validation state. Mic permission is framed around the payoff, not the permission.</p>
+
+  <div class="stage">
+
+    <!-- STEP 1 — WELCOME -->
+    <div class="specimen">
+      <div class="tag">Step 1 · Welcome</div>
+      <div class="phone jobsite">
+        <div class="screen">
+          <div class="statusbar"><span>7:02</span><span class="r">5G &#9646;&#9646;&#9646;&#9646; 88%</span></div>
+          <div class="body onb-screen">
+            <div class="scroll">
+              <div class="onb-hero">
+                <div class="onb-logo">M</div>
+                <h2>Talk once.<br>Get the paperwork.</h2>
+                <p>Hit record at a site walk. Murmur writes the report, the todos, and updates your
+                  jobs — while your hands stay dirty.</p>
+              </div>
+              <div class="step-badges"><span class="sb on"></span><span class="sb"></span><span class="sb"></span></div>
+              <div class="why-card">
+                <div class="wc-row"><span class="wc-ic">&#127908;</span><div><div class="wc-t">One button</div><div class="wc-b">Start, talk, stop. That's the whole app.</div></div></div>
+                <div class="wc-row"><span class="wc-ic">&#128274;</span><div><div class="wc-t">Stays on your phone</div><div class="wc-b">Audio is transcribed on-device. We don't keep it.</div></div></div>
+                <div class="wc-row"><span class="wc-ic">&#128203;</span><div><div class="wc-t">Clean reports</div><div class="wc-b">Share to clients and subs as text or PDF.</div></div></div>
+              </div>
+            </div>
+            <div class="onb-foot">
+              <button class="btn">Get started</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="caption"><b>Welcome:</b> value in the user's language ("get the paperwork"). No mention
+      of keys or AI plumbing yet — earn trust before asking for anything.</div>
+    </div>
+
+    <!-- STEP 2 — WHY A KEY + PASTE (valid) -->
+    <div class="specimen">
+      <div class="tag">Step 2 · Connect the brain (valid)</div>
+      <div class="phone jobsite">
+        <div class="screen">
+          <div class="statusbar"><span>7:03</span><span class="r">5G &#9646;&#9646;&#9646;&#9646; 88%</span></div>
+          <div class="body onb-screen">
+            <div class="scroll">
+              <div class="onb-hero" style="padding-bottom:10px">
+                <h2 style="font-size:26px">Connect the brain</h2>
+                <p>Murmur uses a top AI service to do the writing. You bring your own account so
+                  <b>you pay pennies per report</b> and we never see your data.</p>
+              </div>
+              <div class="step-badges"><span class="sb"></span><span class="sb on"></span><span class="sb"></span></div>
+
+              <div class="why-card" style="margin-bottom:14px">
+                <div class="wc-row"><span class="wc-ic">1&#65039;&#8419;</span><div><div class="wc-t">Open the sign-up page</div><div class="wc-b">Takes 2 minutes. We'll walk you there.</div></div></div>
+                <div class="wc-row"><span class="wc-ic">2&#65039;&#8419;</span><div><div class="wc-t">Copy the key it gives you</div><div class="wc-b">A long code starting with "sk-". Just tap copy.</div></div></div>
+                <div class="wc-row"><span class="wc-ic">3&#65039;&#8419;</span><div><div class="wc-t">Paste it below</div><div class="wc-b">We check it right away.</div></div></div>
+              </div>
+
+              <button class="btn secondary" style="margin:0 22px 18px;width:auto;display:block">
+                &#8599; Open the sign-up page
+              </button>
+
+              <div class="field-label">Paste your key</div>
+              <div class="paste-field valid">
+                <span class="pf-val">sk-••••••••••••••••••••••7f2a</span>
+                <span class="pf-icon">&#10003;</span>
+              </div>
+              <div class="field-hint" style="color:var(--ok);font-weight:700">Key works — you're all set.</div>
+            </div>
+            <div class="onb-foot">
+              <button class="btn">Continue</button>
+              <div class="link-row"><a href="#">Paste from clipboard</a> · <a href="#">I'll do this later</a></div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="caption"><b>BYOK, friendly version:</b> "connect the brain," not "enter API key."
+      A deep-link button removes the scariest step (finding the page). Live green check on a valid key,
+      masked value, and an honest "why" (you pay pennies, we see nothing).</div>
+    </div>
+
+    <!-- STEP 2 — ERROR STATE -->
+    <div class="specimen">
+      <div class="tag">Step 2 · Invalid key (error)</div>
+      <div class="phone jobsite">
+        <div class="screen">
+          <div class="statusbar"><span>7:03</span><span class="r">5G &#9646;&#9646;&#9646;&#9646; 88%</span></div>
+          <div class="body onb-screen">
+            <div class="scroll">
+              <div class="onb-hero" style="padding-bottom:10px">
+                <h2 style="font-size:26px">Connect the brain</h2>
+                <p>Murmur uses a top AI service to do the writing. You bring your own account so
+                  <b>you pay pennies per report</b> and we never see your data.</p>
+              </div>
+              <div class="step-badges"><span class="sb"></span><span class="sb on"></span><span class="sb"></span></div>
+
+              <button class="btn secondary" style="margin:0 22px 18px;width:auto;display:block">
+                &#8599; Open the sign-up page
+              </button>
+
+              <div class="field-label">Paste your key</div>
+              <div class="paste-field error">
+                <span class="pf-val">sk-4b90...2c (too short)</span>
+                <span class="pf-icon">&#10005;</span>
+              </div>
+              <div class="field-hint err">That doesn't look like a full key. It should start with
+                "sk-" and be much longer. Try copying the whole thing again.</div>
+
+              <div class="why-card" style="margin-top:20px">
+                <div class="wc-row"><span class="wc-ic">&#128172;</span><div><div class="wc-t">Stuck?</div><div class="wc-b">Tap here and we'll show you exactly where the key is on their site.</div></div></div>
+              </div>
+            </div>
+            <div class="onb-foot">
+              <button class="btn secondary">Continue</button>
+              <div class="link-row"><a href="#">Get help with this step</a></div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="caption"><b>Error state:</b> plain-language diagnosis ("looks too short"), no jargon,
+      no red wall of doom. Continue is disabled (greyed) until valid. A one-tap "get help" leads to a
+      screenshot walkthrough — the failure most likely to lose this user.</div>
+    </div>
+
+    <!-- STEP 3 — MIC PERMISSION -->
+    <div class="specimen">
+      <div class="tag">Step 3 · Mic permission</div>
+      <div class="phone jobsite">
+        <div class="screen">
+          <div class="statusbar"><span>7:04</span><span class="r">5G &#9646;&#9646;&#9646;&#9646; 88%</span></div>
+          <div class="body onb-screen" style="justify-content:center;display:flex;flex-direction:column">
+            <div class="step-badges" style="padding-top:0"><span class="sb"></span><span class="sb"></span><span class="sb on"></span></div>
+            <div class="perm-sheet">
+              <div class="pi">&#127908;</div>
+              <h3>Let Murmur hear the job</h3>
+              <p>To turn your site walks into reports, Murmur needs to listen while you record.
+                It only listens when <b>you</b> tap record — never in the background.</p>
+              <button class="btn" onclick="document.getElementById('ios-perm').style.display='flex'">Turn on the mic</button>
+              <button class="btn secondary" style="margin-top:10px">Not now</button>
+            </div>
+
+            <!-- Simulated iOS system dialog -->
+            <div id="ios-perm" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.5);align-items:center;justify-content:center;z-index:40">
+              <div style="width:270px;background:#2a2c31;border-radius:16px;overflow:hidden;text-align:center;color:#fff;font-family:var(--sf)">
+                <div style="padding:20px 18px 16px">
+                  <div style="font-weight:700;font-size:16px;margin-bottom:6px">"Murmur" Would Like to Access the Microphone</div>
+                  <div style="font-size:13px;color:#b9bcc2;line-height:1.4">So it can transcribe your recorded site walks into reports. Audio stays on your device.</div>
+                </div>
+                <div style="display:flex;border-top:1px solid #3a3d44">
+                  <div style="flex:1;padding:13px;color:#6aa8ff;border-right:1px solid #3a3d44;font-size:16px">Don't Allow</div>
+                  <div style="flex:1;padding:13px;color:#6aa8ff;font-weight:700;font-size:16px">Allow</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="caption"><b>Mic ask:</b> our own priming screen ("let Murmur hear the job") sells the
+      value and pre-answers the fear ("never in the background") <i>before</i> the iOS dialog fires —
+      so the system prompt is a yes. Tap "Turn on the mic" to see the OS dialog.</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

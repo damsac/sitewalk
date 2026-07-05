@@ -1,69 +1,50 @@
 # Canon
 
-Shared source of truth between dam and sac. Every entry here has been explicitly agreed on by both. If it's not in this file, it's not canonical.
+Shared source of truth between dam and sac for the rebuild. Every entry here has been explicitly agreed on by both — rows marked *pending* or *proposed* are not yet canon. If it's not in this file, it's not canonical.
 
 Updated via PR. Changes to this file require review from the other person.
 
+Pre-pivot canon (the old voice-notes app) lives in `damsac/Murmur` `meta/CANON.md` history — historical only.
+
 ---
-
-## Architecture
-
-- **Two-layer project:** SwiftUI iOS app (`Murmur/`) + Swift package (`Packages/MurmurCore/`)
-- **LLM provider:** Currently PPQ.ai. Architecture supports swapping to any provider.
-- **Xcode project generated** from `project.yml` via XcodeGen — never edit `.xcodeproj` directly
-- **Per-developer settings** in `project.local.yml` (gitignored)
 
 ## Product
 
-- **What Murmur is:** An autonomous second brain. You speak, and an agent captures, organizes, surfaces, and acts on your entries. Not a transcription app — a thinking partner that manages your mental load.
-- **Core insight:** Capture first, categorize automatically. The agent doesn't just structure your input — it actively curates what you need to see and when.
-- **Entry model:** The atomic unit is `Entry`. Category (todo, note, reminder, idea, list, habit, question) carries the semantic weight.
-- **Agent-first UI:** Three layers — smart list (flat, agent-curated), gestures (swipe to act), mic (voice to agent).
-- **Privacy (goal):** All user data encrypted at rest. Zero plaintext storage. Not yet implemented — required for production release.
-- **Credits as fuel:** Token-based usage with starter balance. Additional payment methods planned post-launch.
+- **What Murmur is now:** AI meeting notes for blue-collar field work. One button; record an hour-long site walk with the phone in your pocket; on-device transcription; an agent turns it into structured items, documents, and todos. Brand: Murmur. Repo/working title: sitewalk.
+- **Capture-first:** artifacts are a pluggable seam; live in-session extraction onto a board; jobs-board home with `Job` as first-class.
+- **Privacy:** audio never leaves the device; on-device STT; local-first storage.
+
+## Architecture
+
+- **Rust workspace** (`crates/`): `harness` (reusable agent crate, zero app logic) → `murmur-core` (domain + SQLite) → `stt` (planned) → `ffi` (UniFFI, planned). Native shells consume it: `apps/ios` (SwiftUI), Android later.
+- **Local-first storage:** SQLite, UUIDv7 ids, tombstones, single-writer `Store` — sync-ready, no sync/accounts/server in v1.
+- **UI↔core seam:** `WalkEngine` protocol at the FFI boundary, domain types only (never harness wire types). Swap point: `AppModel.init(engine:)`. `DemoWalkEngine` is the placeholder until the Plan 07 bridge.
+- **`apps/ios` is outside the cargo workspace** (`exclude = ["spikes"]` covers spike crates; the app has its own xcodegen project). Workspace gates: `cargo test --workspace` + `cargo clippy --workspace --all-targets`, always green on main.
 
 ## Roles
 
-- **dam** — Architecture, backend, core systems (`Packages/MurmurCore/`), and frontend contributions. Owns the foundation that the UI builds on.
-- **sac** — Frontend, UI/UX, SwiftUI views and interactions (`Murmur/`). Owns the user-facing experience.
+- **dam** — harness, murmur-core, STT, FFI. Owns the foundation.
+- **sac** — renderers, component library, visual direction (`apps/ios/`). Owns the user-facing experience.
 
-Both touch the full stack when needed — these are centers of gravity, not hard boundaries.
+Centers of gravity, not hard boundaries.
 
 ## Conventions
 
-- **Branch model:** `main` (stable), `dam` (dam's working branch), `sac` (sac's working branch). PRs go from `pr/dam/<name>` or `pr/sac/<name>` → `main`. Rebase working branch onto main after merge.
-- **Commit format:** `type: short description` (no Co-Authored-By footers)
-- **PR process:** Feature branches to main, PR review required, includes Thinking section
-- **Default simulator:** iPhone 17 Pro
-- **Dev shell:** Nix flake, activated via `direnv allow`
-- **Make targets:** All dev commands through `make` (see CLAUDE.md)
+- **Branch model:** `main` + PR branches (`sac/<name>`, `pr/dam/<name>`). PRs include a **Thinking** section; review thinking first, code second (`meta/RECONCILIATION.md`).
+- **Commit format:** `type(scope): short description` — no Co-Authored-By footers.
+- **Secrets:** `.env` at repo root, gitignored, shell-sourced — never committed, never read into agent context.
+- **Review machinery (dam's side):** plan → plan-review → builder execution → spec+quality reviews → whole-artifact final review. The final review has caught a real cross-module issue in six of six plans — never skip it.
 
 ## Decisions Log
 
-Append new decisions here with date, who proposed, who agreed.
-
-| Date | Decision | Proposed by | Context |
-|------|----------|-------------|---------|
-| 2026-02-28 | Adopt collaborative meta structure at `meta/` | dam | Genesis: bootstrap shared process |
-| 2026-02-28 | Archive old `workflows/` to `workflows.archive/` | dam | Clean slate for meta |
-| 2026-02-28 | PRs must include Thinking section | dam | Review thinking, not just code |
-| 2026-02-28 | Metacraft skills installed at user level (~/.claude/skills/) | dam | Shared tooling: genesis, meta-agent, session-lifecycle, tmux-lanes, gather, skill-creator |
-| 2026-02-28 | Use cancelRecording() over stopRecording() in agent path | dam | Optimizing for speed. Accept potential loss of final partial transcript (~500ms of speech) rather than blocking for finalization. Revisit if users report missing words. |
-
-## Rebuild Decisions (2026-07 pivot — agreement noted per row)
-
-Everything above this section describes the pre-pivot app and is historical. The rebuild's canon:
-
 | Date | Decision | Proposed by | Agreed via |
 |------|----------|-------------|------------|
-| 2026-07-01 | Pivot: AI meeting notes for blue-collar field work (site walks → documents). Ground-up rebuild; Swift codebase superseded, kept as reference | dam | sac's SITEWALK design study shaped spec Rev 2; sac built the iOS app against it (PR #1) — de facto. Formal spec review still owed |
-| 2026-07-01 | Architecture: Rust workspace (harness → murmur-core → stt → ffi/UniFFI) + native SwiftUI/Compose shells. Native over Tauri (background audio, feel) | dam | pending sac's spec review |
-| 2026-07-01 | Division of labor: dam = harness/core/STT/FFI; sac = renderers/components/visual direction | dam | operating as such since |
-| 2026-07-01 | Local-first: SQLite, UUIDv7, tombstones, single-writer store; sync-ready, no sync/accounts in v1. Audio never leaves device | dam | pending sac's spec review |
-| 2026-07-02 | Product rules R1–R9 (hidden transcript, deliberate stop, under-extraction bias R6, spend meter R9, …) — spec §3 | dam | pending sac's spec review |
-| 2026-07-03 | Repo: `damsac/sitewalk` (sac's working title graduated to repo name; brand stays Murmur) | dam | sac PR'd into it |
-| 2026-07-04 | Swap-contract fix: items get a `source` column (live/authoritative/manual); process() clears live items only AFTER successful extraction | dam | core-side, informs sac's board UX |
-| 2026-07-04 | STT: benchmark-first — whisper.cpp Rust-side is the preferred bet, 06-spike confirms or kills. Driver: vocabulary→STT biasing needs it; iOS 26 SpeechAnalyzer dropped custom vocabulary | dam | supersedes HANDOFF's "STT stays in Swift" — flagged to sac in PR #1 review |
-| 2026-07-04 | UI↔core seam: `WalkEngine` protocol at the FFI boundary, domain types only (never harness wire types); swap point `AppModel.init(engine:)` | sac | dam's PR #1 review endorses |
-| proposed | Template keys: `landscape \| property \| inspection` as canonical | sac (in code) | awaiting explicit ack from both |
-| proposed | STT DONE semantics: flush final utterance (supersedes 2026-02-28 cancel-for-speed canon for the site-walk context) | dam | joint call pending |
+| 2026-07-01 | Pivot: field-work voice agent; ground-up rebuild; old Swift app superseded | dam | sac's SITEWALK study shaped spec Rev 2; sac built `apps/ios` against it — de facto. Formal spec review still owed |
+| 2026-07-01 | Native shells over Tauri (background audio, feel) | dam | pending sac's spec review |
+| 2026-07-01 | Product rules R1–R9 (hidden transcript, deliberate stop, under-extraction bias R6, spend meter R9, …) | dam | pending sac's spec review |
+| 2026-07-03 | Repo `damsac/sitewalk`; brand stays Murmur | dam | sac PR'd into it |
+| 2026-07-04 | Swap-contract fix: items get `source` (live/authoritative/manual); process() clears live items only AFTER successful extraction | dam | core-side; informs sac's board UX |
+| 2026-07-04 | STT: benchmark-first — whisper.cpp Rust-side preferred, 06-spike confirms or kills. Driver: vocabulary→STT biasing; iOS 26 SpeechAnalyzer dropped custom vocabulary | dam | supersedes HANDOFF's "STT stays in Swift"; flagged in PR #1 review |
+| 2026-07-04 | `WalkEngine` seam + `AppModel.init(engine:)` swap point | sac | dam's PR #1 review endorses |
+| proposed | Template keys `landscape \| property \| inspection` as canonical | sac (in code) | awaiting explicit ack |
+| proposed | STT DONE semantics: flush final utterance (site-walk reality) vs speed (old-app canon) | dam | joint call pending |

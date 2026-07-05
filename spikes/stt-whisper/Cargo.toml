@@ -1,0 +1,10 @@
+[package]
+name = "stt-whisper-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+whisper-rs = { version = "=0.16.0", features = ["metal"] }  # exact pin: a silent patch bump would confound Table 1 mid-spike
+hound = "3"        # WAV read (16 kHz mono f32 — whisper's input format)
+# deliberately minimal; WER/stream logic is hand-rolled and disposable

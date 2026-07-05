@@ -1,39 +1,9 @@
-# Xcode project — regenerated from project.yml
-Murmur.xcodeproj/
-
-# Build artifacts
-build/
-DerivedData/
-*.ipa
-*.dSYM
-*.dSYM.zip
-Packages/MurmurCore/.build/
-Packages/MurmurCore/.swiftpm/
-Packages/MurmurCore/ScenarioResults/*.md
-
-# User state
-*.xcuserstate
-xcuserdata/
-*.xcworkspace/xcuserdata/
-
-# Per-developer config
-project.local.yml
-
-# Nix / direnv
-.direnv/
-result
-
-# OS
+/target
+**/*.rs.bk
 .DS_Store
 
-# Claude Code local settings
-.claude/settings.local.json
+# local secrets
+.env
 
-# Claude Code worktrees
-.claude/worktrees/
-
-# Cursor
-.cursor/
-
-# Screenshots
-screenshots/
+# simulator/QA capture evidence
+/screenshots/

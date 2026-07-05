@@ -1,0 +1,28 @@
+{
+  "description": "Long rambling whole-house walk (~1400 words / ~8k chars, exceeds the live-window budget): self-corrections, tangents, multiple systems/rooms, a dozen genuine items scattered throughout, several chatter distractors.",
+  "tags": ["long", "window-budget", "multi-pass"],
+  "items": [
+    { "kind": "todo", "text": "replace the GFCI outlet in the upstairs bathroom" },
+    { "kind": "decision", "text": "keep the original hardwood in the hallway instead of replacing it with LVP" },
+    { "kind": "note", "text": "attic insulation looks thin, R-19 at best, worth batting up before winter" },
+    { "kind": "safety", "text": "exposed wiring in the basement junction box needs a cover plate before anyone touches it" },
+    { "kind": "decision", "text": "going with a tankless water heater instead of repairing the old tank" },
+    { "kind": "price", "text": "roughly twelve hundred dollars for the water heater swap including venting changes" },
+    { "kind": "part", "text": "order a 40-amp double-pole breaker for the sub panel" },
+    { "kind": "todo", "text": "caulk the gap around the exterior sillplate on the west side" },
+    { "kind": "safety", "text": "deck stair handrail wobbles, tighten or replace the lag bolts" },
+    { "kind": "todo", "text": "get the roofer to look at curling shingles on the north slope" },
+    { "kind": "part", "text": "need a new flapper and fill valve for the downstairs toilet" },
+    { "kind": "todo", "text": "call the HVAC guy to check the furnace short cycling" }
+  ],
+  "contacts": [],
+  "distractors": [
+    "might grab a coffee before the next stop",
+    "traffic was brutal getting over here",
+    "the dog needs a vet appointment sometime",
+    "we'll see if it rains this weekend",
+    "reminds me of a job we did last year, different story though",
+    "mailbox post is leaning a little, needs to be reset in concrete"
+  ],
+  "expects_summary": true
+}

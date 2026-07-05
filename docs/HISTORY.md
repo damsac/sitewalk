@@ -120,7 +120,7 @@ commit history is grafted into this repo and browsable here:
 
 ```
 # Rebuild history is carried over intact (not copy-imported):
-git log --oneline <SITEWALK_MERGE_COMMIT_SHA>^2   # PLACEHOLDER — filled in Phase 2
+git log --oneline 86c16792f8aa602bc005812a3c78591221e65447^2   # 138 rebuild commits
 # The Rust workspace sits at the repo root after migration.
 ```
 
@@ -143,11 +143,11 @@ merge commit (branch history preserved) in **PR #152**.
    `Packages/MurmurCore/`) from the working tree — preserved in history only.
    Conceptually: *"pivot: retire the Swift app from the tree (Era I preserved in
    history)."* Its SHA gets recorded here in Phase 2:
-   `<PIVOT_COMMIT_SHA>` — **PLACEHOLDER**.
+   `7cc1c2428d6e8aa76da2b38cf4d28624bee56fa2`.
 2. sitewalk `main` is fetched as a remote and merged with
    `git merge --allow-unrelated-histories` — never a copy-import — so Era II's
    history is carried over intact. The merge commit's SHA:
-   `<SITEWALK_MERGE_COMMIT_SHA>` — **PLACEHOLDER**.
+   `86c16792f8aa602bc005812a3c78591221e65447`.
 3. The Rust workspace ends up at the repo root; `README.md` is replaced (draft at
    `docs/reunify/README.next.md`); sitewalk issue #2 is migrated here.
 4. `damsac/sitewalk` gets a pointer README and is archived (`gh repo archive`) —
@@ -157,10 +157,10 @@ merge commit (branch history preserved) in **PR #152**.
 
 | To see… | Do… |
 |---------|-----|
-| The Swift app as it lived | `git show <PIVOT_COMMIT_SHA>^:Murmur/…` (parent of the pivot commit) |
+| The Swift app as it lived | `git show 7cc1c2428d6e8aa76da2b38cf4d28624bee56fa2^:Murmur/…` (parent of the pivot commit) |
 | The pivot decision | `docs/superpowers/specs/2026-07-01-murmur-rebuild-vision-design.md` + `meta/CANON.md` |
-| The Rust rebuild's chapter-by-chapter history | `git log <SITEWALK_MERGE_COMMIT_SHA>^2` |
+| The Rust rebuild's chapter-by-chapter history | `git log 86c16792f8aa602bc005812a3c78591221e65447^2` |
 | The current product & workspace | repo root + `README.md` |
 
-*Placeholders marked `<…_SHA>` are filled in during Phase 2 once the pivot and
-unrelated-histories merge commits exist.*
+*The pivot and unrelated-histories merge commits above landed in Phase 2
+(2026-07-05); the SHAs are final.*

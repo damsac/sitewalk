@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Murmur Rebuild — UI Mocks</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .lead { max-width: 760px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 18px; margin-top: 8px; }
+  .card-link {
+    display: block; text-decoration: none; color: inherit;
+    background: #fff; border: 1px solid #d3d7dd; border-radius: 16px;
+    padding: 20px 22px;
+    box-shadow: 0 6px 18px -12px rgba(0,0,0,.3);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .card-link:hover { transform: translateY(-2px); box-shadow: 0 14px 26px -14px rgba(0,0,0,.35); }
+  .card-link .n { font-size: 12px; font-weight: 800; color: #c2410c; letter-spacing: .08em; text-transform: uppercase; }
+  .card-link h3 { margin: 6px 0 6px; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  .card-link p { margin: 0; font-size: 14px; color: #55606e; line-height: 1.5; }
+  .card-link .ab { display:inline-block; margin-top:10px; font-size:12px; font-weight:800; color:#2a323d; background:#eef0f3; border-radius:8px; padding:3px 9px; }
+  .block { margin: 40px 0; }
+  .block h2 { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 14px; }
+  .note {
+    background: #fbf6ee; border: 1px solid #e7dcc7; border-radius: 14px;
+    padding: 18px 20px; max-width: 820px; font-size: 14.5px; line-height: 1.6; color: #3f3a30;
+  }
+  .note h3 { margin: 0 0 6px; font-size: 15px; }
+  .note ul { margin: 6px 0 14px; padding-left: 20px; }
+  .note li { margin-bottom: 7px; }
+  .note b { color: #23201b; }
+  .swatch { display:inline-block; width:14px;height:14px;border-radius:4px;vertical-align:middle;margin:0 4px; border:1px solid rgba(0,0,0,.15);}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Murmur — Rebuild UI Mocks</h1>
+  <p class="sub lead">Static HTML/CSS mockups for the Murmur rebuild: AI meeting notes for blue-collar
+  field work. One button starts a site walk; the on-device agent then composes a report, todos, and
+  updated records. Not a chat app — no prompt box, no message thread. Every screen is rendered inside
+  a 390&times;844 phone frame. Dated 2026-07-01.</p>
+
+  <div class="block">
+    <h2>Screens</h2>
+    <div class="grid">
+      <a class="card-link" href="home.html">
+        <div class="n">01 · Two directions</div>
+        <h3>Home / Today</h3>
+        <p>The one big record button plus agent-composed content: open todos, latest report card, one
+          "needs your call" alert. Glanceable, not a feed.</p>
+        <span class="ab">A: Jobsite</span> <span class="ab">B: Paper</span>
+      </a>
+      <a class="card-link" href="recording.html">
+        <div class="n">02 · Two directions</div>
+        <h3>Active session</h3>
+        <p>Giant timer, de-emphasized live transcript, one huge stop control. Reads at arm's length in
+          sunlight.</p>
+        <span class="ab">A: Jobsite</span> <span class="ab">B: Paper</span>
+      </a>
+      <a class="card-link" href="processing.html">
+        <div class="n">03 · Jobsite</div>
+        <h3>Processing</h3>
+        <p>The ~30s of agent work, plus the offline variant ("finishes when you're back on signal").</p>
+        <span class="ab">Online + Offline states</span>
+      </a>
+      <a class="card-link" href="report.html">
+        <div class="n">04 · Jobsite</div>
+        <h3>Session report</h3>
+        <p>Readable write-up, extracted todos with trades/assignees, detected contacts, edit, and a
+          pinned SHARE bar.</p>
+      </a>
+      <a class="card-link" href="todos.html">
+        <div class="n">05 · Jobsite</div>
+        <h3>Todos / punch list</h3>
+        <p>Grouped by project with an Overdue bucket. Check-off, snooze. A foreman's list, not a
+          productivity app. (Tap a checkbox.)</p>
+      </a>
+      <a class="card-link" href="onboarding.html">
+        <div class="n">06 · Jobsite</div>
+        <h3>First run &amp; BYOK</h3>
+        <p>Friendliest possible AI-key setup for a non-technical user, plus a value-framed mic
+          permission ask. Welcome &rarr; connect &rarr; permission.</p>
+      </a>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2>Direction choice for screens 3–6</h2>
+    <div class="note">
+      <p style="margin-top:0">I built both <b>Jobsite</b> (<span class="swatch" style="background:#16181d"></span>dark,
+      <span class="swatch" style="background:#ff7a18"></span>safety-orange) and <b>Paper</b>
+      (<span class="swatch" style="background:#f6f2ea"></span>warm off-white,
+      <span class="swatch" style="background:#c2410c"></span>burnt-orange ink) for Home and Recording,
+      and chose <b>Jobsite</b> for screens 3–6. Why:</p>
+      <ul>
+        <li><b>Tool identity.</b> The brief asks for "DeWalt drill energy." Dark chassis + safety-orange
+          reads as equipment; the orange record bar looks like a physical trigger. That confidence is
+          the product's whole pitch versus SaaS note apps.</li>
+        <li><b>Affordance clarity.</b> On a busy jobsite, one saturated orange = "the action." A single
+          strong accent on a dark ground makes the primary control impossible to miss.</li>
+        <li><b>Honest caveat (why Paper still ships as A/B):</b> in direct overhead sun, a dark screen
+          mirrors glare and a light "paper" field with dark ink is often <i>more</i> legible. If field
+          testing shows glare is the dominant failure, Paper is the better production choice — the two
+          are the same components, only the palette differs, so switching is cheap. I'd validate this
+          outdoors before locking it.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2>UX problems noticed while mocking</h2>
+    <div class="note">
+      <h3>Onboarding / BYOK — the real risk</h3>
+      <ul>
+        <li><b>"API key" is a wall.</b> A landscaper does not have, and will not create, an OpenAI/
+          Anthropic account from a paste field. I reframed it as "connect the brain" and added a
+          deep-link button to the provider sign-up, but honestly a raw BYOK flow will still churn a
+          large share of this exact demographic. <b>Recommendation:</b> offer a managed/hosted key with
+          a small markup as the default path, and keep BYOK as an "advanced / bring your own" option.
+          The mock shows BYOK because it was the assigned hard problem — but the friendliest flow may be
+          to not require a key at all.</li>
+        <li><b>Where the key lives changes constantly.</b> A deep link to a provider's key page breaks
+          whenever they redesign. The "get help with this step" screenshot walkthrough will rot. This
+          argues again for hosting the key ourselves.</li>
+        <li><b>Billing anxiety is unaddressed.</b> "You pay pennies per report" is reassuring until the
+          first surprise bill. Needs an in-app spend meter and a hard cap the user sets during setup —
+          not mocked here but should exist before launch.</li>
+        <li><b>Validation can only prove format, not funds.</b> A key can be well-formed but have no
+          credit / hit a rate limit. The green check risks over-promising. Better: do one tiny live test
+          call during setup and report "working" only if it actually returns.</li>
+      </ul>
+      <h3>Recording &amp; sessions</h3>
+      <ul>
+        <li><b>The transcript is a trap.</b> Showing live text invites the user to read and "correct" it,
+          which fights the "don't watch this, keep working" goal. I de-emphasized and masked it, but it
+          may be worth hiding entirely behind a tap — presence of text implies you're meant to monitor it.</li>
+        <li><b>Accidental double-tap / pocket stops.</b> One button to start and stop means a bump can end
+          a session. Stop needs either a deliberate target (done here — full-width, distinct red) or a
+          confirm; I avoided a confirm because it adds friction, but this needs field testing.</li>
+        <li><b>Phone-away during processing.</b> If the user locks the phone mid-processing, on-device
+          transcription + LLM must survive backgrounding (iOS will suspend). The offline screen promises
+          "finishes later" — that promise requires real background/resume handling, or it's a lie.</li>
+        <li><b>Session labeling.</b> The mock shows a pre-filled label ("Site walk — Johnson"). In reality
+          the agent has to infer project/label after the fact, or the user must pick before recording
+          (friction, and they won't). Likely answer: record first, let the agent guess the project from
+          content, let the user correct on the report.</li>
+      </ul>
+      <h3>Home &amp; agent composition</h3>
+      <ul>
+        <li><b>"Needs your call" must be rare.</b> The alert banner is powerful precisely because it's
+          uncommon. If the agent surfaces a decision every session, it becomes noise and the whole
+          "only what matters" promise collapses. Needs a strict budget (≤1 alert, and only for genuine
+          money/schedule decisions).</li>
+        <li><b>Trust in extraction.</b> Auto-created todos/contacts with wrong assignees or hallucinated
+          people erode trust fast for this user. Edit affordances are everywhere in the report, but the
+          agent should lean toward under-extracting (fewer, confident items) over dumping everything.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

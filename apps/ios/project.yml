@@ -1,0 +1,55 @@
+name: SitewalkGallery
+# DEMO base spec — self-sufficient with zero setup: a clean checkout builds the
+# scripted DemoWalkEngine app from this file alone (no MurmurCoreFFI package, so
+# `#if canImport(MurmurCoreFFI)` is false and the real-core code compiles out).
+#
+#   xcodegen generate                 -> demo app (this spec)
+#   ./build-ffi.sh && ./generate.sh   -> upgrades to the REAL murmur-core engine
+#
+# The real-core build is opted into by ./generate.sh, which generates from
+# project-real.yml (this spec + the gitignored project.local.yml, which adds the
+# MurmurCoreFFI package dependency and the injected PPQ_API_KEY build setting).
+options:
+  bundleIdPrefix: com.damsac
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+targets:
+  SitewalkGallery:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Sources/App/Info.plist
+      properties:
+        # Literal build-variable reference — the real value is a build setting
+        # supplied by the gitignored project.local.yml and expanded by xcodebuild
+        # into the built app's Info.plist. This tracked value never holds a secret.
+        PPQ_API_KEY: "$(PPQ_API_KEY)"
+        CFBundleDisplayName: Sitewalk
+        UILaunchScreen: {}
+        NSMicrophoneUsageDescription: "Sitewalk records your walk-and-talk so it can turn it into paperwork."
+        NSSpeechRecognitionUsageDescription: "Sitewalk transcribes your walk on-device to build your document."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIAppFonts:
+          - Barlow-Regular.ttf
+          - Barlow-Medium.ttf
+          - Barlow-SemiBold.ttf
+          - Barlow-Bold.ttf
+          - Barlow-ExtraBold.ttf
+          - BarlowSemiCondensed-Medium.ttf
+          - BarlowSemiCondensed-SemiBold.ttf
+          - IBMPlexMono-Regular.ttf
+          - IBMPlexMono-Medium.ttf
+          - IBMPlexMono-SemiBold.ttf
+          - SourceSerif4-SemiBold.ttf
+          - SourceSerif4-Bold.ttf
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.damsac.sitewalk.gallery
+        CODE_SIGNING_ALLOWED: "NO"
+        TARGETED_DEVICE_FAMILY: "1"

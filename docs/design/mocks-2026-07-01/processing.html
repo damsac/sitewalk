@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Murmur — Processing</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+  <a class="backlink" href="index.html">&larr; All screens</a>
+  <h1>3 · Session ended — agent working</h1>
+  <p class="sub">Direction: <b>Jobsite</b>. The ~30s after tapping End. Left: normal online processing
+  with honest step labels. Right: the offline variant — the session is safe, work resumes on signal,
+  and the user is free to put the phone away.</p>
+
+  <div class="stage">
+
+    <!-- ONLINE PROCESSING -->
+    <div class="specimen">
+      <div class="tag">State · Working (online)</div>
+      <div class="phone jobsite">
+        <div class="screen">
+          <div class="statusbar"><span>7:26</span><span class="r">5G &#9646;&#9646;&#9646;&#9646; 82%</span></div>
+          <div class="body proc-screen">
+            <div class="spinner"></div>
+            <div class="proc-title">Writing up your session</div>
+            <div class="proc-sub">This takes about half a minute.<br>You can put your phone away.</div>
+
+            <div class="proc-steps">
+              <div class="proc-step done"><span class="dot">&#10003;</span> Transcribed 11 min</div>
+              <div class="proc-step active"><span class="dot">&#9679;</span> Pulling out todos &amp; people</div>
+              <div class="proc-step pending"><span class="dot"></span> Writing the report</div>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="caption"><b>Working:</b> honest, plain-language steps replace a mystery spinner.
+      "You can put your phone away" tells a busy foreman they're not on the hook to wait.</div>
+    </div>
+
+    <!-- OFFLINE -->
+    <div class="specimen">
+      <div class="tag">State · Offline</div>
+      <div class="phone jobsite">
+        <div class="screen">
+          <div class="statusbar"><span>7:26</span><span class="r">&#9888; No signal 82%</span></div>
+          <div class="body proc-screen">
+            <div style="font-size:64px;margin-bottom:8px">&#128190;</div>
+            <div class="proc-title">Session saved</div>
+            <div class="proc-sub">You're out of signal right now.<br>Murmur will finish the write-up
+              the moment you're back online — nothing is lost.</div>
+
+            <div class="offline-badge">
+              <span class="oi">&#128246;</span>
+              <div>Waiting for signal<br>
+                <span style="color:var(--muted);font-weight:600">Recording &amp; transcript are safe on this phone</span>
+              </div>
+            </div>
+
+            <div style="margin-top:26px;width:100%;padding:0 4px">
+              <button class="btn secondary">Back to Today</button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="caption"><b>Offline:</b> reassurance first. Big "Session saved", a clear promise it
+      finishes later, and an escape hatch back to Today. No error tone, no red.</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
