@@ -63,11 +63,19 @@ final class AppModel {
     /// When live, drive the STT path from a bundled fixture WAV instead of the
     /// mic (`wavwalk=1`, D7) — a mic-free way to exercise real whisper.
     private let wavFixture: Bool
+    /// Voice-processing A/B knob (Plan 08 Task 10): enable Apple's on-device
+    /// noise/echo suppression on the mic capture path. Sourced from the
+    /// `voiceproc=1` launch arg; only affects the live-mic `AudioCaptureSource`
+    /// (the WAV fixture already has clean PCM). Default off — the Task 12 SNR
+    /// eval decides the production default.
+    private let voiceProcessing: Bool
 
-    init(engine: WalkEngine? = nil, scripted: Bool = true, wavFixture: Bool = false) {
+    init(engine: WalkEngine? = nil, scripted: Bool = true, wavFixture: Bool = false,
+         voiceProcessing: Bool = false) {
         self.engine = engine ?? DemoWalkEngine()
         self.scripted = scripted
         self.wavFixture = wavFixture
+        self.voiceProcessing = voiceProcessing
     }
 
     // MARK: Trade switching (validation strategy: same bones, swappable template)
@@ -160,7 +168,7 @@ final class AppModel {
         }
         let audio: any PCMAudioSource = wavFixture
             ? WavFileAudioSource(pushSamples: onSamples)   // mic-free fixture (D7)
-            : AudioCaptureSource(pushSamples: onSamples)   // live mic
+            : AudioCaptureSource(pushSamples: onSamples, voiceProcessing: voiceProcessing) // live mic
         audioSource = audio
         audio.start()
     }

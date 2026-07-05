@@ -116,6 +116,7 @@ struct RootRouter: View {
                 live: Self.args.contains("live=1"),
                 wavwalk: Self.args.contains("wavwalk=1"),
                 demo: Self.args.contains("demo=1"),
+                voiceProcessing: Self.args.contains("voiceproc=1"),
                 autoflowRounds: Self.args
                     .first(where: { $0.hasPrefix("autoflow=") })
                     .flatMap { Int($0.dropFirst("autoflow=".count)) } ?? 0
@@ -131,7 +132,8 @@ struct AppRoot: View {
     private let autoflowRounds: Int
 
     @MainActor
-    init(live: Bool, wavwalk: Bool = false, demo: Bool, autoflowRounds: Int) {
+    init(live: Bool, wavwalk: Bool = false, demo: Bool, voiceProcessing: Bool = false,
+         autoflowRounds: Int) {
         self.live = live
         self.wavwalk = wavwalk
         self.autoflowRounds = autoflowRounds
@@ -143,7 +145,8 @@ struct AppRoot: View {
             initialValue: AppModel(
                 engine: resolveEngine(demo: demo),
                 scripted: !whisperWalk,
-                wavFixture: wavwalk
+                wavFixture: wavwalk,
+                voiceProcessing: voiceProcessing
             )
         )
     }
