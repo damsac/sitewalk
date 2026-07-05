@@ -1,6 +1,7 @@
 //! `WalkSession`: append/finish, the `LiveExtractor` actor, batched board
 //! events (Plan 07 D3/D7).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use harness::{LlmProvider, Memory, MemoryStore};
@@ -27,6 +28,14 @@ pub struct WalkSession {
     memory_store: Arc<dyn MemoryStore>,
     runtime_handle: tokio::runtime::Handle,
     template: Option<String>,
+    /// Count of STORE faults swallowed by fire-and-forget live ticks
+    /// (carry-note 4). A live pass that fails on the *model* is intentionally
+    /// swallowed (D9: `maybe_extract` returns `Ok(Failed)`, capture is safe);
+    /// this counts only genuine store faults (a poisoned lock, a sqlite/NotFound
+    /// error) that the tick would otherwise discard silently. Surfaced via
+    /// `tick_store_fault_count()` so the UI can show a "capture degraded" hint.
+    /// Never crashes the tick loop.
+    tick_store_faults: AtomicU64,
 }
 
 impl WalkSession {
@@ -51,16 +60,40 @@ impl WalkSession {
             memory_store,
             runtime_handle,
             template,
+            tick_store_faults: AtomicU64::new(0),
         })
+    }
+
+    /// Records a store fault a tick would otherwise swallow (carry-note 4).
+    /// Increments the queryable counter and logs to stderr. There is no logging
+    /// crate in this workspace (CI stays dependency-light / hermetic), so stderr
+    /// is the honest side channel and the counter is the queryable surface.
+    fn record_tick_fault(&self, context: &str) {
+        self.tick_store_faults.fetch_add(1, Ordering::Relaxed);
+        eprintln!(
+            "murmur-ffi: live tick store fault (session {}): {context}",
+            self.session_id
+        );
     }
 
     /// Re-queries the board and emits exactly one `BoardUpdated` snapshot —
     /// the shared tail of both a live-pass tick and the finish-time swap (D3).
     fn emit_board_snapshot(&self) {
         let Some(listener) = self.listener.lock().unwrap().clone() else { return };
-        let items = match self.store.lock().unwrap().list_items_for_session(&self.session_id) {
-            Ok(items) => items,
-            Err(_) => return,
+        // Don't panic across FFI on a poisoned lock (this is also called from
+        // finish()): count the degradation and skip the snapshot instead.
+        let items = match self.store.lock() {
+            Ok(store) => match store.list_items_for_session(&self.session_id) {
+                Ok(items) => items,
+                Err(e) => {
+                    self.record_tick_fault(&format!("list_items_for_session: {e}"));
+                    return;
+                }
+            },
+            Err(_) => {
+                self.record_tick_fault("store lock poisoned");
+                return;
+            }
         };
         let board_items = items.iter().map(convert::board_item).collect();
         listener.on_event(WalkEvent::BoardUpdated { items: board_items });
@@ -174,10 +207,26 @@ impl WalkSession {
                 let mut extractor = session.extractor.lock().await;
                 extractor.maybe_extract().await
             };
-            if let Ok(LiveExtractOutcome::Extracted { .. }) = outcome {
-                session.emit_board_snapshot();
+            match outcome {
+                Ok(LiveExtractOutcome::Extracted { .. }) => session.emit_board_snapshot(),
+                // Skipped (too little new transcript / not recording) and a
+                // model-side Failed pass (D9: offline/LLM-down) are swallowed by
+                // design — capture is safe and the next tick retries.
+                Ok(LiveExtractOutcome::Skipped | LiveExtractOutcome::Failed { .. }) => {}
+                // A genuine store fault — surfaced (carry-note 4) instead of
+                // silently discarded. Never crashes the tick loop.
+                Err(e) => session.record_tick_fault(&format!("maybe_extract: {e}")),
             }
         });
+    }
+
+    /// Number of store faults swallowed by fire-and-forget live ticks so far
+    /// (carry-note 4). A nonzero count means a tick's store access failed (a
+    /// poisoned lock, a sqlite/NotFound error) — never a model/offline pass,
+    /// which is swallowed by design (D9). The UI can poll this to surface a
+    /// "capture degraded" hint. Lock-free read.
+    pub fn tick_store_fault_count(&self) -> u64 {
+        self.tick_store_faults.load(Ordering::Relaxed)
     }
 
     /// D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
@@ -430,6 +479,50 @@ mod tests {
         // Store lock is never held across `maybe_extract`.
         session.clone().append_transcript("more talk".into());
         let _ = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+    }
+
+    #[tokio::test]
+    async fn tick_store_fault_is_counted_not_swallowed() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        // A real session for the WalkSession's own transcript writes...
+        let sid = store.start_session(None).unwrap().id;
+        let store = Arc::new(StdMutex::new(store));
+        let memory = Arc::new(StdMutex::new(Memory::default()));
+
+        // ...but the extractor points at a session that does not exist, so its
+        // tick's `get_session` returns NotFound — a genuine store fault that
+        // `maybe_extract` surfaces as `Err` (NOT a swallowed model failure).
+        let mut extractor = LiveExtractor::new(
+            Arc::new(MockProvider::new(vec![])),
+            store.clone(),
+            memory.clone(),
+            "ghost-session",
+        );
+        extractor.min_new_chars = 1;
+
+        let session = test_session(
+            sid.clone(),
+            store.clone(),
+            extractor,
+            Arc::new(MockProvider::new(vec![])),
+            memory,
+        );
+
+        assert_eq!(session.tick_store_fault_count(), 0);
+        session.clone().append_transcript("anything at all".into());
+
+        // Wait for the fire-and-forget tick to land.
+        for _ in 0..100 {
+            if session.tick_store_fault_count() > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            session.tick_store_fault_count(),
+            1,
+            "a store fault in the tick must be counted (surfaced), not silently swallowed"
+        );
     }
 
     #[tokio::test]
