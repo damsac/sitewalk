@@ -4,7 +4,7 @@
 
 **Goal:** Wire **real microphone audio** end-to-end so a spoken walk fills the live board on device: iOS mic capture → 16 kHz mono f32 PCM across FFI → the `crates/stt` `SttStream` (whisper) → finalized transcript text → the **EXISTING `WalkSession` append path** (`Store::append_transcript` → `LiveExtractor::maybe_extract` → `boardUpdated`) → DONE → the existing two-phase `finish()` → document in review. This is Plan 07 **D8 stage 2**, explicitly designed to be **additive**: a new `push_audio` FFI method, the text `append_transcript` path **untouched**.
 
-**What this plan is NOT.** It does not rewrite `append_transcript`, the `LiveExtractor` actor, the tick/finish serialization (D3b), the board-snapshot event, or `finish()`'s two-phase processing. It does not build model download/management UI, word-precise timestamps, trie/logit biasing, VAD, diarization, or Android. It wires the mic → STT → the append seam that already exists, plus the minimum event surface for the UI to show live transcript. See **Non-goals** for the full de-scope list.
+**What this plan is NOT.** It does not rewrite `append_transcript`, the `LiveExtractor` actor, the tick/finish serialization (D3b), the board-snapshot event, or `finish()`'s two-phase processing. It does not build model download/management UI, word-precise timestamps, trie/logit biasing, diarization, or Android. It wires the mic → STT → the append seam that already exists, plus the minimum event surface for the UI. **Part C** adds construction-site noise robustness (a VAD/no-speech gate, an Apple voice-processing knob, and a noise eval) — sequenced after the core wiring, off the milestone critical path. See **Non-goals** for the full de-scope list.
 
 **Hard dependencies (all DONE, main @ `8381d56`):** Plan 06 (`crates/stt`: `SttStream` caller-driven pump, `Decoder` seam + `ScriptedDecoder`, `WhisperDecoder` behind the `whisper` feature, `build_bias_prompt` ≤100 terms, `end()` flush). Plan 07 (`crates/ffi`: `MurmurEngine`, `WalkSession` with sync fire-and-forget `append_transcript` + tick, `boardUpdated` snapshots, two-phase `finish()`, key hygiene). Plan 06a (`source` column + atomic-at-finish swap). This plan sits on top of all three and reuses their seams verbatim.
 
@@ -45,8 +45,8 @@ Today the UI transcript comes from the Swift-side pump reading `src.chunks` and 
 Rationale: "what the UI sees live = finalized + optional greyed preview; what feeds extraction = finalized only" is Plan 06's design constant made concrete at the boundary. Extraction/append is unchanged — it still receives plain text via the existing internal call.
 
 ### D5. Model file lifecycle: **bundle `base.en` q5_1 for the milestone**; path flows through `EngineConfig`; load failure is a construction error (not a panic)
-- **Which model:** `ggml-base.en-q5_1.bin` (~57 MB, spike RTF 0.009 / WER 5.8% clean) — the spike verdict says base.en is sufficient. `small.en` (~182 MB) is a config swap later.
-- **Bundle vs download:** **bundle** for the milestone. Rationale: spec §1 is offline-first / bulletproof capture — a first-run download that can fail on a jobsite with no signal violates the core promise, and 57 MB is an acceptable IPA bump for a milestone. On-demand-resources / a download manager is the scalable answer and is **Deferred** (Plan 06 Deferred 5 — "model management is a shell concern").
+- **Which model:** `ggml-base.en-q5_1.bin` (**~60 MB** on disk — the `RESULTS.md` table + the actual file; the spike doc's line 216 says "~57 MB" and is **stale** — Task 8/README use 60 MB; spike RTF 0.009 / WER 5.8% clean) — the spike verdict says base.en is sufficient. `small.en` (~182 MB) is a config swap later, and the noise eval (Part C) may promote it (RTF headroom makes it ~free).
+- **Bundle vs download:** **bundle** for the milestone. Rationale: spec §1 is offline-first / bulletproof capture — a first-run download that can fail on a jobsite with no signal violates the core promise, and ~60 MB is an acceptable IPA bump for a milestone. On-demand-resources / a download manager is the scalable answer and is **Deferred** (Plan 06 Deferred 5 — "model management is a shell concern").
 - **Path flow:** `EngineConfig` gains `stt_model_path: Option<String>` (and `stt_flush_on_finish: bool`, D6). Swift resolves `Bundle.main.path(forResource: "ggml-base.en-q5_1", ofType: "bin")` and passes it. `begin_walk` reads it: under `#[cfg(feature="whisper")]` + `Some(path)` → `SttStream::with_model`; else `None` (text path).
 - **Load failure is fallible, never a panic:** a missing/corrupt model must NOT `expect()`-crash the host (Plan 07's whole finish-degrade ethos). This rides the **fallible-constructor carry-forward**: when `begin_walk` becomes `Result`, a `SttStream::with_model` error propagates as `Err`. Until then, Task 5 stores `stt: None` on load failure and `log`s the degrade (the walk falls back to text-only / no audio ingest rather than crashing). Either way: **no unwind across FFI.**
 - **CI stays hermetic:** the model file is never referenced by `cargo test`; `with_model` is `#[cfg(feature="whisper")]`; the whisper feature is off in the workspace test build.
@@ -71,26 +71,34 @@ crates/
   ffi/
     Cargo.toml                 # MODIFY: stt path dep (always) + `whisper` feature → stt/whisper
     src/
-      engine.rs                # MODIFY: EngineConfig gains stt_model_path, stt_flush_on_finish
-      session.rs               # MODIFY: WalkSession.stt: Option<Arc<SttStream>> + pump thread;
-                               #         push_audio(); finish() flush; bias-terms assembly
+      engine.rs                # MODIFY: EngineConfig + MurmurEngine gain stt_model_path, stt_flush_on_finish
+      session.rs               # MODIFY: WalkSession.stt + pump thread; push_audio(); finish() flush;
+                               #         cancel() (stop pump + tombstone); bias-terms assembly
       events.rs                # MODIFY: WalkEvent.TranscriptCommitted / TranscriptPreview
       convert.rs               # (no change expected — segments don't cross FFI)
     tests/
       audio_pump_e2e.rs        # NEW: push_audio → pump → append → boardUpdated + transcript events
+  stt/                         # Part C (Task 11):
+    src/vad.rs                 # NEW: energy/VAD pre-gate (pure, hermetic)
+    src/decoder.rs             # MODIFY: RawSegment gains no_speech_prob (default 0.0; ScriptedDecoder sets it)
+    src/finalize.rs            # MODIFY: drop segments above the no_speech_prob threshold
+    src/{lib.rs,whisper.rs}    # MODIFY: SttConfig thresholds; WhisperDecoder populates no_speech_prob (cfg)
+  murmur-core/
+    src/store/sessions.rs      # MODIFY (if needed): Store::abandon_session — tombstone a discarded walk (issue #3)
 apps/ios/
   Sources/Engine/
-    AudioCaptureSource.swift   # NEW: AVAudioEngine tap → 16kHz mono f32 → session.pushAudio
+    AudioCaptureSource.swift   # NEW: AVAudioEngine tap → 16kHz mono f32 → session.pushAudio; voice-proc knob (Task 10)
     WavFileAudioSource.swift   # NEW: bundled 16kHz WAV → push_audio (scripted-audio test path, D7)
     TranscriptSource.swift     # MODIFY: audio-source protocol note (STT now Rust-side, not SFSpeech)
-    MurmurEngine.swift         # MODIFY: pushAudio passthrough; transcript events → UI; model path
+    MurmurEngine.swift         # MODIFY: pushAudio + cancel passthrough; transcript events → UI; model path
   Sources/App/
-    AppModel.swift             # MODIFY: live=1 uses the audio path; transcript from Rust events
-    GalleryApp.swift           # MODIFY: EngineConfig with stt_model_path + flush toggle
+    AppModel.swift             # MODIFY: live=1 uses the audio path; transcript from Rust events; discardWalk → cancel()
+    GalleryApp.swift           # MODIFY: EngineConfig with stt_model_path + flush toggle + voiceproc arg
   Packages/MurmurCoreFFI/
-    Resources/ggml-base.en-q5_1.bin   # NEW (gitignored large binary; provisioned by build-ffi.sh doc)
+    Resources/ggml-base.en-q5_1.bin   # NEW (~60 MB, gitignored large binary; provisioned by build-ffi.sh doc)
   project.yml                  # MODIFY: bundle the model resource; whisper build via build-ffi.sh
   build-ffi.sh                 # MODIFY: build crates/ffi with `--features whisper`
+spikes/stt-whisper/            # Part C (Task 12): noise SNR sweep harness + RESULTS.md append
 README.md                      # MODIFY: plan-series line
 ```
 
@@ -162,6 +170,13 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 - [ ] **Step 2 — run to see failure** (event cases don't exist).
 - [ ] **Step 3 — implement:**
   - `events.rs`: extend `#[derive(uniffi::Enum)] WalkEvent` with `TranscriptCommitted { text: String }` and `TranscriptPreview { text: String }`. (The existing `BoardUpdated { items }` case is unchanged.)
+  - **REQUIRED — fix the three now-refutable bindings in `session.rs` (E0005 or this task won't compile):** adding cases to `WalkEvent` makes every irrefutable single-variant destructure a **refutable** pattern, a hard compile error. Three existing test bindings use `let WalkEvent::BoardUpdated { items } = event;` — at **`session.rs:371`, `:411`, and `:475`** (verified against source). Rewrite each to a `match`/`if let`, e.g.:
+    ```rust
+    let WalkEvent::BoardUpdated { items } = event else {
+        panic!("expected BoardUpdated, got {event:?}");
+    };
+    ```
+    (or `match event { WalkEvent::BoardUpdated { items } => { … }, other => panic!("…{other:?}") }`). The `:475` site is inside a `while let Ok(event) = rx.try_recv()` loop asserting no empty board — there it must **skip** non-`BoardUpdated` events (transcript events may now arrive on the same channel) rather than panic: `if let WalkEvent::BoardUpdated { items } = event { assert!(!items.is_empty(), …) }`. Do this rewrite in the SAME commit as the enum change so the crate never lands in a non-compiling state.
   - `session.rs`: in the pump loop, after collecting finalized segments, emit **one** `TranscriptCommitted { text: joined_finalized }` via the listener (before/independent of the board tick — the tick is async and fires on `runtime_handle`; the transcript event is synchronous from the pump). After each poll, also emit `TranscriptPreview { text: stt.preview_tail() }`.
   - **Swift enum exhaustiveness:** adding cases forces `BoardListener.onEvent`'s `switch` to handle them (Task 7). Note this in the plan so the Swift change is coordinated — the FFI enum and the Swift adapter change together.
 - [ ] **Step 4 — verify:** `cargo test -p ffi session` green.
@@ -169,22 +184,26 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 
 ---
 
-### Task 4: `finish()` flush + bias-terms assembly at `begin_walk`
+### Task 4: `finish()` flush + `cancel()` (pump-stop, no worker-block) + bias-terms assembly
 
-**Files:** modify `crates/ffi/src/session.rs`.
+**Files:** modify `crates/ffi/src/session.rs`, `crates/ffi/src/engine.rs` (a `cancel_walk` export or `WalkSession::cancel`), and — if the store lacks an "abandon" primitive — `crates/murmur-core/src/store/sessions.rs`.
 
-**Goal:** On DONE, flush the final utterance through the append path (default, toggle-gated) **before** the existing two-phase process; assemble the ≤100-term bias vocabulary at `begin_walk`.
+**Goal:** On DONE, flush the final utterance through the append path (default, toggle-gated) **before** the existing two-phase process. On DISCARD, a `cancel()` path stops the pump **and** tombstones the session (closing both the leaked-thread leak and issue #3's SQLite zombie). Neither path may block a tokio worker on `join()`. Assemble the ≤100-term bias vocabulary at `begin_walk`.
 
 - [ ] **Step 1 — failing tests** (`session.rs` tests):
   - `finish_flushes_the_final_utterance`: a `ScriptedDecoder` `SttStream` holds a final buffered utterance that only `end()` finalizes; `push_audio` then `finish()` — assert the flushed final words reached `append_transcript` (visible in the transcript / a `TranscriptCommitted` event) **before** `process()` ran, and the returned `DocumentPayload` reflects the post-flush transcript. With `flush_on_finish = false`, assert the final held utterance is NOT flushed (speed path).
+  - `cancel_stops_the_pump_and_tombstones_the_session`: begin an audio session (test-ctor with a `ScriptedDecoder` `SttStream`), `push_audio`, then `cancel()`. Assert: (a) the pump thread has exited (a subsequent `push_audio` does not resurrect it / no new `TranscriptCommitted` arrives); (b) the session is no longer an open `Recording` row — `store.get_session(sid)` reflects the tombstoned/abandoned status (issue #3). No panic, idempotent (a second `cancel()`, or `cancel()` after `finish()`, is a harmless no-op).
   - `bias_terms_from_memory_vocabulary`: a helper `collect_bias_terms(&Memory, template)` returns `memory.section_texts("vocabulary")` (+ optional seed), capped at 100.
 - [ ] **Step 2 — run to see failure.**
 - [ ] **Step 3 — implement:**
-  - **Pump stop + flush in `finish()`:** at the top of `finish()` (before or right after acquiring the extractor mutex `_tick_guard`), stop the pump thread (set `stop`, notify, `join`). Then, if `stt.is_some() && flush_on_finish`, call `stt.end()`; for each finalized segment, write it via a **direct `Store::append_transcript`** (a scoped lock) so the flushed text is part of the transcript `process()` reads. **Do NOT** route the flush through the async tick (we already hold the extractor mutex for D3b — a tick would deadlock on it); the flushed text is caught by `process()`'s authoritative extraction anyway, and optionally emit a final `TranscriptCommitted` for the UI. Ordering: stop pump → flush → `end_and_record_session` → `process()`. The existing degrade paths (empty transcript, offline) are unchanged.
+  - **Shared `stop_pump` helper (fixes finding 3 — never `join()` on a tokio worker):** the pump thread's `poll()` runs a long **blocking** Metal decode; a bare `.join()` inside the `#[uniffi::export(async_runtime="tokio")] async fn finish()` would **block a multi-thread tokio worker** for the duration of an in-flight decode (bounded but real under sim-CPU/thermal). So `stop_pump` sets the `stop` flag + notifies the Condvar, then performs the `join()` via **`tokio::task::spawn_blocking(move || handle.join()).await`** — moving the wait onto tokio's blocking pool, off the async workers. Chosen over signal-and-detach because it gives a **deterministic "pump fully stopped before we touch `SttStream::end()`/`process()`"** guarantee (no detached thread can call `append_transcript` mid-swap); the cost is one blocking-pool task, which is exactly what that pool is for. `cancel()` (sync, see below) uses the plain thread `join()` directly — it is not on a tokio worker.
+  - **`finish()` flush:** after acquiring the extractor mutex `_tick_guard`, `stop_pump().await`. Then, if `stt.is_some() && flush_on_finish`, call `stt.end()`; for each finalized segment, write it via a **direct `Store::append_transcript`** (a scoped lock) so the flushed text is part of the transcript `process()` reads. **Do NOT** route the flush through the async tick (we hold the extractor mutex for D3b — a tick would deadlock on it); the flushed text is caught by `process()`'s authoritative extraction anyway, and optionally emit a final `TranscriptCommitted` for the UI. Ordering: stop pump → flush → `end_and_record_session` → `process()`. Existing degrade paths (empty transcript, offline) unchanged.
+  - **`cancel()` — one API, both leaks (finding 2 + issue #3):** `#[uniffi::export] pub fn cancel(self: Arc<Self>)` (sync — a discard is instant, no async needed). It: (1) signals the pump `stop` + notifies, then `join`s the thread **directly** (this is a plain FFI thread, not a tokio worker — a direct join is correct here; the decode is bounded and discard is user-initiated). (2) Tombstones the session in the store: call the store's abandon primitive — if `Store` already exposes one (Plan 03 tombstone support), use it; **if not, add `Store::abandon_session(id)`** to `sessions.rs` (transition a `Recording` session to a tombstoned/`Abandoned` terminal status via the existing tombstone columns, mirroring `end_and_record_session`'s shape) — this is the store-side fix for issue #3 (discarded walks currently leak zombie `Recording` rows). (3) Drop the `SttStream`/listener so the session's `Arc` cycle (the pump held its own `Arc<WalkSession>`) is broken and the object can free. Idempotent: guard on "pump already stopped / session already terminal." **Wire into Swift `AppModel.discardWalk()`** (Task 7) — today it only cancels Swift tasks and never tells Rust, which is exactly why the thread + the SQLite row leak.
+  - **Arc-cycle note:** the pump thread owns an `Arc<WalkSession>` (to call `append_transcript`), so a session is never freed until the pump exits. `finish()` and `cancel()` are therefore the ONLY two exits; both must stop the pump. A walk that is neither finished nor cancelled (app killed mid-walk) leaks only until process death — acceptable, but the `cancel()` wiring in `discardWalk` closes the common case.
   - **Bias terms:** add `fn collect_bias_terms(memory: &Memory, template: Option<&str>) -> Vec<String>` (read `section_texts("vocabulary")`, map to owned, optional per-template seed, truncate to `SttConfig::default().max_bias_terms`). `begin_walk` (Task 5) uses it when building the real stream.
   - `flush_on_finish` is read from the field set in Task 1 (from `EngineConfig`).
-- [ ] **Step 4 — verify:** `cargo test -p ffi session` green (flush both directions; existing finish degrade tests unaffected).
-- [ ] **Step 5 — commit:** `feat(ffi): finish() flushes the final STT utterance (toggle); bias terms from memory vocabulary`
+- [ ] **Step 4 — verify:** `cargo test -p ffi session` green (flush both directions; cancel stops pump + tombstones; existing finish degrade tests unaffected). If `abandon_session` was added, `cargo test -p murmur-core sessions` green.
+- [ ] **Step 5 — commit:** `feat(ffi): finish() flush + cancel() (stop pump, tombstone session — fixes thread leak + issue #3); bias terms`
 
 ---
 
@@ -199,7 +218,7 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
   - Env+feature gated real-model smoke (`#[ignore]`, like `stt`'s `real_model_decodes_silence` and `anthropic_smoke`): with `--features whisper` + `MURMUR_WHISPER_MODEL` set, `begin_walk` with that path builds a session whose `stt` is `Some`, `push_audio(silence)` + a pump pass returns without error. CI never runs it.
 - [ ] **Step 2 — run to see failure.**
 - [ ] **Step 3 — implement:**
-  - `begin_walk` reads `self.config`-carried `stt_model_path` (thread the two new config values onto `MurmurEngine` at construction — store `stt_model_path: Option<String>` and `stt_flush_on_finish: bool` on the engine, set in `new`/`with_providers`).
+  - **Thread the two config values onto `MurmurEngine` WITHOUT breaking `with_providers` (finding 4).** `MurmurEngine` gains `stt_model_path: Option<String>` and `stt_flush_on_finish: bool` fields. `new(config)` sets them from `config`. But **`with_providers` (`engine.rs:129`) takes no `EngineConfig`** and is called by every existing mock-provider test — changing its signature would break all of them. So `with_providers` keeps its current parameter list and **initializes the two fields to defaults**: `stt_model_path: None`, `stt_flush_on_finish: true`. Rationale: mock-provider tests exercise the **text path or an injected `ScriptedDecoder` `SttStream`** (via the Task 2 test-only audio-session constructor), never a real model file — so `None` is correct for them and no call site changes. Whisper-path pump tests get their `SttStream` from the test constructor, not from `with_providers`. (If a test ever needs a non-default flush toggle, add a narrow `#[doc(hidden)] with_providers_stt(..)` variant rather than widening the common one — do NOT thread config into `with_providers`.)
   - Build the stream:
     ```rust
     let bias = collect_bias_terms(&self.memory.lock().unwrap(), Some(&template));
@@ -243,6 +262,7 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 
 - [ ] **Step 1 — adapter surface:**
   - Add `func pushAudio(_ samples: [Float])` to the `WalkEngine` protocol (`WalkEngine.swift`) — the parallel to `append(transcript:)` for the audio path. `DemoWalkEngine` implements it as a no-op (scripted text demo needs no audio).
+  - Add `func cancel()` to the `WalkEngine` protocol (the discard path, Task 4 finding 2). `MurmurEngine.cancel` → `session?.cancel()` then nils `session`/`continuation` (like `finish()` does). `DemoWalkEngine.cancel` is a no-op.
   - `MurmurEngine.pushAudio` → `session?.pushAudio(samples: samples)`.
   - `BoardListener.onEvent`: handle the new cases. `boardUpdated` unchanged. Add `case .transcriptCommitted(let text)` and `case .transcriptPreview(let text)` → hop to `@MainActor` and yield new `WalkEvent` cases up to `AppModel`.
   - Extend the Swift-side `WalkEvent` enum (`WalkEngine.swift`) with `case transcriptCommitted(String)` and `case transcriptPreview(String)` so the app-facing stream carries them.
@@ -250,6 +270,7 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
   - `startWalk()`: when `!scripted` (i.e. `live=1`), use `AudioCaptureSource` instead of `SpeechSource`; its `pushSamples` closure calls `engine.pushAudio(_:)`. When `scripted`, keep `ScriptedSource` (text) → `engine.append(transcript:)` unchanged (demo path).
   - The event loop gains: `case .transcriptCommitted(let text): self.transcript += text` (the transcript now originates from Rust for the audio path) and `case .transcriptPreview(let text): self.previewTail = text` (a new optional `@Published`-style property; render greyed — **nice-to-have**, D4). Do **not** double-count: in the audio path, the Swift pump no longer appends transcript from `src.chunks` (there are no text chunks — `AudioCaptureSource` yields PCM, not text). Keep the `src.chunks` text-append **only** for the scripted path.
   - **Guard the two paths cleanly:** scripted → text via `append`; live → PCM via `pushAudio` + transcript via events. No path feeds both.
+  - **Wire `discardWalk()` to `cancel()` (finding 2):** `AppModel.discardWalk()` today only cancels the Swift `source`/tasks and resets state — it never tells Rust, leaking the pump thread AND a zombie `Recording` row (issue #3). Add `engine.cancel()` (and `source?.stop()` for `AudioCaptureSource`) to `discardWalk()` so the Rust session is stopped + tombstoned. Keep the existing state reset.
 - [ ] **Step 3 — model path + config** (`GalleryApp.swift`): in `resolveEngine`, set `stt_model_path` = `Bundle.main.path(forResource: "ggml-base.en-q5_1", ofType: "bin")` and `stt_flush_on_finish: true` on `EngineConfig`. If the model resource is missing, `stt_model_path: nil` → the walk degrades to text-only (no crash). Update the `EngineConfig(...)` literal for the new fields.
 - [ ] **Step 4 — verify (build):** `xcodebuild … build` compiles with the new events, adapter methods, and config fields.
 - [ ] **Step 5 — commit:** `feat(ios): MurmurEngine pushAudio + transcript events → UI; live=1 uses whisper audio; model path`
@@ -263,7 +284,7 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 **Goal:** Build the FFI static libs **with `--features whisper`** (pulls whisper-rs + vendored whisper.cpp + Metal), regenerate bindings, bundle the model file, and link it — while `cargo test --workspace` stays feature-off/hermetic.
 
 - [ ] **Step 1 — `build-ffi.sh`:** add `--features whisper` to both `cargo build -p ffi --release --target aarch64-apple-ios-sim` and `…-ios` invocations. whisper.cpp needs cmake/clang (already in the dev shell via Plan 06 Task 1) — the script already sets `SDKROOT`/system-Xcode CC for the iOS cross-link; confirm the metal shaders compile for the iOS SDK (whisper-rs-sys vendored build). If the metal build needs an SDK flag, add it here (document). The bindgen step is unaffected (it reads the built library).
-- [ ] **Step 2 — bundle the model:** document in `build-ffi.sh` / `MurmurCoreFFI/README.md` how to fetch `ggml-base.en-q5_1.bin` (MIT, `huggingface.co/ggerganov/whisper.cpp`) into `Resources/` (gitignored — large binary, like the xcframework). `project.yml`: add the `Resources/` model file to the app target's `resources:` (or the `MurmurCoreFFI` package resources) so `Bundle.main.path(forResource:)` resolves at runtime. Keep `CODE_SIGNING_ALLOWED: NO` for sim.
+- [ ] **Step 2 — bundle the model:** document in `build-ffi.sh` / `MurmurCoreFFI/README.md` how to fetch `ggml-base.en-q5_1.bin` (~60 MB, MIT, `huggingface.co/ggerganov/whisper.cpp`) into `Resources/` (gitignored — large binary, like the xcframework). `project.yml`: add the `Resources/` model file to the app target's `resources:` (or the `MurmurCoreFFI` package resources) so `Bundle.main.path(forResource:)` resolves at runtime. Keep `CODE_SIGNING_ALLOWED: NO` for sim.
 - [ ] **Step 3 — verify:** run `apps/ios/build-ffi.sh` (produces whisper-enabled libs + bindings + xcframework); `cd apps/ios && xcodegen generate && xcodebuild … build` links; **crucially** confirm `nix develop -c cargo test --workspace` (repo root, feature OFF) still green — the app build's `--features whisper` must not leak into the workspace test invocation.
 - [ ] **Step 4 — commit:** `build(ios): FFI built with whisper feature; bundle base.en model; xcframework wired`
 
@@ -283,19 +304,66 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 
 ---
 
-## Part C — Docs & final review
+## Part C — Construction-site noise robustness (dam addendum; sequence AFTER core wiring — the milestone gate at Task 9.4 does not move)
 
-### Task 10: Docs + independent whole-artifact review
+> Whisper's failure mode in machinery-only audio is **fluent hallucination** — it invents plausible text from a jackhammer/generator drone. That directly violates product rule **R3 (under-extract, never invent)**. These three tasks harden the noisy-jobsite case. They are separable and land after Tasks 1–9; none is on the critical path to the "real voice walk" milestone.
+
+### Task 10: Swift capture — Apple voice processing / Voice Isolation as an A/B config knob
+
+**Files:** modify `apps/ios/Sources/Engine/AudioCaptureSource.swift`, `GalleryApp.swift`.
+
+**Goal:** Make Apple's on-device noise/echo suppression available on the capture path, as a **toggle**, because aggressive suppression can *hurt* whisper (spectral artifacts) as easily as help — the choice is deferred to the Task 12 noise eval, not decided here.
+
+- [ ] **Step 1 — implement the knob:** on the `AVAudioEngine` input node, gate `try inputNode.setVoiceProcessingEnabled(true)` behind a config flag (e.g. `voiceProcessing: Bool` on the capture source, sourced from a launch arg `voiceproc=1` and/or `EngineConfig`). Document the alternative system route (AVAudioSession input mode / the OS mic-mode "Voice Isolation" the user picks in Control Center) in a comment — that route is user-controlled, not app-set, so the app knob is `setVoiceProcessingEnabled`. Note the format caveat: enabling voice processing can change the node's output format — re-derive the `AVAudioConverter` input format after toggling.
+- [ ] **Step 2 — acceptance = BOTH paths runnable, decision deferred:** verify the walk runs with the knob **on** and **off** (no crash, PCM still flows at 16 kHz mono f32). Do **not** pick a default here — Task 12's SNR curves decide it. Record both as runnable in the commit message.
+- [ ] **Step 3 — verify (build + a smoke walk each way):** `xcodebuild … build`; a `wavwalk=1` run with `voiceproc=1` and without, both reach the board.
+- [ ] **Step 4 — commit:** `feat(ios): Voice Isolation / voice-processing capture knob (A/B; default deferred to noise eval)`
+
+---
+
+### Task 11: Rust VAD / no-speech gating — stop machinery-only hallucination (R3)
+
+**Files:** modify `crates/stt/src/` (a new `vad.rs` pre-gate + hooks in `lib.rs`/`chunk.rs`; extend `decoder.rs`'s `RawSegment` + `finalize.rs`); hermetic tests throughout.
+
+**Goal:** Gate noise-only audio out of the committed transcript by **two** independent signals, both hermetic-testable with `ScriptedDecoder` + synthetic PCM (no model, no feature):
+- **(a) Energy/VAD pre-gate (before the `Chunker`/decode):** a cheap RMS-energy (and optionally zero-crossing) gate that drops windows below a speech threshold so whisper never decodes pure silence/drone. Pure Rust, no deps. Testable: synthetic low-energy noise PCM → no window decoded → no output.
+- **(b) `no_speech_prob` post-check (in the `Finalizer`):** whisper emits a per-segment no-speech probability; segments above a threshold are discarded before finalize. **This requires a Plan-06 crate change:** `RawSegment` (`decoder.rs`) currently carries only `start_cs/end_cs/text` — add `no_speech_prob: f32` (default `0.0`; `ScriptedDecoder` sets it per script entry; `WhisperDecoder` populates it from `state`). The `Finalizer::ingest` drops words from segments whose `no_speech_prob` exceeds the config threshold. Both thresholds live in `SttConfig` (with measured defaults from Task 12; conservative defaults until then).
+
+- [ ] **Step 1 — failing tests** (hermetic): (i) `vad_gate_drops_low_energy_windows` — synthetic noise PCM below threshold yields no decode/no output, speech-energy PCM passes through; (ii) `high_no_speech_prob_segment_is_not_finalized` — a `ScriptedDecoder` segment with `no_speech_prob: 0.95` produces **no** committed words, while a `0.05` segment does; (iii) append-only/dedup contracts (Plan 06) still hold with the new field.
+- [ ] **Step 2 — run to see failure.**
+- [ ] **Step 3 — implement:** `RawSegment.no_speech_prob` (additive, defaulted); `WhisperDecoder` populates it (`#[cfg(feature="whisper")]`); `vad.rs` RMS gate wired ahead of the `Chunker` (or in `SttStream::poll` before handing windows to decode); `Finalizer` no-speech post-check; `SttConfig` thresholds. **Keep hermetic:** the VAD is pure; the `no_speech_prob` field defaults so all existing Plan-06 tests and `cargo test --workspace` stay green with the feature off.
+- [ ] **Step 4 — verify:** `cargo test -p stt` (feature off) green incl. the new gates; `cargo test -p stt --features whisper` compiles; `cargo test --workspace` still hermetic-green.
+- [ ] **Step 5 — commit:** `feat(stt): energy/VAD pre-gate + no_speech_prob post-check — no machinery hallucination (R3)`
+
+---
+
+### Task 12: Noise eval — SNR sweep → WER curves → base.en vs small.en decision
+
+**Files:** extend `spikes/stt-whisper/` harness (or a note + fixtures in `crates/evals/`); a `docs/` results append.
+
+**Goal:** Decide, with data, (a) whether base.en survives jobsite noise or small.en should be promoted, and (b) the Task 10 voice-processing default and Task 11 thresholds. **Not hermetic / not CI** — this is a manual measurement harness (needs models + audio), like the original spike.
+
+- [ ] **Step 1 — noise corpus:** mix real construction noise (jackhammer, circular saw, generator, wind — public corpora, e.g. ESC-50/FSD50K/freesound; cite licenses) into the spike's clean test speech at several SNRs (e.g. +20, +10, +5, 0 dB).
+- [ ] **Step 2 — run the sweep:** for base.en and small.en, at each SNR, with voice-processing-simulated vs raw (or note it's device-only), produce **WER curves** and a hallucination rate (invented-token count on noise-only clips — the R3 metric).
+- [ ] **Step 3 — decide + document:** append results to `spikes/stt-whisper/RESULTS.md` (or a new `docs/research/` note): the base-vs-small call (RTF headroom means small.en is ~free if WER justifies it — D5), the voice-processing default (Task 10), and the VAD/no-speech thresholds (Task 11). Feed the chosen model back to D5/Task 8's bundled file if it changes.
+- [ ] **Step 4 — commit:** `docs(stt): construction-noise SNR sweep — WER curves, model + threshold decisions`
+
+---
+
+## Part D — Docs & final review
+
+### Task 13: Docs + independent whole-artifact review
 
 **Files:** modify `README.md`; review across the whole diff.
 
 - [ ] **Step 1 — README:** plan-series line `… 07 FFI bridge, 08 STT stage-2 (mic → whisper → append)`.
-- [ ] **Step 2 — full verification:** `nix develop -c cargo test --workspace` (feature OFF, hermetic) + `cargo clippy --workspace --all-targets` (zero warnings) + `cargo build -p ffi --features whisper` + `cargo clippy -p ffi --features whisper --all-targets` + the iOS build + the Task 9 sim/device flow.
+- [ ] **Step 2 — full verification:** `nix develop -c cargo test --workspace` (feature OFF, hermetic) + `cargo clippy --workspace --all-targets` (zero warnings) + `cargo build -p ffi --features whisper` + `cargo clippy -p ffi --features whisper --all-targets` + `cargo test -p stt` (incl. the new VAD/no-speech gates) + the iOS build + the Task 9 sim/device flow.
 - [ ] **Step 3 — independent whole-artifact review** (CANON: "caught a real cross-module issue in every plan — never skip it"; this is a separate agent from the builder, per MEMORY "independent final review has caught a real issue 9/9 times"). Read the diff `stt → crates/ffi → apps/ios` as one artifact and specifically re-check:
-  - **Threading/locks:** `SttStream::poll()` releases its engine/input locks before `append_transcript` runs (no lock inversion, D2); the pump thread is `join`ed before `finish()`'s `process().await` (no orphan thread mutating the board mid-swap); a pump-triggered tick still queues behind `finish()`'s held extractor mutex (D3b intact).
-  - **Hermetic CI:** `cargo test --workspace` compiles and passes with `whisper` OFF; no test references a model file; `with_model` is fully `#[cfg(feature="whisper")]`.
+  - **Threading/locks:** `SttStream::poll()` releases its engine/input locks before `append_transcript` runs (no lock inversion, D2); the pump is stopped via `spawn_blocking(join)` in `finish()` (Task 4) so **no tokio worker is blocked** on an in-flight decode; a pump-triggered tick still queues behind `finish()`'s held extractor mutex (D3b intact).
+  - **Discard/cancel path (finding 2 + issue #3):** `AppModel.discardWalk()` calls `engine.cancel()`; `WalkSession::cancel()` stops+joins the pump thread (no leak) AND tombstones the session (`abandon_session` / store tombstone — no zombie `Recording` row); `cancel()` is idempotent and safe after `finish()`; the pump's `Arc<WalkSession>` cycle is broken so the object frees. Confirm a discarded walk leaves neither a live thread nor an open session row.
+  - **Hermetic CI:** `cargo test --workspace` compiles and passes with `whisper` OFF; no test references a model file; `with_model` and `WhisperDecoder`'s `no_speech_prob` population are fully `#[cfg(feature="whisper")]`; `RawSegment.no_speech_prob` defaults so Plan-06 tests are unbroken.
   - **No panic across FFI:** a bad/missing model path degrades (or returns `Err` via the fallible constructor) — never `expect()`; a decode error in the pump is logged and skipped, not fatal.
-  - **Finalized-only extraction:** only finalized text reaches `append_transcript`; `preview_tail` is never persisted/extracted; the scripted text path and the audio path never double-feed the transcript.
+  - **Finalized-only extraction / R3:** only finalized text reaches `append_transcript`; `preview_tail` is never persisted/extracted; VAD/no-speech gating drops machinery-only audio before it can hallucinate into the committed stream; the scripted text path and the audio path never double-feed the transcript.
   - **Key hygiene:** the model-load log line and any new `Debug` never print `api_key`.
   - **Additivity:** the text `append_transcript` path is byte-for-byte unchanged; a text-only (`stt: None`) session behaves exactly as Plan 07 shipped.
 - [ ] **Step 4 — commit:** `docs: plan 08 done — STT stage-2 mic→whisper→append wired`
@@ -307,7 +375,7 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 1. **Model download / on-demand resources / model-selection UI** — bundle base.en for the milestone (D5); fetching/storage/base-vs-small selection is a shell concern (Plan 06 Deferred 5).
 2. **Word-precise timestamps** — v1 segment-coarse time (Plan 06 Deferred 4); the coarse-seam fallback's accuracy fix (ROADMAP §2) is a follow-up.
 3. **Trie / logit-bias hotword decoder** — v1 is `initial_prompt` injection (Plan 06 Deferred 3).
-4. **VAD-gated decoding, battery/thermal auto-tuning, adaptive chunk/model** — Plan 06 Deferred 7/10; revisit with device numbers (the T5 spike).
+4. **Battery/thermal auto-tuning, adaptive chunk/model** — Plan 06 Deferred 7; revisit with device numbers (the T5 spike). *(Note: energy/VAD + no-speech gating is now IN scope — Part C Task 11 — because machinery hallucination is an R3 correctness issue, not a battery optimization.)*
 5. **Diarization** — Plan 06 Deferred 9.
 6. **Android backend** — Plan 06 Deferred 8.
 7. **Generative layout-ops protocol** — Plan 07 Deferred 2 (`boardUpdated` snapshots stay coarse).
@@ -319,14 +387,16 @@ Run cargo via the dev shell or `nix shell nixpkgs#cargo nixpkgs#rustc -c cargo <
 - **Fallible `MurmurEngine::new`/`begin_walk`** (parallel lane) — this plan's model-load degrade should become an `Err` return once that lands (D5, Task 5 Step 3).
 - **iPhone T5 device spike** (the one unretired STT GO condition) — Task 9 Step 4's device walk is the natural place to retire it; RTF<1.0 + no thermal kill over ~10 min locked (Plan 06 Deferred 2).
 - **On-sim Metal availability** — if whisper.cpp Metal can't init on the simulator, a CPU-force config knob may be needed for sim builds (D7); device is the real target.
-- **Model-download follow-up** — bundling 57 MB is a milestone expedient; ODR/download manager is the scalable path (D5).
+- **Model-download follow-up** — bundling ~60 MB is a milestone expedient; ODR/download manager is the scalable path (D5). If Task 12's noise eval promotes small.en (~182 MB), the bundle-vs-download trade tightens — a download path may become required.
 - **STT DONE flush-vs-speed canon** — default `flush` behind `stt_flush_on_finish` (D6); flip the default if canon lands "speed."
 
 ## Self-Review Notes
 
 - **Riskiest assumption (named):** that whisper.cpp's **Metal** build links and runs correctly for the iOS SDK via `build-ffi.sh`'s system-Xcode cross-link path (Task 8), and that Metal degrades to CPU (not a hard failure) on the simulator (D7/Task 9). Mitigation: the milestone gate is the **device** walk (Task 9.4), the sim path has a documented CPU fallback, and the entire Rust pump is proven hermetically with `ScriptedDecoder` (Tasks 2–4) independent of whisper.
-- **Additivity discharged:** `push_audio` + the pump are new; `append_transcript`, the `LiveExtractor` actor, `boardUpdated`, and `finish()`'s two-phase process are reused verbatim (D2/D3). A `stt: None` session is exactly Plan 07's text path — the review checks this (Task 10.3).
+- **Additivity discharged:** `push_audio` + the pump are new; `append_transcript`, the `LiveExtractor` actor, `boardUpdated`, and `finish()`'s two-phase process are reused verbatim (D2/D3). A `stt: None` session is exactly Plan 07's text path — the review checks this (Task 13.3).
+- **Two lifecycle exits, both stop the pump (finding 2 + 3):** the pump thread owns an `Arc<WalkSession>`, so `finish()` and `cancel()` are the only paths that can free a session. `finish()` stops the pump via `spawn_blocking(join)` (no tokio worker blocked on an in-flight decode); `cancel()` (sync FFI, wired into `discardWalk`) stops+joins directly and tombstones the session — one API closing both the leaked-thread leak and issue #3's zombie `Recording` row. A never-finished-never-cancelled walk (app killed mid-walk) leaks only to process death.
 - **Hermetic-CI invariant:** `stt` is an always-on pure dep; only `WhisperDecoder` construction is `#[cfg(feature="whisper")]`; `cargo test --workspace` never sees the feature, a model, or a native STT toolchain. The app build alone adds `--features whisper` (Task 8). This is Plan 06's discipline extended one crate up — the single most important thing this plan must not break.
-- **Judgment calls for reviewers:** (a) **Rust-side pump on a dedicated `std::thread`** over Swift-side polling or `tokio::spawn` — Plan 07 D8 committed to a bridge-side pump; a dedicated thread keeps the blocking Metal decode off the tokio workers and off the audio render thread, and reuses the existing `append_transcript` seam. (b) **bundle base.en** over first-run download — offline-first (spec §1); download is Deferred. (c) **finish flushes by default** behind a toggle — capture-never-lost over a sub-second speed gain; flagged for canon (D6). (d) **transcript surfaced via two new `WalkEvent` cases** over reusing `boardUpdated` — extraction stays finalized-only; the UI gets committed + optional greyed preview (D4). (e) **feature-independent FFI surface** (`push_audio` always exists; whisper gates only `with_model`) so the Swift binary and the hermetic test build share one method set (D3).
+- **Judgment calls for reviewers:** (a) **Rust-side pump on a dedicated `std::thread`** over Swift-side polling or `tokio::spawn` — Plan 07 D8 committed to a bridge-side pump; a dedicated thread keeps the blocking Metal decode off the tokio workers and off the audio render thread, and reuses the existing `append_transcript` seam. Its two exits both avoid blocking a tokio worker: `finish()` joins via `spawn_blocking`, `cancel()` is a sync FFI call that joins directly (Task 4, findings 2/3). (b) **bundle base.en** over first-run download — offline-first (spec §1); download is Deferred. (c) **finish flushes by default** behind a toggle — capture-never-lost over a sub-second speed gain; flagged for canon (D6). (d) **transcript surfaced via two new `WalkEvent` cases** over reusing `boardUpdated` — extraction stays finalized-only; the UI gets committed + optional greyed preview (D4). (e) **feature-independent FFI surface** (`push_audio` always exists; whisper gates only `with_model`) so the Swift binary and the hermetic test build share one method set (D3).
 - **Spec coverage:** Rev 2 §2 on-device live STT ✓ (the whole plan); §1 offline/bulletproof capture ✓ (bundled model, flush-on-finish, decode-error-non-fatal pump); §vocabulary point 3 biasing ✓ (D8, memory `vocabulary` → `build_bias_prompt`); §6 <8 s ✓ (finish flush is one sub-second decode before the existing budgeted process). Live-is-provisional / `process()` authoritative ✓ (finalized text feeds the live board; the flushed full transcript feeds authoritative processing, unchanged).
-- **Test-count checkpoint (expectations, not gates):** T1 +2 (config), T2 +1 (pump e2e), T3 +1 (transcript events), T4 +2 (flush both ways + bias terms), T5 +1 hermetic +1 `#[ignore]` smoke, Task 8 e2e +1 (`audio_pump_e2e.rs`) ≈ **9 new**, of which 8 run in default (feature-off) CI.
+- **R3 / noise robustness (Part C):** whisper's fluent hallucination on machinery-only audio is a correctness bug (invents text = violates under-extract-never-invent), so the energy/VAD pre-gate + `no_speech_prob` post-check (Task 11) are in scope, hermetic-testable, and additive to Plan 06 (`RawSegment.no_speech_prob` defaults to `0.0`). The Apple voice-processing knob (Task 10) is A/B-only — default deferred to the SNR eval (Task 12), because suppression can hurt whisper as easily as help.
+- **Test-count checkpoint (expectations, not gates):** T1 +2 (config), T2 +1 (pump e2e), T3 +1 (transcript events), T4 +3 (flush both ways + cancel/tombstone + bias terms), T5 +1 hermetic +1 `#[ignore]` smoke, Task 8 e2e +1 (`audio_pump_e2e.rs`), T11 +3 (VAD gate + no-speech + append-only-holds) ≈ **13 new**, of which 12 run in default (feature-off) CI (the `#[ignore]` smoke and the manual noise eval excluded).
