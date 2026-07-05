@@ -64,6 +64,30 @@ struct PumpState {
     stop: bool,
 }
 
+/// Best-effort safety net (review finding 1): if the host drops its last
+/// handle WITHOUT `finish()`/`cancel()` (e.g. a defensive `session = nil` on
+/// the Swift side), signal the pump to stop so the thread — and with it the
+/// `SttStream`/whisper Metal context — is released instead of parking forever.
+/// This is reachable because the pump holds only a `Weak` (see `start_pump`).
+/// NON-JOINING by design: `Drop` can run on any thread (including the pump
+/// thread itself, when it drops the last upgraded `Arc`) and must never block
+/// on an in-flight decode — the thread is detached and exits at its next loop
+/// check. `finish()`/`cancel()` remain the deterministic, joining exits.
+impl Drop for WalkSession {
+    fn drop(&mut self) {
+        let (lock, cvar) = &*self.pump;
+        if let Ok(mut state) = lock.lock() {
+            state.stop = true;
+            cvar.notify_all();
+        }
+        // Detach: taking the JoinHandle and dropping it never blocks. After a
+        // finish()/cancel() this is already None (stop_pump joined) — no-op.
+        if let Ok(mut handle) = self.pump_handle.lock() {
+            drop(handle.take());
+        }
+    }
+}
+
 /// Assemble the ≤100-term STT bias vocabulary at `begin_walk` (D8): the user's
 /// memory `vocabulary` section plus an optional small per-template seed, capped
 /// at `SttConfig::max_bias_terms`. Reads an existing memory section — no new
@@ -150,14 +174,22 @@ impl WalkSession {
 
     /// Spawn the dedicated STT pump thread (D2) — one OS thread per audio
     /// session. No-op for a text-only (`stt: None`) session. The thread parks
-    /// on the `Condvar` between polls (cheap when idle) and owns its own
-    /// `Arc<WalkSession>`, so a session is never freed until the pump exits
-    /// (`finish()`/`cancel()` are the only two exits — Task 4).
+    /// on the `Condvar` between polls (cheap when idle).
+    ///
+    /// The pump holds only a WEAK reference (review finding 1): a strong `Arc`
+    /// here would cycle (session → pump thread → session) and keep the session
+    /// and `SttStream` (a ~60MB whisper Metal context) alive forever if the
+    /// host dropped its last handle without `finish()`/`cancel()`. With a `Weak`,
+    /// the last external drop runs `WalkSession::drop` (the safety net below),
+    /// which signals `stop`; the pump also exits on its own if an upgrade ever
+    /// fails. It upgrades per pass and drops the strong `Arc` before re-parking,
+    /// so it never pins the session across an idle park. `finish()`/`cancel()`
+    /// remain the deterministic (joining) exits; `Drop` is best-effort only.
     fn start_pump(self: &Arc<Self>) {
         if self.stt.is_none() {
             return;
         }
-        let session = self.clone();
+        let weak = Arc::downgrade(self);
         let pump = self.pump.clone();
         let handle = std::thread::spawn(move || {
             let (lock, cvar) = &*pump;
@@ -173,16 +205,18 @@ impl WalkSession {
                 state.wake = false;
                 drop(state); // release before the long decode
 
-                // 2. Poll the STT stream — the long, BLOCKING Metal decode.
+                // 2. Session gone (last external Arc dropped) → exit.
+                let Some(session) = weak.upgrade() else { break };
+                let Some(stt) = session.stt.as_ref() else {
+                    break; // unreachable (guarded at spawn) but never panic
+                };
+
+                // 3. Poll the STT stream — the long, BLOCKING Metal decode.
                 // Lock order (D2): `poll()` takes and RELEASES SttStream's
                 // internal engine→input locks and returns the segments before
                 // `feed_segments`/`append_transcript` runs, so the STT engine
                 // lock is never held across the Store/extractor locks — no lock
                 // inversion, no new deadlock surface.
-                let stt = match session.stt.as_ref() {
-                    Some(s) => s,
-                    None => break, // unreachable (guarded above) but never panic
-                };
                 match stt.poll() {
                     Ok(segs) => session.feed_segments(segs),
                     // A decode error must NOT kill the pump (capture-never-lost):
@@ -192,6 +226,7 @@ impl WalkSession {
                         session.session_id
                     ),
                 }
+                // The strong `Arc` (`session`) drops HERE, before the next park.
             }
         });
         *self.pump_handle.lock().unwrap() = Some(handle);
@@ -233,6 +268,21 @@ impl WalkSession {
         if let Some(listener) = self.listener.lock().unwrap().clone() {
             listener.on_event(event);
         }
+    }
+
+    /// The single terminal-transition primitive shared by `finish()` and
+    /// `cancel()` (review finding 2): returns `true` for exactly ONE caller
+    /// over the session's lifetime. INVARIANT — both lifecycle exits call this
+    /// FIRST, before acquiring the tick guard: swap-first on BOTH sides is
+    /// what guarantees a concurrent finish+cancel resolves to one winner
+    /// (finish proceeds and cancel no-ops, or cancel proceeds and finish
+    /// degrades) — never "finish degrades AND cancel tombstones", which would
+    /// lose the user's DONE and delete the data in the same instant. A losing
+    /// `finish()` may return a degraded document while the winner is still
+    /// mid-flight; that is the pre-existing double-finish semantics and is
+    /// display-safe (the store is read under its own lock).
+    fn try_enter_terminal(&self) -> bool {
+        !self.terminated.swap(true, Ordering::SeqCst)
     }
 
     /// Stop the pump thread and JOIN it — the single teardown shared by the
@@ -445,22 +495,34 @@ impl WalkSession {
             let _ = store.append_transcript(&self.session_id, &text);
         }
         let session = self.clone();
-        self.runtime_handle.spawn(async move {
-            let outcome = {
-                let mut extractor = session.extractor.lock().await;
-                extractor.maybe_extract().await
-            };
-            match outcome {
-                Ok(LiveExtractOutcome::Extracted { .. }) => session.emit_board_snapshot(),
-                // Skipped (too little new transcript / not recording) and a
-                // model-side Failed pass (D9: offline/LLM-down) are swallowed by
-                // design — capture is safe and the next tick retries.
-                Ok(LiveExtractOutcome::Skipped | LiveExtractOutcome::Failed { .. }) => {}
-                // A genuine store fault — surfaced (carry-note 4) instead of
-                // silently discarded. Never crashes the tick loop.
-                Err(e) => session.record_tick_fault(&format!("maybe_extract: {e}")),
-            }
-        });
+        // `Handle::spawn` PANICS if the backing runtime has shut down (the
+        // engine was dropped while a pump pass is in flight — review finding
+        // 1b). This method is called from the pump's OS thread, which has no
+        // unwind boundary; under panic=abort that panic kills the host app.
+        // Catch it and degrade to a counted fault instead: the transcript
+        // chunk is already persisted above (capture is safe), only the live
+        // tick is lost.
+        let spawned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.runtime_handle.spawn(async move {
+                let outcome = {
+                    let mut extractor = session.extractor.lock().await;
+                    extractor.maybe_extract().await
+                };
+                match outcome {
+                    Ok(LiveExtractOutcome::Extracted { .. }) => session.emit_board_snapshot(),
+                    // Skipped (too little new transcript / not recording) and a
+                    // model-side Failed pass (D9: offline/LLM-down) are swallowed by
+                    // design — capture is safe and the next tick retries.
+                    Ok(LiveExtractOutcome::Skipped | LiveExtractOutcome::Failed { .. }) => {}
+                    // A genuine store fault — surfaced (carry-note 4) instead of
+                    // silently discarded. Never crashes the tick loop.
+                    Err(e) => session.record_tick_fault(&format!("maybe_extract: {e}")),
+                }
+            })
+        }));
+        if spawned.is_err() {
+            self.record_tick_fault("runtime shut down: live tick not spawned");
+        }
     }
 
     /// Enqueue mic PCM for the STT pump (D1/D2). A CHEAP enqueue: buffers the
@@ -503,16 +565,17 @@ impl WalkSession {
     /// - phase B failed outright (offline/LLM-down, D9) -> a queued partial
     ///   document built from the live board — capture is never lost.
     pub async fn finish(self: Arc<Self>) -> DocumentPayload {
-        // D3b: hold the extractor mutex across the whole call so no live tick
-        // can interleave with end-of-session processing.
-        let _tick_guard = self.extractor.lock().await;
-
-        // Lifecycle guard: a second finish() (or a finish() after cancel())
-        // degrades to the already-built document rather than reprocessing or
-        // resurrecting a tombstoned session.
-        if self.terminated.swap(true, Ordering::SeqCst) {
+        // Terminal transition FIRST, guard second — the SAME order as
+        // `cancel()` (see `try_enter_terminal`). A second finish() (or a
+        // finish() after cancel()) degrades to the already-built document
+        // rather than reprocessing or resurrecting a tombstoned session.
+        if !self.try_enter_terminal() {
             return self.degraded_document();
         }
+
+        // D3b: hold the extractor mutex across the rest of the call so no
+        // live tick can interleave with end-of-session processing.
+        let _tick_guard = self.extractor.lock().await;
 
         // Stop the pump (spawn_blocking join — never blocks a worker), THEN
         // flush the final utterance so process() reads the complete transcript
@@ -579,7 +642,9 @@ impl WalkSession {
     /// export would block the UI thread. Idempotent: a second `cancel()`, or a
     /// `cancel()` after `finish()`, is a harmless no-op.
     pub async fn cancel(self: Arc<Self>) {
-        if self.terminated.swap(true, Ordering::SeqCst) {
+        // Terminal transition FIRST, guard second — the SAME order as
+        // `finish()` (see `try_enter_terminal`).
+        if !self.try_enter_terminal() {
             return; // already finished or cancelled — nothing to do
         }
         // Exclude ticks (D3b), then stop the pump deterministically before we
@@ -594,9 +659,9 @@ impl WalkSession {
         if let Ok(store) = self.store.lock() {
             let _ = store.delete_session(&self.session_id);
         }
-        // Release the foreign listener. The pump thread (which held its own
-        // Arc<WalkSession>) has exited via stop_pump, so the Arc cycle is
-        // already broken and the session frees once Swift drops its handle.
+        // Release the foreign listener. The pump thread holds only a Weak (see
+        // start_pump) and has exited via stop_pump; the session frees once
+        // Swift drops its handle.
         *self.listener.lock().unwrap() = None;
     }
 }
@@ -1168,6 +1233,32 @@ mod tests {
         // Idempotent: a second cancel(), and a finish() after cancel(), do not panic.
         session.clone().cancel().await;
         let _ = session.clone().finish().await;
+    }
+
+    #[tokio::test]
+    async fn dropping_the_last_handle_stops_the_pump() {
+        // Review finding 1: no finish(), no cancel() — the host just drops its
+        // last Arc. The pump holds only a Weak, and WalkSession::drop signals
+        // stop, so the thread must exit (releasing the SttStream) instead of
+        // parking forever.
+        let (session, _sid, _store) = flush_test_session(true);
+        // Take the JoinHandle so the exit is observable; Drop's own take then
+        // finds None (harmless — Drop only detaches, never joins).
+        let handle = session
+            .pump_handle
+            .lock()
+            .unwrap()
+            .take()
+            .expect("audio session must have a running pump");
+
+        drop(session); // the LAST strong Arc — runs the Drop safety net
+
+        let joined = tokio::task::spawn_blocking(move || handle.join());
+        tokio::time::timeout(std::time::Duration::from_secs(2), joined)
+            .await
+            .expect("pump thread did not exit after the last Arc dropped")
+            .expect("join task panicked")
+            .expect("pump thread panicked");
     }
 
     #[tokio::test]
