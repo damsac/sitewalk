@@ -1,22 +1,39 @@
 #!/usr/bin/env bash
-# Generates SitewalkGallery.xcodeproj, injecting the API key so the app runs the
-# REAL murmur-core engine instead of the demo engine.
+# Generates SitewalkGallery.xcodeproj. Two modes, chosen automatically by whether
+# the (gitignored) MurmurCoreFFI xcframework exists:
+#
+#   xcframework present  -> REAL murmur-core engine. Injects the API key and
+#                           generates from project-real.yml (demo base + the
+#                           gitignored project.local.yml + the MurmurCoreFFI
+#                           package dependency).
+#   xcframework absent   -> DEMO engine. Generates from project.yml alone, and
+#                           tells you to run ./build-ffi.sh to upgrade.
+#
+# A clean checkout with no setup still builds: bare `xcodegen generate` (or this
+# script's demo branch) produces the DemoWalkEngine app with zero dependencies.
 #
 # Secret flow (no secret ever touches a tracked file):
 #   repo-root .env  ANTHROPIC_API_KEY  ->  gitignored apps/ios/project.local.yml
 #   (build setting PPQ_API_KEY)  ->  xcodebuild expands $(PPQ_API_KEY) into the
-#   built app's Info.plist at build time. The tracked Info.plist/project.yml only
-#   ever hold the literal "$(PPQ_API_KEY)".
+#   built app's Info.plist at build time. Tracked files only hold "$(PPQ_API_KEY)".
+# The .env var is ANTHROPIC_API_KEY; the app's Info.plist key is the historical
+# PPQ_API_KEY — this script bridges the two names.
 #
-# The .env var is named ANTHROPIC_API_KEY; the app's Info.plist key is the
-# historical PPQ_API_KEY — this script bridges the two names.
-#
-# Usage: cd apps/ios && ./generate.sh   (then build with xcodebuild / XcodeBuildMCP)
+# Usage: cd apps/ios && ./generate.sh   (then build via xcodebuild / XcodeBuildMCP)
 set -euo pipefail
 cd "$(dirname "$0")"                 # apps/ios
 REPO_ROOT="$(cd ../.. && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
 LOCAL="project.local.yml"
+XCFRAMEWORK="Packages/MurmurCoreFFI/Frameworks/ffiFFI.xcframework"
+
+if [ ! -d "$XCFRAMEWORK" ]; then
+  echo "NOTE: $XCFRAMEWORK not found — generating the DEMO project." >&2
+  echo "      Run ./build-ffi.sh, then ./generate.sh again, for the real core." >&2
+  xcodegen generate
+  echo "==> generated SitewalkGallery.xcodeproj (DEMO engine)"
+  exit 0
+fi
 
 # Resolve the key: explicit env wins, else read from .env. Never printed.
 KEY=""
@@ -28,7 +45,8 @@ fi
 
 if [ -z "$KEY" ]; then
   echo "WARN: no ANTHROPIC_API_KEY in env or $ENV_FILE." >&2
-  echo "      The app will build against the DEMO engine (no real LLM)." >&2
+  echo "      The real core is linked but will fall back to the DEMO engine at" >&2
+  echo "      runtime until a key is present." >&2
 fi
 
 # Write the gitignored local spec (0600). Value is never echoed.
@@ -40,5 +58,5 @@ settings:
     PPQ_API_KEY: "$KEY"
 EOF
 
-xcodegen generate
-echo "==> generated SitewalkGallery.xcodeproj (real engine active when a key was found)"
+xcodegen generate --spec project-real.yml
+echo "==> generated SitewalkGallery.xcodeproj (REAL murmur-core engine active when a key was found)"

@@ -1,26 +1,46 @@
 # Sitewalk iOS
 
-SwiftUI app running on the real `murmur-core` engine via the `crates/ffi`
-UniFFI bridge (falls back to a scripted demo engine when no API key is
-configured — see `GalleryApp.resolveEngine`).
+SwiftUI app. Runs the scripted `DemoWalkEngine` out of the box, and upgrades to
+the real `murmur-core` engine (via the `crates/ffi` UniFFI bridge) once the
+xcframework is built and an API key is present — see `GalleryApp.resolveEngine`.
 
-## Build & run (real engine)
+## Demo build (clean checkout, zero setup)
 
 ```sh
-./build-ffi.sh       # from apps/ios or repo root — regenerates the gitignored
-                     # MurmurCoreFFI xcframework + Swift bindings (slow first run)
-./generate.sh        # generates SitewalkGallery.xcodeproj AND injects the API key
-                     # (ANTHROPIC_API_KEY from the repo-root .env) as PPQ_API_KEY
+xcodegen generate    # uses project.yml — no MurmurCoreFFI dependency
 xcodebuild -project SitewalkGallery.xcodeproj -scheme SitewalkGallery \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
-`./generate.sh` is the single command to run before building: it writes the
-gitignored `project.local.yml` (from `project.local.yml.template`) with the key
-pulled from `.env`, then runs `xcodegen`. The key flows only into that gitignored
-spec and the generated (gitignored) `.xcodeproj`; xcodebuild expands
-`$(PPQ_API_KEY)` into the built app's Info.plist at build time. No tracked file
-ever holds the secret. With no key present the app builds against the demo engine.
+A fresh clone builds and runs on the demo engine with no dependencies: the base
+`project.yml` doesn't reference the (gitignored) MurmurCoreFFI xcframework, so
+`#if canImport(MurmurCoreFFI)` is false and the real-core code compiles out.
+
+## Real-core build (one extra step)
+
+```sh
+./build-ffi.sh       # regenerates the gitignored MurmurCoreFFI xcframework +
+                     # Swift bindings (slow first run). Only needed when the
+                     # xcframework is missing or crates/ffi changed.
+./generate.sh        # detects the xcframework, injects the API key, and
+                     # generates from project-real.yml (real MurmurCoreFFI dep)
+xcodebuild -project SitewalkGallery.xcodeproj -scheme SitewalkGallery \
+  -destination 'platform=iOS Simulator,name=iPhone 17' build
+```
+
+`./generate.sh` writes the gitignored `project.local.yml` (from
+`project.local.yml.template`) with `PPQ_API_KEY` pulled from the repo-root
+`.env`'s `ANTHROPIC_API_KEY`, then runs `xcodegen generate --spec
+project-real.yml` (which merges `project.yml` + `project.local.yml` + the
+MurmurCoreFFI package dependency). If the xcframework is absent it falls back to
+the demo build and tells you to run `./build-ffi.sh`. The key flows only into the
+gitignored `project.local.yml` and the generated (gitignored) `.xcodeproj`;
+xcodebuild expands `$(PPQ_API_KEY)` into the built app's Info.plist at build
+time. No tracked file ever holds the secret.
+
+> Switching modes in an existing checkout can leave a stale SwiftPM package graph
+> in DerivedData — if a build errors with `Unable to find module dependency:
+> 'ffiFFI'`, delete DerivedData and rebuild. A clean checkout is unaffected.
 
 Confirm which engine is live from the console (no key is ever logged):
 

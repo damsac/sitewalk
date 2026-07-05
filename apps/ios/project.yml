@@ -1,10 +1,14 @@
 name: SitewalkGallery
-# Per-developer settings (PPQ_API_KEY, etc.) live in the gitignored
-# project.local.yml, which ./generate.sh creates from project.local.yml.template
-# and populates from the ANTHROPIC_API_KEY in the repo-root .env. Run
-# ./generate.sh (not bare `xcodegen generate`) so the include below resolves.
-include:
-  - path: project.local.yml
+# DEMO base spec — self-sufficient with zero setup: a clean checkout builds the
+# scripted DemoWalkEngine app from this file alone (no MurmurCoreFFI package, so
+# `#if canImport(MurmurCoreFFI)` is false and the real-core code compiles out).
+#
+#   xcodegen generate                 -> demo app (this spec)
+#   ./build-ffi.sh && ./generate.sh   -> upgrades to the REAL murmur-core engine
+#
+# The real-core build is opted into by ./generate.sh, which generates from
+# project-real.yml (this spec + the gitignored project.local.yml, which adds the
+# MurmurCoreFFI package dependency and the injected PPQ_API_KEY build setting).
 options:
   bundleIdPrefix: com.damsac
   deploymentTarget:
@@ -12,17 +16,12 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-packages:
-  MurmurCoreFFI:
-    path: Packages/MurmurCoreFFI
 targets:
   SitewalkGallery:
     type: application
     platform: iOS
     sources:
       - Sources
-    dependencies:
-      - package: MurmurCoreFFI
     info:
       path: Sources/App/Info.plist
       properties:
