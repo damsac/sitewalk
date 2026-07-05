@@ -101,8 +101,9 @@ series, each plan a chapter:
 | 05 | live in-session extraction (`LiveExtractor`) | done (6 commits) |
 | 05b | `crates/evals` — synthetic corpus + deterministic grader (F0.5, R6-weighted) | done (8 commits) |
 | 06-spike | STT benchmark: whisper-rs feasibility / RTF / biasing, GO-KILL exit criteria | **GO** |
-| 06 | STT for real (+ items `source` column, swap-contract fix) | next |
-| 07 | layout protocol + FFI (UniFFI) — where the iOS `WalkEngine` bridge lands | queued |
+| 06 | STT for real (+ items `source` column, swap-contract fix) | done |
+| 07 | layout protocol + FFI (UniFFI) — where the iOS `WalkEngine` bridge lands | done |
+| 08 | STT stage-2 (mic → whisper → append): `push_audio` + Rust pump → the existing append path, finish flush + cancel, iOS `AudioCaptureSource` | done (Part C noise-robustness follow-up) |
 
 **iOS shell** — sac built the native SwiftUI app (design system + full flow)
 behind a `WalkEngine` protocol seam at the FFI boundary (`AppModel.init(engine:)`
