@@ -116,6 +116,14 @@ pub struct MurmurEngine {
     /// tests borrow the `#[tokio::test]` runtime instead of spinning up a
     /// second one.
     pub(crate) runtime_handle: tokio::runtime::Handle,
+    /// Bundled whisper model path (D5), passed to `SttStream::with_model` at
+    /// `begin_walk` under the `whisper` feature. `None` → text-only walks.
+    // Read only by the `whisper`-gated build_stt_stream; the feature-off build
+    // ignores it (text-only), so it is intentionally unread there.
+    #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
+    pub(crate) stt_model_path: Option<String>,
+    /// DONE flush toggle (D6), threaded onto each `WalkSession`.
+    pub(crate) stt_flush_on_finish: bool,
     _runtime: Option<Arc<tokio::runtime::Runtime>>,
 }
 
@@ -142,8 +150,42 @@ impl MurmurEngine {
             memory_store,
             providers,
             runtime_handle,
+            stt_model_path: config.stt_model_path.clone(),
+            stt_flush_on_finish: config.stt_flush_on_finish,
             _runtime: Some(runtime),
         }))
+    }
+}
+
+impl MurmurEngine {
+    /// Build the per-session `SttStream` for the audio path (D5). Fallible, NOT
+    /// panicking: `begin_walk` is a `Result`-returning FFI export (the parallel
+    /// fallible-constructor lane has landed), so a bad/corrupt model path
+    /// surfaces as `Err` across FFI rather than a host crash. A `None` model
+    /// path (or the feature off) yields `Ok(None)` — a text-only walk.
+    #[cfg(feature = "whisper")]
+    pub(crate) fn build_stt_stream(&self, bias: &[String]) -> Result<Option<Arc<stt::SttStream>>, EngineError> {
+        match &self.stt_model_path {
+            Some(path) => {
+                let stream = stt::SttStream::with_model(
+                    std::path::Path::new(path),
+                    stt::SttConfig::default(),
+                    bias,
+                )
+                // Never print a key here (it isn't in scope, but keep the
+                // message store/model-only — Plan 07 R6 redaction posture).
+                .map_err(|e| EngineError::BeginWalk(format!("stt model load failed: {e}")))?;
+                Ok(Some(Arc::new(stream)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Feature-off build: no whisper backend is compiled in, so the walk always
+    /// runs text-only regardless of any configured model path.
+    #[cfg(not(feature = "whisper"))]
+    pub(crate) fn build_stt_stream(&self, _bias: &[String]) -> Result<Option<Arc<stt::SttStream>>, EngineError> {
+        Ok(None)
     }
 }
 
@@ -168,6 +210,12 @@ impl MurmurEngine {
             memory_store,
             providers,
             runtime_handle: tokio::runtime::Handle::current(),
+            // Mock-provider tests exercise the text path or an injected
+            // ScriptedDecoder SttStream (via WalkSession::new_audio_test_session),
+            // never a real model — so `None`/`true` defaults are correct and no
+            // call site changes (finding 4: with_providers keeps its signature).
+            stt_model_path: None,
+            stt_flush_on_finish: true,
             _runtime: None,
         })
     }

@@ -69,8 +69,6 @@ struct PumpState {
 /// at `SttConfig::max_bias_terms`. Reads an existing memory section — no new
 /// memory plumbing. `template` is reserved for a future per-template seed list;
 /// v1 seeds nothing template-specific.
-// Wired into begin_walk's whisper-stream construction in Task 5.
-#[allow(dead_code)]
 fn collect_bias_terms(memory: &Memory, _template: Option<&str>) -> Vec<String> {
     let max = stt::SttConfig::default().max_bias_terms;
     memory
@@ -396,9 +394,19 @@ impl MurmurEngine {
             self.memory.clone(),
             &session_id,
         );
-        // Task 1: no audio stream yet (text-only path unchanged). Task 5 wires
-        // the real whisper stream + pump here.
-        Ok(WalkSession::new(
+        // Assemble the ≤100-term bias vocabulary once, here, where both the
+        // template and Memory are in hand (D8), then build the audio stream
+        // (whisper feature + model path) and start the pump. Text-only when
+        // there is no model / the feature is off — `stt: None`, pump not spawned.
+        let bias = {
+            let memory = self
+                .memory
+                .lock()
+                .map_err(|_| EngineError::BeginWalk("memory lock poisoned".into()))?;
+            collect_bias_terms(&memory, Some(&template))
+        };
+        let stt = self.build_stt_stream(&bias)?;
+        let session = WalkSession::new(
             session_id,
             self.store.clone(),
             extractor,
@@ -407,9 +415,11 @@ impl MurmurEngine {
             self.memory_store.clone(),
             self.runtime_handle.clone(),
             Some(template),
-            None,
-            true,
-        ))
+            stt,
+            self.stt_flush_on_finish,
+        );
+        session.start_pump();
+        Ok(session)
     }
 }
 
@@ -964,6 +974,65 @@ mod tests {
         assert!(committed.contains("order"), "committed text carries the finalized words: {committed:?}");
         assert!(committed.contains("deck framing"), "committed text: {committed:?}");
         assert_eq!(board_text.as_deref(), Some("order lumber"), "same finalized text drove extraction");
+    }
+
+    #[tokio::test]
+    async fn begin_walk_without_model_path_is_text_only() {
+        // with_providers defaults stt_model_path=None → the session's stt slot
+        // is None, push_audio is a no-op, and the text append path is intact.
+        let store = Store::open_in_memory("device-a").unwrap();
+        let engine = MurmurEngine::with_providers(
+            store,
+            Memory::default(),
+            Arc::new(NullMemoryStore),
+            Providers {
+                live: Arc::new(MockProvider::new(vec![])),
+                processing: Arc::new(MockProvider::new(vec![])),
+                reflection: Arc::new(MockProvider::new(vec![])),
+            },
+        );
+        let session = engine.begin_walk(None, "landscape".into()).unwrap();
+        assert!(session.stt.is_none(), "no model path → text-only session (stt: None)");
+        // Neither call panics; the text path still writes a transcript.
+        session.clone().push_audio(vec![0.0; 16_000]);
+        session.clone().append_transcript("hello there".into());
+    }
+
+    /// Env + feature gated real-model smoke (never runs in CI — like stt's
+    /// `real_model_decodes_silence`): with `--features whisper` and
+    /// `MURMUR_WHISPER_MODEL` set, begin_walk builds a real SttStream and a
+    /// silent push drives a pump pass without error.
+    // A plain `#[test]` (not `#[tokio::test]`): `MurmurEngine::new` owns its own
+    // tokio Runtime, and dropping that Runtime inside another runtime's async
+    // context panics — so this smoke test stays synchronous and drives the async
+    // cancel via the engine's own runtime handle.
+    #[cfg(feature = "whisper")]
+    #[test]
+    #[ignore = "needs the whisper feature + MURMUR_WHISPER_MODEL; never in CI"]
+    fn real_model_begin_walk_builds_an_stt_session() {
+        let Ok(model) = std::env::var("MURMUR_WHISPER_MODEL") else {
+            return; // no model provided — nothing to smoke
+        };
+        let db = std::env::temp_dir().join("murmur-stt-smoke.db");
+        let cfg = crate::engine::EngineConfig {
+            db_path: db.to_string_lossy().into_owned(),
+            device_id: "smoke".into(),
+            api_key: "sk-test".into(),
+            base_url: None,
+            model_live: "claude-haiku-4-5".into(),
+            model_processing: "claude-sonnet-4-5".into(),
+            model_reflection: "claude-haiku-4-5".into(),
+            stt_model_path: Some(model),
+            stt_flush_on_finish: true,
+        };
+        let engine = MurmurEngine::new(cfg).expect("engine construction");
+        let session =
+            engine.clone().begin_walk(None, "landscape".into()).expect("begin_walk with a real model");
+        assert!(session.stt.is_some(), "a valid model path builds an SttStream");
+        session.clone().push_audio(vec![0.0; 16_000]); // 1 s of silence
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // Clean teardown (stops the pump) on the engine's runtime.
+        engine.runtime_handle.clone().block_on(session.cancel());
     }
 
     #[tokio::test]
