@@ -19,7 +19,7 @@ let package = Package(
     name: "MurmurCoreFFI",
     platforms: [.iOS(.v17)],
     products: [
-        .library(name: "MurmurCoreFFI", targets: ["MurmurCoreFFI"]),
+        .library(name: "MurmurCoreFFI", targets: ["MurmurCoreFFI"])
     ],
     targets: [
         .binaryTarget(
@@ -29,7 +29,22 @@ let package = Package(
         .target(
             name: "MurmurCoreFFI",
             dependencies: ["ffiFFI"],
-            path: "Sources/MurmurCoreFFI"
-        ),
+            path: "Sources/MurmurCoreFFI",
+            // The `ffiFFI` static lib is built WITH the `whisper` feature
+            // (build-ffi.sh), which vendors whisper.cpp + ggml (C++) and its
+            // Metal/Accelerate backends. Those objects reference the C++ runtime
+            // (___cxa_*, std::__throw_*) and the Metal/MetalKit/Accelerate
+            // frameworks; the app target must link them or the final link fails
+            // with "symbol(s) not found for architecture arm64". rustc passes
+            // these on its own cross-link, but Xcode linking the .a does not —
+            // so the FFI package declares them here for every consumer.
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedFramework("Metal"),
+                .linkedFramework("MetalKit"),
+                .linkedFramework("Foundation"),
+                .linkedFramework("Accelerate")
+            ]
+        )
     ]
 )

@@ -34,6 +34,11 @@ nix develop -c bash -c '
   set -euo pipefail
   export DEVELOPER_DIR=/Applications/Xcode-26.2.0.app/Contents/Developer
   export SDKROOT=$(/usr/bin/xcrun --sdk iphonesimulator --show-sdk-path)
+  # Match the app deployment target (project.yml: iOS 17.0). Without this, rustc
+  # links the cdylib probe at its default min (arm64-apple-ios10.0), and the
+  # whisper.cpp objects that cmake built against the real iOS SDK min fail to
+  # link with a missing ___chkstk_darwin symbol for architecture arm64.
+  export IPHONEOS_DEPLOYMENT_TARGET=17.0
   export CC_aarch64_apple_ios_sim=/usr/bin/clang
   export CXX_aarch64_apple_ios_sim=/usr/bin/clang++
   export AR_aarch64_apple_ios_sim=/usr/bin/ar
@@ -52,6 +57,10 @@ nix develop -c bash -c '
   set -euo pipefail
   export DEVELOPER_DIR=/Applications/Xcode-26.2.0.app/Contents/Developer
   export SDKROOT=$(/usr/bin/xcrun --sdk iphoneos --show-sdk-path)
+  # Match the app deployment target (project.yml: iOS 17.0) — see the sim
+  # invocation above; without it the device cdylib link fails on a missing
+  # ___chkstk_darwin symbol for architecture arm64.
+  export IPHONEOS_DEPLOYMENT_TARGET=17.0
   export CC_aarch64_apple_ios=/usr/bin/clang
   export CXX_aarch64_apple_ios=/usr/bin/clang++
   export AR_aarch64_apple_ios=/usr/bin/ar

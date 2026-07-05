@@ -7,3 +7,6 @@
 
 # simulator/QA capture evidence
 /screenshots/
+
+# On-device whisper model (large binary, provisioned locally — see apps/ios/build-ffi.sh)
+apps/ios/Sources/Resources/ggml-base.en-q5_1.bin

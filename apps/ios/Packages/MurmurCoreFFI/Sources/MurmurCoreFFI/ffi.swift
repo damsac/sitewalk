@@ -447,6 +447,22 @@ fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterFloat: FfiConverterPrimitive {
+    typealias FfiType = Float
+    typealias SwiftType = Float
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Float {
+        return try lift(readFloat(&buf))
+    }
+
+    public static func write(_ value: Float, into buf: inout [UInt8]) {
+        writeFloat(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -866,6 +882,17 @@ public protocol WalkSessionProtocol : AnyObject {
     func appendTranscript(text: String) 
     
     /**
+     * DISCARD (findings 2 + issue #3): stop the pump AND tombstone the session.
+     * The close cousin of `finish()` — SAME shape (async, tick-guard-holding,
+     * `stop_pump().await`) differing only in the tail (`delete_session` instead
+     * of `process()`). Async, NOT a sync export: Swift calls it from a detached
+     * `Task` in `discardWalk()`, and the pump join can land mid-decode — a sync
+     * export would block the UI thread. Idempotent: a second `cancel()`, or a
+     * `cancel()` after `finish()`, is a harmless no-op.
+     */
+    func cancel() async 
+    
+    /**
      * D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
      * the terminal swap snapshot + the structured document.
      *
@@ -882,6 +909,15 @@ public protocol WalkSessionProtocol : AnyObject {
      * document built from the live board — capture is never lost.
      */
     func finish() async  -> DocumentPayload
+    
+    /**
+     * Enqueue mic PCM for the STT pump (D1/D2). A CHEAP enqueue: buffers the
+     * samples under a short lock and wakes the pump thread — the long Metal
+     * decode happens on the pump thread, never here. No-op for a text-only
+     * (`stt: None`) session. Must not block: Swift calls this from a
+     * background task fed by the audio render thread.
+     */
+    func pushAudio(samples: [Float]) 
     
     /**
      * Stores the listener (fresh per session — D3/HANDOFF per-session
@@ -968,6 +1004,33 @@ open func appendTranscript(text: String) {try! rustCall() {
 }
     
     /**
+     * DISCARD (findings 2 + issue #3): stop the pump AND tombstone the session.
+     * The close cousin of `finish()` — SAME shape (async, tick-guard-holding,
+     * `stop_pump().await`) differing only in the tail (`delete_session` instead
+     * of `process()`). Async, NOT a sync export: Swift calls it from a detached
+     * `Task` in `discardWalk()`, and the pump join can land mid-decode — a sync
+     * export would block the UI thread. Idempotent: a second `cancel()`, or a
+     * `cancel()` after `finish()`, is a harmless no-op.
+     */
+open func cancel()async  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_ffi_fn_method_walksession_cancel(
+                    self.uniffiClonePointer()
+                    
+                )
+            },
+            pollFunc: ffi_ffi_rust_future_poll_void,
+            completeFunc: ffi_ffi_rust_future_complete_void,
+            freeFunc: ffi_ffi_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
      * D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
      * the terminal swap snapshot + the structured document.
      *
@@ -999,6 +1062,20 @@ open func finish()async  -> DocumentPayload {
             errorHandler: nil
             
         )
+}
+    
+    /**
+     * Enqueue mic PCM for the STT pump (D1/D2). A CHEAP enqueue: buffers the
+     * samples under a short lock and wakes the pump thread — the long Metal
+     * decode happens on the pump thread, never here. No-op for a text-only
+     * (`stt: None`) session. Must not block: Swift calls this from a
+     * background task fed by the audio render thread.
+     */
+open func pushAudio(samples: [Float]) {try! rustCall() {
+    uniffi_ffi_fn_method_walksession_push_audio(self.uniffiClonePointer(),
+        FfiConverterSequenceFloat.lower(samples),$0
+    )
+}
 }
     
     /**
@@ -1426,10 +1503,28 @@ public struct EngineConfig {
     public var modelLive: String
     public var modelProcessing: String
     public var modelReflection: String
+    /**
+     * Absolute path to the bundled whisper GGML model (D5). `None` → the walk
+     * runs text-only (no audio ingest). Not secret: fine to print in `Debug`.
+     */
+    public var sttModelPath: String?
+    /**
+     * DONE flush-vs-speed toggle (D6). `true` (default) flushes the final
+     * buffered utterance through the append path before processing.
+     */
+    public var sttFlushOnFinish: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(dbPath: String, deviceId: String, apiKey: String, baseUrl: String?, modelLive: String, modelProcessing: String, modelReflection: String) {
+    public init(dbPath: String, deviceId: String, apiKey: String, baseUrl: String?, modelLive: String, modelProcessing: String, modelReflection: String, 
+        /**
+         * Absolute path to the bundled whisper GGML model (D5). `None` → the walk
+         * runs text-only (no audio ingest). Not secret: fine to print in `Debug`.
+         */sttModelPath: String?, 
+        /**
+         * DONE flush-vs-speed toggle (D6). `true` (default) flushes the final
+         * buffered utterance through the append path before processing.
+         */sttFlushOnFinish: Bool) {
         self.dbPath = dbPath
         self.deviceId = deviceId
         self.apiKey = apiKey
@@ -1437,6 +1532,8 @@ public struct EngineConfig {
         self.modelLive = modelLive
         self.modelProcessing = modelProcessing
         self.modelReflection = modelReflection
+        self.sttModelPath = sttModelPath
+        self.sttFlushOnFinish = sttFlushOnFinish
     }
 }
 
@@ -1465,6 +1562,12 @@ extension EngineConfig: Equatable, Hashable {
         if lhs.modelReflection != rhs.modelReflection {
             return false
         }
+        if lhs.sttModelPath != rhs.sttModelPath {
+            return false
+        }
+        if lhs.sttFlushOnFinish != rhs.sttFlushOnFinish {
+            return false
+        }
         return true
     }
 
@@ -1476,6 +1579,8 @@ extension EngineConfig: Equatable, Hashable {
         hasher.combine(modelLive)
         hasher.combine(modelProcessing)
         hasher.combine(modelReflection)
+        hasher.combine(sttModelPath)
+        hasher.combine(sttFlushOnFinish)
     }
 }
 
@@ -1493,7 +1598,9 @@ public struct FfiConverterTypeEngineConfig: FfiConverterRustBuffer {
                 baseUrl: FfiConverterOptionString.read(from: &buf), 
                 modelLive: FfiConverterString.read(from: &buf), 
                 modelProcessing: FfiConverterString.read(from: &buf), 
-                modelReflection: FfiConverterString.read(from: &buf)
+                modelReflection: FfiConverterString.read(from: &buf), 
+                sttModelPath: FfiConverterOptionString.read(from: &buf), 
+                sttFlushOnFinish: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -1505,6 +1612,8 @@ public struct FfiConverterTypeEngineConfig: FfiConverterRustBuffer {
         FfiConverterString.write(value.modelLive, into: &buf)
         FfiConverterString.write(value.modelProcessing, into: &buf)
         FfiConverterString.write(value.modelReflection, into: &buf)
+        FfiConverterOptionString.write(value.sttModelPath, into: &buf)
+        FfiConverterBool.write(value.sttFlushOnFinish, into: &buf)
     }
 }
 
@@ -1622,6 +1731,19 @@ public enum WalkEvent {
     
     case boardUpdated(items: [BoardItem]
     )
+    /**
+     * Newly FINALIZED transcript text from the STT pump (D4). The UI appends
+     * it to the visible transcript. This is the SAME text fed to
+     * `append_transcript` — extraction sees finalized text only.
+     */
+    case transcriptCommitted(text: String
+    )
+    /**
+     * The volatile, un-finalized preview tail (D4). Displayed greyed; NEVER
+     * persisted, NEVER extracted.
+     */
+    case transcriptPreview(text: String
+    )
 }
 
 
@@ -1638,6 +1760,12 @@ public struct FfiConverterTypeWalkEvent: FfiConverterRustBuffer {
         case 1: return .boardUpdated(items: try FfiConverterSequenceTypeBoardItem.read(from: &buf)
         )
         
+        case 2: return .transcriptCommitted(text: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .transcriptPreview(text: try FfiConverterString.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -1649,6 +1777,16 @@ public struct FfiConverterTypeWalkEvent: FfiConverterRustBuffer {
         case let .boardUpdated(items):
             writeInt(&buf, Int32(1))
             FfiConverterSequenceTypeBoardItem.write(items, into: &buf)
+            
+        
+        case let .transcriptCommitted(text):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(text, into: &buf)
+            
+        
+        case let .transcriptPreview(text):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(text, into: &buf)
             
         }
     }
@@ -1720,6 +1858,31 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         case 1: return try FfiConverterString.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceFloat: FfiConverterRustBuffer {
+    typealias SwiftType = [Float]
+
+    public static func write(_ value: [Float], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterFloat.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Float] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Float]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterFloat.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -1843,7 +2006,13 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_walksession_append_transcript() != 45442) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ffi_checksum_method_walksession_cancel() != 21818) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_walksession_finish() != 48721) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_walksession_push_audio() != 33536) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walksession_set_event_listener() != 4564) {
