@@ -218,6 +218,42 @@ final class MurmurEngine: WalkEngine {
         try engine.removeVocabularyTerm(term: term)
     }
 
+    // MARK: - Photos (Plan 11): engine-keyed CRUD (not WalkSession-scoped —
+    // photos are attachable during the walk AND at review time, when there is
+    // no live WalkSession). `session` gives the active walk's id via the
+    // `sessionId()` getter; `nil` when there is no live session.
+
+    var currentSessionId: String? {
+        session?.sessionId()
+    }
+
+    func attachPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) throws -> PhotoModel {
+        let ref = try engine.addPhoto(sessionId: sessionId, itemId: itemId, filename: filename, capturedAt: capturedAt)
+        return Self.photo(ref)
+    }
+
+    func listPhotos(sessionId: String) throws -> [PhotoModel] {
+        try engine.listPhotos(sessionId: sessionId).map(Self.photo)
+    }
+
+    func removePhoto(photoId: String) throws {
+        try engine.removePhoto(photoId: photoId)
+    }
+
+    func liveLivePhotoFilenames() throws -> [String] {
+        try engine.listLivePhotoFilenames()
+    }
+
+    private nonisolated static func photo(_ ref: MurmurCoreFFI.PhotoRef) -> PhotoModel {
+        PhotoModel(
+            id: ref.id,
+            sessionId: ref.sessionId,
+            itemId: ref.itemId,
+            filename: ref.filename,
+            capturedAt: ref.capturedAt
+        )
+    }
+
     // MARK: - Formatting layer (D2): core is display-copy-free; this is
     // where cents → "$285", doc_number → "EST-0047", job_date_unix →
     // "JUL 01 2026", and label keys → display copy happen.

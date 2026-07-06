@@ -49,13 +49,32 @@ final class AppModel {
     private(set) var vocabulary: [String] = []
     var vocabularyError: String?
 
+    // Photo attachments (Plan 11). `photos` is the source of truth the review
+    // gallery renders (loaded via `loadPhotos(sessionId:)`); `photoError`
+    // carries a thrown FFI error for display.
+    // sac: capture affordance placement, gallery layout/thumbnails, empty
+    // state, and per-item attach gesture are yours — this is functional-plain.
+    // (Not `private(set)`: mutated from AppModel+Photos.swift, a same-module
+    // extension in a different file — Swift's `private` is file-scoped.)
+    var photos: [PhotoModel] = []
+    var photoError: String?
+    /// Snapshotted when a walk successfully begins and kept through review
+    /// (Plan 11 D7): the real `MurmurEngine` drops its live `WalkSession` once
+    /// `finish()` returns, so `engine.currentSessionId` alone would go nil
+    /// exactly when review-time photo capture needs it. Engine-keyed CRUD
+    /// (add/list/remove_photo) works on a `Processed` session too — there is
+    /// no live `WalkSession` requirement, just this id.
+    private(set) var currentSessionId: String?
+
     // Review state
     var document: DocumentModel?
     var editingRowID: UUID?
     var editText = ""
     var shareURL: URL?
 
-    private var engine: WalkEngine
+    // Not fully `private`: read from AppModel+Photos.swift (a same-module
+    // extension in a different file — Swift's `private` is file-scoped).
+    private(set) var engine: WalkEngine
     private var source: TranscriptSource?
     /// The live PCM source (Plan 08): used instead of `source` when
     /// `!scripted`. Produces PCM (not text) — STT is Rust-side whisper. Either
@@ -122,6 +141,10 @@ final class AppModel {
         items = []
         isPaused = false
         walkStart = Date()
+        // Snapshot the session id NOW, while the engine's live session still
+        // has one — see the doc comment on `currentSessionId` (Plan 11 D7).
+        currentSessionId = engine.currentSessionId
+        photos = []
 
         eventTask = Task { [weak self] in
             guard let self else { return }
@@ -217,6 +240,8 @@ final class AppModel {
         previewTail = ""
         items = []
         isPaused = false
+        currentSessionId = nil // the session was just tombstoned in Rust
+        photos = []
         phase = .board
         path = []
     }

@@ -9,6 +9,7 @@ pub mod convert;
 pub mod document;
 pub mod engine;
 pub mod events;
+pub mod photos;
 pub mod session;
 pub mod vocabulary;
 
@@ -16,4 +17,5 @@ pub use convert::{document_payload, partial_document_from_items};
 pub use document::{DocLine, DocumentPayload};
 pub use engine::{EngineConfig, EngineError, MurmurEngine, Providers};
 pub use events::{BoardItem, WalkEvent, WalkEventListener};
+pub use photos::PhotoRef;
 pub use session::WalkSession;

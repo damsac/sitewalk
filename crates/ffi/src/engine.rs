@@ -30,6 +30,12 @@ pub enum EngineError {
     /// contains an api key (memory/vocab strings only).
     #[error("memory error: {0}")]
     Memory(String),
+    /// A photo attachment operation failed (missing/tombstoned session, an
+    /// item_id not in the session, an empty/duplicate filename, a poisoned lock,
+    /// or a persistence failure). Recoverable — surface, don't crash. Contains
+    /// store/validation strings only (never an api key).
+    #[error("photo error: {0}")]
+    Photo(String),
 }
 
 /// Config crossing the FFI boundary. `api_key` is an opaque `String` from the

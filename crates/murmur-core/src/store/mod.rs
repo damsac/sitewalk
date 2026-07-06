@@ -9,6 +9,7 @@ mod contacts;
 mod documents;
 mod items;
 mod jobs;
+mod photos;
 mod sessions;
 mod usage;
 

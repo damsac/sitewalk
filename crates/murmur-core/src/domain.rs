@@ -191,6 +191,24 @@ pub struct Artifact {
     pub device_id: String,
 }
 
+/// A user-captured photo attached to a session (spec: photos never leave the
+/// device — only this METADATA row is sync-ready; the BYTES live in the shell's
+/// Documents dir, local-only forever, Plan 11 D4). `item_id` is an optional
+/// attachment to a specific captured item; it is demoted to `None` if that item
+/// is swept (Plan 11 D3), so a live photo never references a tombstoned item.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Photo {
+    pub id: String,
+    pub session_id: String,
+    pub item_id: Option<String>,
+    /// Shell-owned, opaque to core: a relative filename in `<Documents>/photos/`.
+    pub filename: String,
+    pub captured_at: u64,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub device_id: String,
+}
+
 /// One LLM call's cost record (R9). Append-only.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LlmUsageRow {

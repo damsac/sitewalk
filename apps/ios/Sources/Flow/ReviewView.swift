@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // Document review — interactive: tap an amount to fix it, gaps fill the same
 // way, total recomputes, SEND exports the PDF.
@@ -6,6 +7,10 @@ import SwiftUI
 struct ReviewView: View {
     @Bindable var model: AppModel
     @FocusState private var amountFocused: Bool
+    // Photos (Plan 11) — functional-plain capture entry point + gallery.
+    // sac: placement, layout, thumbnails, empty state are yours; this just
+    // wires PhotosPicker → bytes → engine.attachPhoto.
+    @State private var photoPickerItem: PhotosPickerItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +33,10 @@ struct ReviewView: View {
                             .padding(.top, 2)
                         RevNote(text: doc.note)
                             .padding(.top, 10)
+
+                        // sac: functional-plain gallery + capture entry — yours to restyle.
+                        photoGallery
+                            .padding(.top, 14)
                     }
                     .padding(18)
                     .background(Theme.C.sheet)
@@ -81,6 +90,20 @@ struct ReviewView: View {
         .background(Theme.C.paperDeep.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
+        .task {
+            if let sessionId = model.currentSessionId {
+                model.loadPhotos(sessionId: sessionId)
+            }
+        }
+        .onChange(of: photoPickerItem) { _, newValue in
+            guard let newValue else { return }
+            Task {
+                if let data = try? await newValue.loadTransferable(type: Data.self) {
+                    model.capturePhoto(image: data, itemId: nil)
+                }
+                photoPickerItem = nil
+            }
+        }
         .sheet(isPresented: Binding(
             get: { model.editingRowID != nil },
             set: { if !$0 { model.commitEdit() } }
@@ -102,6 +125,61 @@ struct ReviewView: View {
                     }
                 }
             }
+        }
+    }
+
+    // sac: functional-plain — capture button + bare grid, no thumbnails/empty
+    // state polish. Restyle freely; the wiring (PhotosPicker → capturePhoto,
+    // Image(contentsOfFile:) → removePhoto) is what matters here.
+    private var photoGallery: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("PHOTOS")
+                    .font(Theme.F.mono(11, .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.C.ink60)
+                Spacer()
+                PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                    Text("+ ADD PHOTO")
+                        .font(Theme.F.mono(11, .medium))
+                        .foregroundStyle(Theme.C.orangeDeep)
+                }
+            }
+            if let error = model.photoError {
+                Text(error)
+                    .font(Theme.F.mono(10))
+                    .foregroundStyle(.red)
+            }
+            if !model.photos.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72))], spacing: 8) {
+                    ForEach(model.photos) { photo in
+                        photoThumbnail(photo)
+                    }
+                }
+            }
+        }
+    }
+
+    private func photoThumbnail(_ photo: PhotoModel) -> some View {
+        let url = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("photos")
+            .appendingPathComponent(photo.filename)
+        return ZStack(alignment: .topTrailing) {
+            if let uiImage = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 72, height: 72)
+                    .clipped()
+            } else {
+                Rectangle().fill(Theme.C.ink.opacity(0.08)).frame(width: 72, height: 72)
+            }
+            Button { model.removePhoto(photo) } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.white, .black.opacity(0.6))
+            }
+            .padding(2)
         }
     }
 

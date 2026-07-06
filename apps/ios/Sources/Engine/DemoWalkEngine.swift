@@ -26,6 +26,13 @@ final class DemoWalkEngine: WalkEngine {
     private var vocabulary: [String] = ["french drain", "ledger board"]
     private static let maxVocabularyTerms = 100
 
+    // MARK: Photos (Plan 11) — in-memory demo conformance, no real files.
+    // The demo has no backend, so a fixed session id stands in for a real
+    // `session_id`; captures attach a bundled placeholder image name.
+    private let demoSessionId = "demo-session"
+    private var demoPhotos: [PhotoModel] = []
+    var currentSessionId: String? { demoSessionId }
+
     /// Per-trade trigger phrases, index-aligned with `trade.captured`.
     private static let triggers: [String: [String]] = [
         "landscape": ["mulch", "boxwood", "zone two", "edge the beds", "twelve hundred"],
@@ -93,6 +100,33 @@ final class DemoWalkEngine: WalkEngine {
         let normalized = normalize(term)
         vocabulary.removeAll { $0.caseInsensitiveCompare(normalized) == .orderedSame }
         return vocabulary
+    }
+
+    // MARK: Photos (Plan 11) — in-memory demo conformance.
+
+    func attachPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) -> PhotoModel {
+        let photo = PhotoModel(
+            id: UUID().uuidString,
+            sessionId: sessionId,
+            itemId: itemId,
+            filename: filename,
+            capturedAt: capturedAt ?? UInt64(Date().timeIntervalSince1970)
+        )
+        demoPhotos.append(photo)
+        return photo
+    }
+
+    func listPhotos(sessionId: String) -> [PhotoModel] {
+        demoPhotos.filter { $0.sessionId == sessionId }
+    }
+
+    func removePhoto(photoId: String) {
+        demoPhotos.removeAll { $0.id == photoId }
+    }
+
+    // No real files in the demo — nothing to sweep.
+    func liveLivePhotoFilenames() -> [String] {
+        demoPhotos.map(\.filename)
     }
 
     func finish() async -> DocumentModel {

@@ -206,6 +206,11 @@ struct AppRoot: View {
         }
         .tint(Theme.C.ink)
         .task {
+            // Reconciling sweep (Plan 11 D4): app-open ONLY, never background —
+            // a concurrent sweep could race an in-flight capture (bytes written,
+            // row not yet committed) and delete a just-captured photo. App-open
+            // is a quiescent point (no capture in flight).
+            model.sweepPhotoBytes()
             if live {
                 _ = await SpeechSource.requestPermissions()
             }

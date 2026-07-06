@@ -550,6 +550,12 @@ impl WalkSession {
         self.tick_store_faults.load(Ordering::Relaxed)
     }
 
+    /// The store id of this walk's session — so the capture UI can call
+    /// `engine.add_photo(session_id, …)` during and after the walk (Plan 11 D7).
+    pub fn session_id(&self) -> String {
+        self.session_id.clone()
+    }
+
     /// D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
     /// the terminal swap snapshot + the structured document.
     ///
@@ -789,6 +795,7 @@ mod tests {
             },
         );
         let session = engine.begin_walk(None, "landscape".into()).unwrap();
+        assert!(!session.session_id().is_empty(), "session_id() exposes the store's session id");
 
         let (tx, mut rx) = mpsc::unbounded_channel();
         session.clone().set_event_listener(Arc::new(ChannelListener(tx)));

@@ -28,6 +28,17 @@ enum WalkEvent {
     case transcriptPreview(String)
 }
 
+/// App-facing mirror of the Rust `PhotoRef` (Plan 11 D7) — a display-copy-free
+/// projection. `filename` is a relative name under `<Documents>/photos/`;
+/// resolving it to a real file URL is the capture/gallery view's job.
+struct PhotoModel: Identifiable, Equatable {
+    var id: String
+    var sessionId: String
+    var itemId: String?
+    var filename: String
+    var capturedAt: UInt64
+}
+
 struct DocumentModel {
     var rows: [DocRowFixture]
     var totalKey: String
@@ -93,4 +104,19 @@ protocol WalkEngine: AnyObject {
     func listVocabulary() throws -> [String]
     func addVocabularyTerm(_ term: String) throws -> [String]
     func removeVocabularyTerm(_ term: String) throws -> [String]
+
+    // Photo attachments (Plan 11). Bytes are the SHELL's responsibility: write
+    // the file into <Documents>/photos/ FIRST, then call attachPhoto(...) with
+    // its relative filename. Deletion is the reconciling sweep — see
+    // sweepPhotoBytes() on AppModel. Throwing: the FFI methods are fallible
+    // (missing session, bad item_id, persistence).
+    func attachPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) throws -> PhotoModel
+    func listPhotos(sessionId: String) throws -> [PhotoModel]
+    func removePhoto(photoId: String) throws
+    func liveLivePhotoFilenames() throws -> [String]   // for the sweep
+
+    /// The active walk's session id, so the capture UI can call
+    /// `attachPhoto(sessionId:...)` mid-walk (Plan 11 D7). `nil` when there is
+    /// no live session (not walking, or the real engine has none yet).
+    var currentSessionId: String? { get }
 }
