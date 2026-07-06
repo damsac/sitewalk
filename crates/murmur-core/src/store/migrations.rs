@@ -121,6 +121,25 @@ pub(crate) const MIGRATIONS: &[&str] = &[
         device_id TEXT NOT NULL
     );
     "#,
+    // v5: photo attachments (Plan 11). Metadata + a relative filename only; the
+    // BYTES live in the shell's Documents dir and never sync (privacy: photos
+    // never leave the device, spec §1/§8). Row shape is sync-ready (§9).
+    r#"
+    CREATE TABLE photos (
+        id          TEXT PRIMARY KEY,
+        session_id  TEXT NOT NULL REFERENCES sessions(id),
+        item_id     TEXT REFERENCES items(id),   -- NULL = session-level attachment
+        filename    TEXT NOT NULL,               -- shell-owned, opaque to core (relative name)
+        captured_at INTEGER NOT NULL,            -- unix seconds (EXIF shot-time or now())
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL,
+        device_id   TEXT NOT NULL,
+        deleted_at  INTEGER
+    );
+    -- At most one LIVE row per filename → the reconciling sweep (D4) is unambiguous.
+    CREATE UNIQUE INDEX idx_photos_filename_live ON photos(filename) WHERE deleted_at IS NULL;
+    CREATE INDEX idx_photos_session ON photos(session_id) WHERE deleted_at IS NULL;
+    "#,
 ];
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), CoreError> {
