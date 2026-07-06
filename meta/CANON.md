@@ -10,7 +10,7 @@ Pre-pivot canon (the old voice-notes app) lives in `damsac/Murmur` `meta/CANON.m
 
 ## Product
 
-- **What Murmur is now:** AI meeting notes for blue-collar field work. One button; record an hour-long site walk with the phone in your pocket; on-device transcription; an agent turns it into structured items, documents, and todos. Brand: Murmur. Repo/working title: sitewalk.
+- **What Sitewalk is now:** AI meeting notes for blue-collar field work. One button; record an hour-long site walk with the phone in your pocket; on-device transcription; an agent turns it into structured items, documents, and todos. Brand: Sitewalk (formerly Murmur — see Decisions Log, 2026-07-06). Repo: `damsac/sitewalk`.
 - **Capture-first:** artifacts are a pluggable seam; live in-session extraction onto a board; jobs-board home with `Job` as first-class.
 - **Privacy:** audio never leaves the device; on-device STT; local-first storage.
 
@@ -43,6 +43,7 @@ Centers of gravity, not hard boundaries.
 | 2026-07-01 | Native shells over Tauri (background audio, feel) | dam | pending sac's spec review |
 | 2026-07-01 | Product rules R1–R9 (hidden transcript, deliberate stop, under-extraction bias R6, spend meter R9, …) | dam | pending sac's spec review |
 | 2026-07-03 | Repo `damsac/sitewalk`; brand stays Murmur | dam | sac PR'd into it |
+| 2026-07-06 | **Product name is Sitewalk** — supersedes the 2026-07-03 "repo = sitewalk, brand stays Murmur" split. Sitewalk is now both the repo and the brand; Murmur remains the historical name for the pre-pivot app (`docs/HISTORY.md`). Follow-ups owned elsewhere, not part of this sweep: TestFlight/App Store Connect listing name, and the app display name in the unmerged TestFlight branch's `project-release.yml` | dam | brand decision sweep |
 | 2026-07-04 | Swap-contract fix: items get `source` (live/authoritative/manual); process() clears live items only AFTER successful extraction | dam | core-side; informs sac's board UX |
 | 2026-07-04 | STT: benchmark-first — whisper.cpp Rust-side preferred, 06-spike confirms or kills. Driver: vocabulary→STT biasing; iOS 26 SpeechAnalyzer dropped custom vocabulary | dam | supersedes HANDOFF's "STT stays in Swift"; flagged in PR #1 review |
 | 2026-07-04 | `WalkEngine` seam + `AppModel.init(engine:)` swap point | sac | dam's PR #1 review endorses |

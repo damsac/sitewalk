@@ -1,19 +1,19 @@
-# Murmur
+# Sitewalk
 
-**Speak through a site walk, get a structured document.** Murmur is a field-work
+**Speak through a site walk, get a structured document.** Sitewalk is a field-work
 voice agent for general contractors, inspectors, and trades: talk your way through
 a walk-through and an on-device agent turns it into an organized report — a
 landscape, property, or inspection document — without you touching the phone.
 
 Audio never leaves the device. Local-first, sync-ready.
 
-> Murmur began life as a general-purpose voice-to-second-brain iOS app. On
-> 2026-07-01 it pivoted to field work and was rebuilt on a Rust core. The whole
+> Sitewalk began life as Murmur, a general-purpose voice-to-second-brain iOS app.
+> On 2026-07-01 it pivoted to field work and was rebuilt on a Rust core. The whole
 > arc lives in this one repository — see **[docs/HISTORY.md](docs/HISTORY.md)**.
 
 ## Workspace layout
 
-Murmur is a Rust workspace with native shells:
+Sitewalk is a Rust workspace with native shells:
 
 ```
 crates/
@@ -81,6 +81,6 @@ thinking first, code second.
 ## History
 
 This repo tells the whole story: the Swift/SwiftUI Murmur (Era I), the 2026-07-01
-field-work pivot, the Rust rebuild (Era II, formerly `damsac/sitewalk`), and the
-2026-07-04 re-unification. Start at **[docs/HISTORY.md](docs/HISTORY.md)** for how to
-browse each era in git history.
+field-work pivot, the Rust rebuild (Era II, formerly `damsac/sitewalk`, now
+branded **Sitewalk**), and the 2026-07-04 re-unification. Start at
+**[docs/HISTORY.md](docs/HISTORY.md)** for how to browse each era in git history.

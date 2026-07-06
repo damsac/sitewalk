@@ -1,11 +1,11 @@
-# Murmur
+# Sitewalk
 
 Field-work voice agent. Speak through a site walk; an on-device agent turns it
 into a structured document (landscape / property / inspection report). Audio never
 leaves the device — local-first, sync-ready.
 
-A Rust core workspace with a native SwiftUI iOS shell. (Murmur began as a
-Swift/SwiftUI second-brain app, pivoted to field work on 2026-07-01, and was
+A Rust core workspace with a native SwiftUI iOS shell. (Sitewalk began as Murmur,
+a Swift/SwiftUI second-brain app, pivoted to field work on 2026-07-01, and was
 rebuilt on Rust — the full arc lives in this one repo; see `docs/HISTORY.md`.)
 
 ## Quick Start

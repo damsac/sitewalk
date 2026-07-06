@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-01 (Rev 2, same day — post sac mock review)
 **Status:** Approved by dam (this session). Pending sac review.
+**Brand note (2026-07-06):** the product is now branded **Sitewalk**; this document is a historical snapshot from the 2026-07-01 rebuild decision and retains "Murmur" throughout — see `meta/CANON.md` for the rename.
 **Supersedes:** the current Swift/SwiftUI codebase. This is a ground-up rebuild in a fresh repo under the Murmur brand (working title in sac's design study: SITEWALK).
 
 ## Rev 2 amendments (sac's design study, `SITEWALK — DS-01`)
