@@ -311,6 +311,12 @@ impl Store {
             "UPDATE artifacts SET deleted_at = ?1, updated_at = ?1 WHERE session_id = ?2 AND deleted_at IS NULL",
             rusqlite::params![now, id],
         )?;
+        // Photos CASCADE (not demote) on session delete — the session is gone
+        // (Plan 11 D3).
+        tx.execute(
+            "UPDATE photos SET deleted_at = ?1, updated_at = ?1 WHERE session_id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, id],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -397,6 +403,9 @@ impl Store {
             &sql,
             rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
         )?;
+        // Demote photos of items just swept (Plan 11 D3) — after the item-sweep,
+        // before commit, same tx.
+        self.demote_photos_of_tombstoned_items(session_id)?;
 
         let session = self.mark_session_processed(session_id, summary)?;
         self.record_llm_usage(Some(session_id), "processing", usage)?;
@@ -440,6 +449,9 @@ impl Store {
              WHERE session_id = ?2 AND deleted_at IS NULL",
             rusqlite::params![now, session_id],
         )?;
+        // Demote photos of the authoritative items just swept (Plan 11 D3) —
+        // after the item tombstone, before commit, same tx.
+        self.demote_photos_of_tombstoned_items(session_id)?;
         tx.commit()?;
         Ok(items + artifacts)
     }

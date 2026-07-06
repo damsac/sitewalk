@@ -146,8 +146,12 @@ impl Store {
         Ok(items)
     }
 
+    /// Tombstones an item and demotes its photos to session-level in one
+    /// transaction (Plan 11 D3): deleting a wrongly-extracted item must not
+    /// destroy a real photo — the photo survives, unlinked.
     pub fn delete_item(&self, id: &str) -> Result<(), CoreError> {
         let now = self.now() as i64;
+        let tx = self.conn.unchecked_transaction()?;
         let changed = self.conn.execute(
             "UPDATE items SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
             rusqlite::params![now, id],
@@ -155,6 +159,11 @@ impl Store {
         if changed == 0 {
             return Err(CoreError::NotFound { entity: "item", id: id.to_string() });
         }
+        self.conn.execute(
+            "UPDATE photos SET item_id = NULL, updated_at = ?1 WHERE item_id = ?2 AND deleted_at IS NULL",
+            rusqlite::params![now, id],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 }
