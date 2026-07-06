@@ -32,7 +32,7 @@ trap 'rm -rf "$BINDINGS_DIR"' EXIT
 echo "==> building crates/ffi for aarch64-apple-ios-sim"
 nix develop -c bash -c '
   set -euo pipefail
-  export DEVELOPER_DIR=/Applications/Xcode-26.2.0.app/Contents/Developer
+  export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-$(env -u DEVELOPER_DIR /usr/bin/xcode-select -p)}"
   export SDKROOT=$(/usr/bin/xcrun --sdk iphonesimulator --show-sdk-path)
   # Match the app deployment target (project.yml: iOS 17.0). Without this, rustc
   # links the cdylib probe at its default min (arm64-apple-ios10.0), and the
@@ -55,7 +55,7 @@ nix develop -c bash -c '
 echo "==> building crates/ffi for aarch64-apple-ios (device)"
 nix develop -c bash -c '
   set -euo pipefail
-  export DEVELOPER_DIR=/Applications/Xcode-26.2.0.app/Contents/Developer
+  export DEVELOPER_DIR="${XCODE_DEVELOPER_DIR:-$(env -u DEVELOPER_DIR /usr/bin/xcode-select -p)}"
   export SDKROOT=$(/usr/bin/xcrun --sdk iphoneos --show-sdk-path)
   # Match the app deployment target (project.yml: iOS 17.0) — see the sim
   # invocation above; without it the device cdylib link fails on a missing

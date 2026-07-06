@@ -1,8 +1,11 @@
 import Foundation
 
-// Design fixtures mirroring design/mockup.html — three trades, same bones.
-// These exist so every component and screen can be built and reviewed
-// before the Rust core is wired in. No logic lives here.
+// Header honesty (issue #155): this file is TWO things that should split when
+// convenient. (1) The five struct types below (TagFixture, JobFixture,
+// CapturedFixture, DocRowFixture, TradeFixture) are the app's INTERIM DOMAIN
+// MODEL — the WalkEngine seam speaks them, and the real bridge maps core rows
+// into them. (2) The `Fixtures` enum is canned demo/design data mirroring
+// docs/design/mockup.html. Types are load-bearing; the canned data is not.
 
 enum TagKind { case red, yellow, green, plain }
 

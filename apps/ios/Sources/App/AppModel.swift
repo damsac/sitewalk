@@ -74,6 +74,10 @@ final class AppModel {
     /// (the WAV fixture already has clean PCM). Default off — the Task 12 SNR
     /// eval decides the production default.
     private let voiceProcessing: Bool
+    /// Injection seam for the scripted text source (issue #155): tests and
+    /// previews can substitute a source without touching the walk lifecycle.
+    @ObservationIgnored
+    var makeScriptedSource: (TradeFixture) -> TranscriptSource = { ScriptedSource(trade: $0) }
 
     init(engine: WalkEngine? = nil, scripted: Bool = true, wavFixture: Bool = false,
          voiceProcessing: Bool = false) {
@@ -149,7 +153,7 @@ final class AppModel {
 
     /// Text/demo path: canned transcript → engine.append (unchanged).
     private func startScriptedSource() {
-        let src = ScriptedSource(trade: trade)
+        let src = makeScriptedSource(trade)
         source = src
         audioSource = nil
         pumpTask = Task { [weak self] in
@@ -196,7 +200,7 @@ final class AppModel {
     }
 
     func discardWalk() {
-        source?.stop()
+        source?.abort()
         audioSource?.stop()
         pumpTask?.cancel()
         eventTask?.cancel()
@@ -223,6 +227,12 @@ final class AppModel {
         phase = .building
         path = [.building]
         Task {
+            // Flush before finish (issue #155 / CANON: flush over speed —
+            // the last words of a walk are often the price). `stop()` lets a
+            // final speech result land (grace-bounded in SpeechSource); the
+            // pump ends when the source's stream finishes, so awaiting it
+            // guarantees every flushed chunk reached engine.append first.
+            _ = await pumpTask?.value
             let doc = await engine.finish()
             self.document = doc
             self.phase = .review
@@ -319,6 +329,17 @@ final class AppModel {
                 tag: TagFixture(kind: .green, label: "SENT"), done: true
             )
         }
+        shareURL = nil
+        document = nil
+        phase = .board
+        path = []
+    }
+
+    /// Abandon a reviewed document WITHOUT marking the job sent (issue #155:
+    /// DISCARD previously routed through `completeSend()` and flipped the job
+    /// to SENT). The persisted core artifact is untouched — only the app-side
+    /// review state resets.
+    func discardDocument() {
         shareURL = nil
         document = nil
         phase = .board

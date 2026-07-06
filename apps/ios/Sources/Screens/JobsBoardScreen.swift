@@ -1,4 +1,6 @@
 import SwiftUI
+// TODO(design-freeze): static design-gallery twin of the Flow/ screen — already
+// drifting from the interactive version; DELETE when the design freezes (#155).
 
 // Screen 01 — Jobs board. One line per site, airport-board discipline.
 // 62pt primary action in the thumb zone.

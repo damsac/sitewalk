@@ -42,7 +42,7 @@ struct ReviewView: View {
             .background(Theme.C.paperDeep)
 
             HStack(spacing: 10) {
-                Button { model.completeSend() } label: {
+                Button { model.discardDocument() } label: {
                     Text("DISCARD")
                         .font(Theme.F.ui(14, .bold))
                         .tracking(1.1)
@@ -92,7 +92,15 @@ struct ReviewView: View {
             set: { if !$0 { model.shareURL = nil } }
         )) {
             if let url = model.shareURL {
-                ShareSheet(url: url) { model.completeSend() }
+                // Only a completed share finalizes the walk; cancelling the
+                // sheet returns to review with the document intact (issue #155).
+                ShareSheet(url: url) { completed in
+                    if completed {
+                        model.completeSend()
+                    } else {
+                        model.shareURL = nil
+                    }
+                }
             }
         }
     }

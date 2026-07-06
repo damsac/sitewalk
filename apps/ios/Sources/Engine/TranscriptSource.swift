@@ -24,7 +24,13 @@ protocol TranscriptSource: AnyObject {
     func start()
     func pause()
     func resume()
+    /// Graceful end: FLUSH any in-flight transcription, then finish the
+    /// stream. Used on DONE — the last words of a walk are often the price
+    /// (CANON: flush over speed). May finish the stream up to ~1.5s late.
     func stop()
+    /// Hard end: drop everything in flight and finish the stream NOW.
+    /// Used on discard — nothing is kept, latency wins.
+    func abort()
 }
 
 // MARK: - Scripted (demo) source
@@ -55,7 +61,15 @@ final class ScriptedSource: TranscriptSource {
                     self.continuation.yield(self.script[self.index] + " ")
                     self.index += 1
                 }
-                try? await Task.sleep(for: .milliseconds(260))
+                // Break on cancellation — `try?` alone swallows the thrown
+                // CancellationError and, with sleep returning instantly once
+                // cancelled, the paused loop becomes a main-actor busy-spin
+                // (issue #155).
+                do {
+                    try await Task.sleep(for: .milliseconds(260))
+                } catch {
+                    break
+                }
             }
             self?.continuation.finish()
         }
@@ -63,10 +77,12 @@ final class ScriptedSource: TranscriptSource {
 
     func pause() { paused = true }
     func resume() { paused = false }
+    // Scripted text has nothing in flight to flush: both ends are immediate.
     func stop() {
         task?.cancel()
         continuation.finish()
     }
+    func abort() { stop() }
 }
 
 // MARK: - Live microphone source
@@ -129,6 +145,11 @@ final class SpeechSource: TranscriptSource {
                     self.delivered = text
                     self.continuation.yield(" " + text)
                 }
+                // Final result after a flush → close immediately rather than
+                // waiting out stop()'s grace ceiling.
+                if result.isFinal {
+                    self.continuation.finish()
+                }
             }
         }
     }
@@ -136,7 +157,23 @@ final class SpeechSource: TranscriptSource {
     func pause() { audioEngine.pause() }
     func resume() { try? audioEngine.start() }
 
+    /// Flush: stop the mic but let recognition FINISH the audio it already
+    /// has — `cancel()` here dropped the final utterance (issue #155; CANON:
+    /// flush over speed). The stream closes when the final result lands, with
+    /// a 1.5s grace ceiling so a stalled recognizer can't hang finishWalk().
     func stop() {
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        request?.endAudio()
+        recognition?.finish()
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            self?.continuation.finish()
+        }
+    }
+
+    /// Drop everything in flight — discard path, nothing is kept.
+    func abort() {
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
         request?.endAudio()

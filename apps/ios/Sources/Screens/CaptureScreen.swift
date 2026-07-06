@@ -1,4 +1,6 @@
 import SwiftUI
+// TODO(design-freeze): static design-gallery twin of the Flow/ screen — already
+// drifting from the interactive version; DELETE when the design freezes (#155).
 
 // Screen 02 — Capture. State readable at arm's length: orange banner,
 // live transcript, items ticking onto the board. Offline never loses audio.

@@ -1,4 +1,6 @@
 import SwiftUI
+// TODO(design-freeze): static design-gallery twin of the Flow/ screen — already
+// drifting from the interactive version; DELETE when the design freezes (#155).
 
 // Screen 04 — Document review. It looks like paper because paper is the
 // pitch. Unheard values stay gaps, never guesses. Send is one thumb away.

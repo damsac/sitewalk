@@ -70,11 +70,13 @@ private struct PDFPageView: View {
 
 struct ShareSheet: UIViewControllerRepresentable {
     let url: URL
-    var onComplete: () -> Void
+    /// `true` only when the user completed an activity; a cancelled sheet
+    /// reports `false` and must not finalize the walk (issue #155).
+    var onComplete: (Bool) -> Void
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let vc = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        vc.completionWithItemsHandler = { _, _, _, _ in onComplete() }
+        vc.completionWithItemsHandler = { _, completed, _, _ in onComplete(completed) }
         return vc
     }
 
