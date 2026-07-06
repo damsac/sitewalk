@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::Row;
 
 use crate::domain::Photo;
@@ -133,6 +135,31 @@ impl Store {
             .map_err(CoreError::Sqlite)
     }
 
+    /// Batched per-item live-photo counts for a session (photo_count
+    /// fast-follow, Plan 11 D6): one `GROUP BY item_id` query, never an N+1
+    /// per board item. Only photos attached to a specific item are counted
+    /// (`item_id IS NOT NULL`); session-level photos don't count for any item.
+    /// An item with no live photos is simply ABSENT from the map — callers
+    /// treat a missing key as `0` (see `convert::board_item`).
+    pub fn count_live_photos_by_item_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<HashMap<String, u32>, CoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT item_id, COUNT(*) FROM photos
+             WHERE session_id = ?1 AND deleted_at IS NULL AND item_id IS NOT NULL
+             GROUP BY item_id",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut counts = HashMap::new();
+        while let Some(row) = rows.next()? {
+            let item_id: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            counts.insert(item_id, count as u32);
+        }
+        Ok(counts)
+    }
+
     /// Demote live photos whose `item_id` references a now-tombstoned item in
     /// `session_id` to session-level (`item_id := NULL`). Runs INSIDE the
     /// caller's transaction, AFTER the item tombstone. Order-independent: it
@@ -257,6 +284,24 @@ mod tests {
         let g = s.add_photo(&sid, None, "b.jpg", None).unwrap();
         s.remove_photo(&g.id).unwrap();
         assert_eq!(s.count_photos_for_session(&sid).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_live_photos_by_item_for_session_batches_and_skips_session_level() {
+        let (s, sid) = store_with_session();
+        let i1 = s.add_item(&sid, "todo", "I1").unwrap();
+        let i2 = s.add_item(&sid, "todo", "I2").unwrap();
+        s.add_photo(&sid, Some(&i1.id), "a.jpg", None).unwrap();
+        s.add_photo(&sid, Some(&i1.id), "b.jpg", None).unwrap();
+        s.add_photo(&sid, Some(&i2.id), "c.jpg", None).unwrap();
+        s.add_photo(&sid, None, "d.jpg", None).unwrap(); // session-level, not counted
+        let gone = s.add_photo(&sid, Some(&i2.id), "e.jpg", None).unwrap();
+        s.remove_photo(&gone.id).unwrap(); // tombstoned, not counted
+
+        let counts = s.count_live_photos_by_item_for_session(&sid).unwrap();
+        assert_eq!(counts.get(i1.id.as_str()), Some(&2));
+        assert_eq!(counts.get(i2.id.as_str()), Some(&1));
+        assert_eq!(counts.len(), 2, "items with zero live photos are absent, not zero-valued");
     }
 
     #[test]
