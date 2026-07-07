@@ -62,6 +62,45 @@ jobs:
       - name: cargo clippy --workspace --all-targets -- -D warnings
         run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 
+  ffi-bindings-drift:
+    name: FFI bindings drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+
+      # Same cache key as the `rust` job — this job builds `ffi` (release,
+      # host target, no `whisper` feature) via the same workspace, so it can
+      # reuse those artifacts instead of recompiling from scratch.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # Regenerates apps/ios/Packages/MurmurCoreFFI/Sources/MurmurCoreFFI/ffi.swift
+      # from the current crates/ffi Rust source (host build only — no iOS
+      # cross-compilation; uniffi's proc-macro metadata is platform-independent,
+      # see apps/ios/check-bindings.sh for the full argument) and fails if it
+      # differs from the committed copy. Catches the drift that shipped stale
+      # in PR #176 (regenerated late) and PR #179 (caught only at final review).
+      - name: Check committed Swift bindings are up to date
+        run: ./apps/ios/check-bindings.sh
+
   ios-demo:
     name: iOS demo build (simulator)
     runs-on: macos-latest
