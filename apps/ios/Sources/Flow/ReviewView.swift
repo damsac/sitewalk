@@ -128,58 +128,111 @@ struct ReviewView: View {
         }
     }
 
-    // sac: functional-plain — capture button + bare grid, no thumbnails/empty
-    // state polish. Restyle freely; the wiring (PhotosPicker → capturePhoto,
-    // Image(contentsOfFile:) → removePhoto) is what matters here.
+    // The gallery reads as a contact sheet ON the paper, not an iOS grid:
+    // stamped label, ink-bordered thumbnails with PH-nn index stamps, square
+    // ink ✕ remove, dashed empty state, errors in the red note bar.
     private var photoGallery: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("PHOTOS")
-                    .font(Theme.F.mono(11, .medium))
-                    .tracking(1.2)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                SectionLabel("PHOTOS")
+                Text("× \(model.photos.count)")
+                    .font(Theme.F.mono(9, .semibold))
                     .foregroundStyle(Theme.C.ink60)
                 Spacer()
                 PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                    Text("+ ADD PHOTO")
-                        .font(Theme.F.mono(11, .medium))
+                    Text("+ ADD")
+                        .font(Theme.F.mono(9, .semibold))
+                        .tracking(1.2)
                         .foregroundStyle(Theme.C.orangeDeep)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Theme.C.orangeDeep, lineWidth: 1.5)
+                        )
                 }
+                .buttonStyle(.plain)
             }
+
             if let error = model.photoError {
-                Text(error)
-                    .font(Theme.F.mono(10))
-                    .foregroundStyle(.red)
+                HStack(spacing: 0) {
+                    Theme.C.redTag.frame(width: 3)
+                    Text(error.uppercased())
+                        .font(Theme.F.mono(8))
+                        .tracking(0.4)
+                        .foregroundStyle(Theme.C.redTag)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(Theme.C.redTint)
             }
-            if !model.photos.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72))], spacing: 8) {
-                    ForEach(model.photos) { photo in
-                        photoThumbnail(photo)
+
+            if model.photos.isEmpty {
+                Text("NO PHOTOS — USE THE PHOTO BUTTON DURING A WALK, OR ADD HERE")
+                    .font(Theme.F.mono(8))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.C.ink35)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .padding(.horizontal, 10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(Theme.C.ink35)
+                    )
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 10)], alignment: .leading, spacing: 10) {
+                    ForEach(Array(model.photos.enumerated()), id: \.element.id) { index, photo in
+                        photoThumbnail(photo, index: index)
                     }
                 }
             }
         }
     }
 
-    private func photoThumbnail(_ photo: PhotoModel) -> some View {
+    private func photoThumbnail(_ photo: PhotoModel, index: Int) -> some View {
         let url = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("photos")
             .appendingPathComponent(photo.filename)
-        return ZStack(alignment: .topTrailing) {
-            if let uiImage = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 72, height: 72)
-                    .clipped()
-            } else {
-                Rectangle().fill(Theme.C.ink.opacity(0.08)).frame(width: 72, height: 72)
+        return VStack(alignment: .leading, spacing: 3) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let uiImage = UIImage(contentsOfFile: url.path) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Rectangle().fill(Theme.C.paperDeep)
+                    }
+                }
+                .frame(width: 76, height: 76)
+                .clipped()
+                .overlay(Rectangle().stroke(Theme.C.ink, lineWidth: 1.5))
+
+                Button { model.removePhoto(photo) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.C.paper)
+                        .frame(width: 18, height: 18)
+                        .background(Theme.C.ink)
+                }
+                .buttonStyle(.plain)
             }
-            Button { model.removePhoto(photo) } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.white, .black.opacity(0.6))
+            HStack(spacing: 4) {
+                Text(String(format: "PH-%02d", index + 1))
+                    .font(Theme.F.mono(7, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.ink60)
+                if photo.itemId != nil {
+                    // pinned to a spoken item during the walk
+                    Image(systemName: "link")
+                        .font(.system(size: 6, weight: .bold))
+                        .foregroundStyle(Theme.C.orangeDeep)
+                }
             }
-            .padding(2)
         }
     }
 

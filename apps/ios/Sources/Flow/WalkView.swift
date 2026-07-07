@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // Live capture — the walk. Everything readable at arm's length; controls
 // glove-sized in the thumb zone.
@@ -6,6 +7,8 @@ import SwiftUI
 struct WalkView: View {
     @Bindable var model: AppModel
     var scriptedLabel: Bool
+    @State private var showCamera = false
+    @State private var pickerItem: PhotosPickerItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,8 +64,17 @@ struct WalkView: View {
                     Waveform()
                 }
                 HStack(spacing: 9) {
-                    Button { model.addPhoto() } label: { PhotoSquareButton() }
+                    // One tap, zero confirm: camera on device, picker on sim.
+                    // The shot pins to the item being spoken (see addPhoto).
+                    if CameraCapture.isAvailable {
+                        Button { showCamera = true } label: { PhotoSquareButton() }
+                            .buttonStyle(.plain)
+                    } else {
+                        PhotosPicker(selection: $pickerItem, matching: .images) {
+                            PhotoSquareButton()
+                        }
                         .buttonStyle(.plain)
+                    }
                     Button { model.togglePause() } label: {
                         Text(model.isPaused ? "RESUME" : "PAUSE")
                             .font(Theme.F.ui(13.5, .bold))
@@ -91,5 +103,18 @@ struct WalkView: View {
         .background(Theme.C.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraCapture { data in model.addPhoto(data) }
+                .ignoresSafeArea()
+        }
+        .onChange(of: pickerItem) { _, newValue in
+            guard let newValue else { return }
+            Task {
+                if let data = try? await newValue.loadTransferable(type: Data.self) {
+                    model.addPhoto(data)
+                }
+                pickerItem = nil
+            }
+        }
     }
 }

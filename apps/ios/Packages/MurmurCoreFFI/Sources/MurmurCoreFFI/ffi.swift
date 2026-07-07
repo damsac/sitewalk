@@ -535,6 +535,16 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol MurmurEngineProtocol : AnyObject {
     
     /**
+     * Attaches a photo to a session, optionally to a specific captured item.
+     * The shell writes the bytes FIRST (Plan 11 D4 write order), then calls
+     * this with the resulting filename. `captured_at` is `None` → core
+     * stamps `now()`. Errors: missing/tombstoned session or item -> `Photo`;
+     * an `item_id` not in `session_id` -> `Photo` (InvalidState); a poisoned
+     * lock or persistence failure -> `Photo`.
+     */
+    func addPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) throws  -> PhotoRef
+    
+    /**
      * Add one user vocabulary term (`FactSource::Stated`, D3). Idempotent
      * (case-insensitive). Errors: `Full` at 100 terms, `Empty` for blank input,
      * a poisoned lock, or a persistence failure. Returns the resulting list so
@@ -551,10 +561,28 @@ public protocol MurmurEngineProtocol : AnyObject {
     func beginWalk(jobId: String?, template: String) throws  -> WalkSession
     
     /**
+     * Core's entire file contract (Plan 11 D4): every live photo filename,
+     * across all sessions. The shell sweep deletes any file on disk not in
+     * this set.
+     */
+    func listLivePhotoFilenames() throws  -> [String]
+    
+    /**
+     * Photos attached to a session, insertion order.
+     */
+    func listPhotos(sessionId: String) throws  -> [PhotoRef]
+    
+    /**
      * The user's vocabulary terms, insertion order. Read-only — no lock held
      * across FFI beyond the clone.
      */
     func listVocabulary() throws  -> [String]
+    
+    /**
+     * Tombstones a photo's metadata row. The bytes are reclaimed by the
+     * shell's reconciling sweep (Plan 11 D4), not deleted here.
+     */
+    func removePhoto(photoId: String) throws 
     
     /**
      * Remove one vocabulary term (case-insensitive). Returns the resulting list.
@@ -632,6 +660,25 @@ public convenience init(config: EngineConfig)throws  {
 
     
     /**
+     * Attaches a photo to a session, optionally to a specific captured item.
+     * The shell writes the bytes FIRST (Plan 11 D4 write order), then calls
+     * this with the resulting filename. `captured_at` is `None` → core
+     * stamps `now()`. Errors: missing/tombstoned session or item -> `Photo`;
+     * an `item_id` not in `session_id` -> `Photo` (InvalidState); a poisoned
+     * lock or persistence failure -> `Photo`.
+     */
+open func addPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?)throws  -> PhotoRef {
+    return try  FfiConverterTypePhotoRef.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_add_photo(self.uniffiClonePointer(),
+        FfiConverterString.lower(sessionId),
+        FfiConverterOptionString.lower(itemId),
+        FfiConverterString.lower(filename),
+        FfiConverterOptionUInt64.lower(capturedAt),$0
+    )
+})
+}
+    
+    /**
      * Add one user vocabulary term (`FactSource::Stated`, D3). Idempotent
      * (case-insensitive). Errors: `Full` at 100 terms, `Empty` for blank input,
      * a poisoned lock, or a persistence failure. Returns the resulting list so
@@ -661,6 +708,29 @@ open func beginWalk(jobId: String?, template: String)throws  -> WalkSession {
 }
     
     /**
+     * Core's entire file contract (Plan 11 D4): every live photo filename,
+     * across all sessions. The shell sweep deletes any file on disk not in
+     * this set.
+     */
+open func listLivePhotoFilenames()throws  -> [String] {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_list_live_photo_filenames(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Photos attached to a session, insertion order.
+     */
+open func listPhotos(sessionId: String)throws  -> [PhotoRef] {
+    return try  FfiConverterSequenceTypePhotoRef.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_list_photos(self.uniffiClonePointer(),
+        FfiConverterString.lower(sessionId),$0
+    )
+})
+}
+    
+    /**
      * The user's vocabulary terms, insertion order. Read-only — no lock held
      * across FFI beyond the clone.
      */
@@ -669,6 +739,17 @@ open func listVocabulary()throws  -> [String] {
     uniffi_ffi_fn_method_murmurengine_list_vocabulary(self.uniffiClonePointer(),$0
     )
 })
+}
+    
+    /**
+     * Tombstones a photo's metadata row. The bytes are reclaimed by the
+     * shell's reconciling sweep (Plan 11 D4), not deleted here.
+     */
+open func removePhoto(photoId: String)throws  {try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_remove_photo(self.uniffiClonePointer(),
+        FfiConverterString.lower(photoId),$0
+    )
+}
 }
     
     /**
@@ -977,6 +1058,12 @@ public protocol WalkSessionProtocol : AnyObject {
     func pushAudio(samples: [Float]) 
     
     /**
+     * The store id of this walk's session — so the capture UI can call
+     * `engine.add_photo(session_id, …)` during and after the walk (Plan 11 D7).
+     */
+    func sessionId()  -> String
+    
+    /**
      * Stores the listener (fresh per session — D3/HANDOFF per-session
      * streams).
      */
@@ -1133,6 +1220,17 @@ open func pushAudio(samples: [Float]) {try! rustCall() {
         FfiConverterSequenceFloat.lower(samples),$0
     )
 }
+}
+    
+    /**
+     * The store id of this walk's session — so the capture UI can call
+     * `engine.add_photo(session_id, …)` during and after the walk (Plan 11 D7).
+     */
+open func sessionId() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_ffi_fn_method_walksession_session_id(self.uniffiClonePointer(),$0
+    )
+})
 }
     
     /**
@@ -1753,6 +1851,101 @@ public func FfiConverterTypeEngineConfig_lower(_ value: EngineConfig) -> RustBuf
 
 
 /**
+ * A display-copy-free projection of `murmur_core::Photo` (D-Plan07 posture):
+ * the shell resolves `filename` to a real file URL under its own
+ * `<Documents>/photos/` directory (Plan 11 D4) — core never touches bytes.
+ */
+public struct PhotoRef {
+    public var id: String
+    public var sessionId: String
+    public var itemId: String?
+    public var filename: String
+    public var capturedAt: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, sessionId: String, itemId: String?, filename: String, capturedAt: UInt64) {
+        self.id = id
+        self.sessionId = sessionId
+        self.itemId = itemId
+        self.filename = filename
+        self.capturedAt = capturedAt
+    }
+}
+
+
+
+extension PhotoRef: Equatable, Hashable {
+    public static func ==(lhs: PhotoRef, rhs: PhotoRef) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.itemId != rhs.itemId {
+            return false
+        }
+        if lhs.filename != rhs.filename {
+            return false
+        }
+        if lhs.capturedAt != rhs.capturedAt {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(sessionId)
+        hasher.combine(itemId)
+        hasher.combine(filename)
+        hasher.combine(capturedAt)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePhotoRef: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PhotoRef {
+        return
+            try PhotoRef(
+                id: FfiConverterString.read(from: &buf), 
+                sessionId: FfiConverterString.read(from: &buf), 
+                itemId: FfiConverterOptionString.read(from: &buf), 
+                filename: FfiConverterString.read(from: &buf), 
+                capturedAt: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PhotoRef, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.sessionId, into: &buf)
+        FfiConverterOptionString.write(value.itemId, into: &buf)
+        FfiConverterString.write(value.filename, into: &buf)
+        FfiConverterUInt64.write(value.capturedAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePhotoRef_lift(_ buf: RustBuffer) throws -> PhotoRef {
+    return try FfiConverterTypePhotoRef.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePhotoRef_lower(_ value: PhotoRef) -> RustBuffer {
+    return FfiConverterTypePhotoRef.lower(value)
+}
+
+
+/**
  * Fallible-path errors that cross the FFI boundary as a thrown error rather
  * than a panic (Plan 07 CANON: no panics across FFI). `flat_error` means the
  * Swift side receives the variant plus its `Display` message — no api key is
@@ -1784,6 +1977,14 @@ public enum EngineError {
      * contains an api key (memory/vocab strings only).
      */
     case Memory(message: String)
+    
+    /**
+     * A photo attachment operation failed (missing/tombstoned session, an
+     * item_id not in the session, an empty/duplicate filename, a poisoned lock,
+     * or a persistence failure). Recoverable — surface, don't crash. Contains
+     * store/validation strings only (never an api key).
+     */
+    case Photo(message: String)
     
 }
 
@@ -1817,6 +2018,10 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 5: return .Photo(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1836,6 +2041,8 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         case .Memory(_ /* message is ignored*/):
             writeInt(&buf, Int32(4))
+        case .Photo(_ /* message is ignored*/):
+            writeInt(&buf, Int32(5))
 
         
         }
@@ -1944,6 +2151,30 @@ public func FfiConverterTypeWalkEvent_lower(_ value: WalkEvent) -> RustBuffer {
 extension WalkEvent: Equatable, Hashable {}
 
 
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2092,6 +2323,31 @@ fileprivate struct FfiConverterSequenceTypeDocLine: FfiConverterRustBuffer {
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePhotoRef: FfiConverterRustBuffer {
+    typealias SwiftType = [PhotoRef]
+
+    public static func write(_ value: [PhotoRef], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePhotoRef.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PhotoRef] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PhotoRef]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePhotoRef.read(from: &buf))
+        }
+        return seq
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
 
@@ -2154,13 +2410,25 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_ffi_checksum_method_murmurengine_add_photo() != 53149) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_murmurengine_add_vocabulary_term() != 28855) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_begin_walk() != 41375) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ffi_checksum_method_murmurengine_list_live_photo_filenames() != 39240) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_list_photos() != 9711) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_murmurengine_list_vocabulary() != 10809) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_remove_photo() != 8364) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_remove_vocabulary_term() != 40682) {
@@ -2179,6 +2447,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walksession_push_audio() != 33536) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_walksession_session_id() != 15531) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walksession_set_event_listener() != 4564) {

@@ -22,6 +22,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Photos you take during a walk pin to the item you're describing and land in the finished document.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sitewalk records your walk-and-talk so it can turn it into paperwork.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

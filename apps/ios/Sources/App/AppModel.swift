@@ -216,8 +216,17 @@ final class AppModel {
         }
     }
 
-    func addPhoto() {
-        guard let id = lastCapturedID,
+    /// Walk-time capture (Plan 11 D7 / sac design pass): one tap, zero
+    /// confirm — the shot pins to the item being spoken (`lastCapturedID`,
+    /// dam's D3 rule) or attaches session-level when the board is still
+    /// empty. Core ids are canonical-lowercase UUIDv7; `UUID.uuidString`
+    /// is uppercase, so lowercase across the seam. The chip bump is
+    /// optimistic — the next `boardUpdated` carries the core's
+    /// `photoCount` and self-corrects.
+    func addPhoto(_ data: Data) {
+        capturePhoto(image: data, itemId: lastCapturedID?.uuidString.lowercased())
+        guard photoError == nil,
+              let id = lastCapturedID,
               let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].photos += 1
     }

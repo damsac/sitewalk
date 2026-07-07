@@ -18,13 +18,23 @@ struct BoardView: View {
                         .tracking(2.0)
                         .foregroundStyle(Theme.C.orangeDeep)
                     Spacer()
-                    // sac: placement/glyph/affordance for the vocabulary editor
-                    // entry point is yours — this gear is a functional default.
+                    // Vocabulary entry: a stamped chip in the tag grammar —
+                    // this is a field tool, not settings, so no gear. Padding
+                    // widens the tap target without growing the stamp.
                     Button { showVocabulary = true } label: {
-                        Image(systemName: "gearshape")
+                        Text("VOCAB")
+                            .font(Theme.F.mono(8, .semibold))
+                            .tracking(1.0)
                             .foregroundStyle(Theme.C.ink60)
+                            .padding(.horizontal, 6)
+                            .padding(.top, 3)
+                            .padding(.bottom, 2)
+                            .background(Theme.C.paperDeep)
+                            .padding(6)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .padding(-6)
                 }
                 Text(model.trade.countTitle)
                     .font(Theme.F.ui(26, .bold))
@@ -74,9 +84,11 @@ struct BoardView: View {
         }
         .background(Theme.C.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        // sac: sheet vs. push, chrome, and dismissal affordance are yours.
         .sheet(isPresented: $showVocabulary) {
             VocabularyView(model: model)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Theme.C.paper)
         }
     }
 }

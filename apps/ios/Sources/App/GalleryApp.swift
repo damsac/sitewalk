@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import os
 #if canImport(MurmurCoreFFI)
 import MurmurCoreFFI
@@ -271,7 +272,23 @@ struct AppRoot: View {
                 try? await Task.sleep(for: .seconds(1))
                 model.startWalk()
                 // Let the scripted walk play out, then finish it.
-                try? await Task.sleep(for: .seconds(16))
+                try? await Task.sleep(for: .seconds(8))
+                // Screenshot-automation hook: exercise the walk-time photo
+                // path (button → capturePhoto → FFI → gallery) unattended.
+                if ProcessInfo.processInfo.arguments.contains("autophoto=1"),
+                   model.phase == .walking {
+                    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240))
+                    let image = renderer.image { ctx in
+                        UIColor(red: 0.91, green: 0.33, blue: 0.12, alpha: 1).setFill()
+                        ctx.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
+                        UIColor.white.setFill()
+                        ctx.fill(CGRect(x: 24, y: 100, width: 272, height: 40))
+                    }
+                    if let data = image.jpegData(compressionQuality: 0.8) {
+                        model.addPhoto(data)
+                    }
+                }
+                try? await Task.sleep(for: .seconds(8))
                 if model.phase == .walking {
                     model.finishWalk()
                 }
@@ -292,7 +309,7 @@ struct AppRoot: View {
 
 struct GalleryRoot: View {
     enum Dest: String, Hashable, CaseIterable {
-        case components, jobs, capture, document
+        case components, jobs, capture, document, vocab
 
         var title: String {
             switch self {
@@ -300,6 +317,7 @@ struct GalleryRoot: View {
             case .jobs: return "01 · JOBS BOARD"
             case .capture: return "02 · CAPTURE"
             case .document: return "04 · DOCUMENT REVIEW"
+            case .vocab: return "05 · FIELD VOCABULARY"
             }
         }
     }
@@ -360,6 +378,7 @@ struct GalleryRoot: View {
                 case .jobs: JobsBoardScreen(trade: Fixtures.landscape)
                 case .capture: CaptureScreen(trade: Fixtures.landscape)
                 case .document: DocumentReviewScreen(trade: Fixtures.landscape)
+                case .vocab: VocabularyView(model: AppModel())
                 }
             }
         }
