@@ -14,7 +14,7 @@ private let engineLog = Logger(subsystem: "com.damsac.sitewalk", category: "engi
 //
 // Launch arguments (used by design QA and screenshot automation):
 //   screen=components|jobs|capture|document  → static design gallery pages
-//   live=1                                   → real mic + on-device STT
+//   live=1 / live=0                          → force mic+STT / scripted (default: live on device, scripted on sim)
 //   autoflow=1                               → auto-starts a scripted walk and
 //                                              auto-finishes it (state machine demo)
 //   demo=1                                   → force DemoWalkEngine even if a
@@ -30,8 +30,7 @@ private let engineLog = Logger(subsystem: "com.damsac.sitewalk", category: "engi
 //                                              revert to base.en: small.en's
 //                                              on-device RTF is Mac-proxy
 //                                              evidence only — the iPhone T5
-//                                              tier is still PENDING in
-//                                              spikes/stt-whisper/RESULTS.md.
+//                                              tier is PENDING in spikes/stt-whisper/RESULTS.md.
 
 /// Engine selection (Plan 07 D10/Task 11): real `MurmurEngine` when an API
 /// key + config resolve, `DemoWalkEngine` when launched with `demo=1` OR
@@ -82,6 +81,20 @@ private func resolveSttKnobs(_ args: [String]) -> SttKnobs {
     engineLog.notice("stt gpu=\(useGpu, privacy: .public)")
     engineLog.notice("stt vad_rms=\(vadRms, privacy: .public) no_speech_prob=\(noSpeechProb, privacy: .public)")
     return SttKnobs(useGpu: useGpu, vadRms: vadRms, noSpeechProb: noSpeechProb)
+}
+
+/// Live-mic vs. scripted text walk. `live=1`/`live=0` always win. Default:
+/// scripted on sim (Metal STT SIGTRAPs on MTLSimDevice; QA assumes scripted),
+/// **live** on device. CAVEAT: small.en's on-device RTF is unmeasured (see
+/// resolveSttModelPath) — `sttmodel=base.en`/`live=0` reverts if too slow.
+private func resolveLive(_ args: [String]) -> Bool {
+    if args.contains("live=1") { return true }
+    if args.contains("live=0") { return false }
+    #if targetEnvironment(simulator)
+    return false
+    #else
+    return true
+    #endif
 }
 
 /// Resolves the bundled whisper model path from the `sttmodel=base.en|small.en`
@@ -200,7 +213,7 @@ struct RootRouter: View {
             GalleryRoot()
         } else {
             AppRoot(
-                live: Self.args.contains("live=1"),
+                live: resolveLive(Self.args),
                 wavwalk: Self.args.contains("wavwalk=1"),
                 demo: Self.args.contains("demo=1"),
                 voiceProcessing: Self.args.contains("voiceproc=1"),
