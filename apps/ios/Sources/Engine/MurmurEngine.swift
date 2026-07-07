@@ -366,7 +366,8 @@ final class MurmurEngine: WalkEngine {
             qty: line.qty,
             amount: amountString(line.amountCents),
             isEdit: false, // Deferred 4: pre-filled-from-history affordance
-            isGap: line.isGap
+            isGap: line.isGap,
+            itemId: line.itemId
         )
     }
 

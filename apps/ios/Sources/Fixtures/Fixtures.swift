@@ -54,6 +54,10 @@ struct DocRowFixture: Identifiable {
     let amount: String
     var isEdit: Bool = false
     var isGap: Bool = false
+    /// The core item this row was built from (Plan 12). `nil` for demo/
+    /// fixture rows (no core ids), total/rollup lines, or rows built before
+    /// Plan 12 landed. // sac: a demo could wire a stub id to preview grouping.
+    var itemId: String?
 }
 
 struct TradeFixture {

@@ -273,3 +273,21 @@ struct ReviewView: View {
         .onAppear { amountFocused = true }
     }
 }
+
+// Plan 12 review-time join. sac: layout/labels/empty-states/tap-to-scroll are
+// yours — this is the join only. Photos group under the row whose itemId
+// matches; everything else (nil itemId, demoted photos, photos on items with
+// no row) falls to a session-level group.
+extension ReviewView {
+    private func photos(for row: DocRowFixture) -> [PhotoModel] {
+        guard let itemId = row.itemId else { return [] }
+        return model.photos.filter { $0.itemId == itemId }
+    }
+
+    private var sessionLevelPhotos: [PhotoModel] {
+        let rowItemIds = Set((model.document?.rows ?? []).compactMap { $0.itemId })
+        return model.photos.filter { photo in
+            photo.itemId == nil || !rowItemIds.contains(photo.itemId!)
+        }
+    }
+}
