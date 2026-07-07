@@ -257,6 +257,10 @@ final class MurmurEngine: WalkEngine {
         try engine.listLivePhotoFilenames()
     }
 
+    func sweepZombieSessions() throws -> UInt64 {
+        try engine.sweepZombieSessions()
+    }
+
     private nonisolated static func photo(_ ref: MurmurCoreFFI.PhotoRef) -> PhotoModel {
         PhotoModel(
             id: ref.id,

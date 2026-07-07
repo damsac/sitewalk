@@ -129,6 +129,12 @@ final class DemoWalkEngine: WalkEngine {
         demoPhotos.map(\.filename)
     }
 
+    // No Recording rows to leak in the scripted demo (no crash-orphaned
+    // sessions are possible here) — nothing to sweep.
+    func sweepZombieSessions() -> UInt64 {
+        0
+    }
+
     func finish() async -> DocumentModel {
         continuation?.finish()
         continuation = nil

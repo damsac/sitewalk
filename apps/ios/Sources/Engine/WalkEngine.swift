@@ -126,6 +126,17 @@ protocol WalkEngine: AnyObject {
     func removePhoto(photoId: String) throws
     func liveLivePhotoFilenames() throws -> [String]   // for the sweep
 
+    /// App-open zombie sweep: a `Recording` session left behind by a crash or
+    /// force-quit mid-walk can never resume (there is no live session for it
+    /// after relaunch) — this transitions every such row to `Failed` so it
+    /// stops sitting in `Recording` forever. Called once at app open,
+    /// alongside `sweepPhotoBytes()` (see `AppRoot.body`'s `.task`).
+    /// Transcript/items survive; `Failed -> Processed` remains the existing
+    /// retry path. Returns the number swept (`0` on a clean relaunch).
+    /// `DemoWalkEngine` no-ops (there is no Recording concept to leak in the
+    /// scripted demo).
+    func sweepZombieSessions() throws -> UInt64
+
     /// The active walk's session id, so the capture UI can call
     /// `attachPhoto(sessionId:...)` mid-walk (Plan 11 D7). `nil` when there is
     /// no live session (not walking, or the real engine has none yet).
