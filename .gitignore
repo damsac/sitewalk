@@ -8,5 +8,9 @@
 # simulator/QA capture evidence
 /screenshots/
 
-# On-device whisper model (large binary, provisioned locally — see apps/ios/build-ffi.sh)
+# On-device whisper model (large binary, provisioned locally — see
+# apps/ios/fetch-whisper-model.sh). Both the shipped default (small.en) and
+# the revertible fallback (base.en) are gitignored; either or both may be
+# present on disk depending on which models you've fetched.
 apps/ios/Sources/Resources/ggml-base.en-q5_1.bin
+apps/ios/Sources/Resources/ggml-small.en-q5_1.bin
