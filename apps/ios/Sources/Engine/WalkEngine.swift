@@ -110,7 +110,18 @@ protocol WalkEngine: AnyObject {
     // its relative filename. Deletion is the reconciling sweep — see
     // sweepPhotoBytes() on AppModel. Throwing: the FFI methods are fallible
     // (missing session, bad item_id, persistence).
-    func attachPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) throws -> PhotoModel
+    //
+    // `attachPhoto` is `async` (PR #176 should-fix): the real implementation's
+    // FFI call takes the same `std::Mutex` store lock the Rust pump thread
+    // contends for during live-extraction commits, so it can block for a
+    // while. `async` lets `MurmurEngine` hop the actual call off the main
+    // actor (`Task.detached`) while the app-facing call site stays a normal
+    // `await` that never blocks the UI thread. `DemoWalkEngine` needs no
+    // change — a synchronous function already satisfies an `async` protocol
+    // requirement.
+    func attachPhoto(
+        sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?
+    ) async throws -> PhotoModel
     func listPhotos(sessionId: String) throws -> [PhotoModel]
     func removePhoto(photoId: String) throws
     func liveLivePhotoFilenames() throws -> [String]   // for the sweep

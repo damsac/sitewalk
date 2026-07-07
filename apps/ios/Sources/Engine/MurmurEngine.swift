@@ -227,8 +227,21 @@ final class MurmurEngine: WalkEngine {
         session?.sessionId()
     }
 
-    func attachPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) throws -> PhotoModel {
-        let ref = try engine.addPhoto(sessionId: sessionId, itemId: itemId, filename: filename, capturedAt: capturedAt)
+    // Off-main (PR #176 should-fix): `engine.addPhoto` blocks on the same
+    // `std::Mutex` store lock the Rust pump thread holds during live-extraction
+    // commits. Capture the (Sendable, thread-safe-by-design FFI handle)
+    // `engine` reference on the main actor, then run the actual blocking call
+    // on `Task.detached` so the main thread is never held hostage by the lock.
+    // The `await` below is the only suspension point — callers (AppModel,
+    // already `@MainActor`) resume on the main actor exactly where they left
+    // off, no extra hop needed on their end.
+    func attachPhoto(
+        sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?
+    ) async throws -> PhotoModel {
+        let engine = self.engine
+        let ref = try await Task.detached {
+            try engine.addPhoto(sessionId: sessionId, itemId: itemId, filename: filename, capturedAt: capturedAt)
+        }.value
         return Self.photo(ref)
     }
 
