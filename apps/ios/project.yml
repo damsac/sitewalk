@@ -29,6 +29,9 @@ targets:
         # supplied by the gitignored project.local.yml and expanded by xcodebuild
         # into the built app's Info.plist. This tracked value never holds a secret.
         PPQ_API_KEY: "$(PPQ_API_KEY)"
+        # Provider base URL (e.g. https://api.ppq.ai). Same injection flow as
+        # the key; empty => provider default (api.anthropic.com).
+        ANTHROPIC_BASE_URL: "$(ANTHROPIC_BASE_URL)"
         CFBundleDisplayName: Sitewalk
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "Sitewalk records your walk-and-talk so it can turn it into paperwork."

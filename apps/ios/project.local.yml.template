@@ -9,3 +9,7 @@ settings:
     # engine (no real LLM). ./generate.sh populates this from ANTHROPIC_API_KEY
     # in the repo-root .env.
     PPQ_API_KEY: ""
+    # Provider base URL (e.g. https://api.ppq.ai for PPQ). Empty => provider
+    # default (api.anthropic.com). ./generate.sh populates this from
+    # ANTHROPIC_BASE_URL in the repo-root .env.
+    ANTHROPIC_BASE_URL: ""

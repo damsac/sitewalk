@@ -89,7 +89,11 @@ private func resolveEngine(demo: Bool) -> WalkEngine? {
         engineLog.notice("engine=demo (no PPQ_API_KEY configured)")
         return nil // no key configured -> demo path (D10)
     }
+    // Env var wins (ad-hoc override via SIMCTL_CHILD_…), else the value baked
+    // into Info.plist by generate.sh — so icon-tap launches hit the right
+    // provider without any environment plumbing.
     let baseURL = ProcessInfo.processInfo.environment["ANTHROPIC_BASE_URL"]
+        ?? (Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_BASE_URL") as? String)
     // iOS does not pre-create Application Support; murmur-core opens its SQLite
     // store at dbPath and panics if the parent directory is missing. Ensure it
     // exists before handing the path to the engine.

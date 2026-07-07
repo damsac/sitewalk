@@ -43,6 +43,16 @@ elif [ -f "$ENV_FILE" ] && grep -qE '^ANTHROPIC_API_KEY=' "$ENV_FILE"; then
   KEY="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
 fi
 
+# Resolve the provider base URL the same way (PPQ et al). Baked into the built
+# app's Info.plist so icon-tap launches work — a SIMCTL_CHILD_ env var only
+# reaches the app when launched via `simctl launch`, which nobody does twice.
+BASE_URL=""
+if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+  BASE_URL="$ANTHROPIC_BASE_URL"
+elif [ -f "$ENV_FILE" ] && grep -qE '^ANTHROPIC_BASE_URL=' "$ENV_FILE"; then
+  BASE_URL="$(grep -E '^ANTHROPIC_BASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
+fi
+
 if [ -z "$KEY" ]; then
   echo "WARN: no ANTHROPIC_API_KEY in env or $ENV_FILE." >&2
   echo "      The real core is linked but will fall back to the DEMO engine at" >&2
@@ -56,6 +66,7 @@ cat > "$LOCAL" <<EOF
 settings:
   base:
     PPQ_API_KEY: "$KEY"
+    ANTHROPIC_BASE_URL: "$BASE_URL"
 EOF
 
 # Whisper model check (Plan 08 D5): the model must be an APP-TARGET resource
