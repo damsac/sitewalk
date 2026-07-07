@@ -27,7 +27,13 @@ Updated when priorities shift. Either person can propose changes via PR.
 
 ## Done 2026-07-06
 
-**Photo attachments (Plan 11) LANDED** — `photos` table (migration v5, transactional, append-only): mandatory `session_id`, optional `item_id`, a shell-owned opaque `filename`, `captured_at`, sync-ready row shape (UUIDv7/timestamps/device_id/tombstone). The load-bearing fix is **demote-on-swap (D3)**: an item tombstone (the live→authoritative swap at finish, `clear_authoritative_outputs`, a manual `delete_item`) demotes that item's photos to session-level (`item_id := NULL`) rather than leaving them dangling on a tombstoned item or losing them; a session tombstone (including via `WalkSession::cancel()`) cascades and tombstones its photos outright. **File-handling seam (D4):** core owns metadata only — one query, `list_live_photo_filenames()` — and never touches bytes; the shell owns `<Documents>/photos/`, writes bytes *before* calling `add_photo` (crash-safe orphan-then-sweep), and reclaims bytes via a **reconciling sweep on app-open only** (never background — would race an in-flight capture). Processing is untouched (`SessionProcessor::process()` unmodified); photos surface via a parallel `list_photos_for_session` read path — vision analysis and document-artifact photo refs are named future work. FFI: `add_photo`/`list_photos`/`remove_photo`/`list_live_photo_filenames` on `MurmurEngine` (throwing, panic-free, `EngineError::Photo`), `WalkSession.session_id()`. iOS: functional-plain capture (PhotosPicker) + gallery wired through `WalkEngine` (demo + real-core), **visuals sac's** (`// sac:` markers). Follow-ups named, not built: vision-model photo analysis, document/PDF photo embedding, live-board per-item `photo_count` (stays `0`), cross-device photo sharing (bytes are local-only forever). Plan: `docs/superpowers/plans/2026-07-06-rust-core-11-photo-attachments.md`.
+**Photo attachments (Plan 11) LANDED** — `photos` table (migration v5, transactional, append-only): mandatory `session_id`, optional `item_id`, a shell-owned opaque `filename`, `captured_at`, sync-ready row shape (UUIDv7/timestamps/device_id/tombstone). The load-bearing fix is **demote-on-swap (D3)**: an item tombstone (the live→authoritative swap at finish, `clear_authoritative_outputs`, a manual `delete_item`) demotes that item's photos to session-level (`item_id := NULL`) rather than leaving them dangling on a tombstoned item or losing them; a session tombstone (including via `WalkSession::cancel()`) cascades and tombstones its photos outright. **File-handling seam (D4):** core owns metadata only — one query, `list_live_photo_filenames()` — and never touches bytes; the shell owns `<Documents>/photos/`, writes bytes *before* calling `add_photo` (crash-safe orphan-then-sweep), and reclaims bytes via a **reconciling sweep on app-open only** (never background — would race an in-flight capture). Processing is untouched (`SessionProcessor::process()` unmodified); photos surface via a parallel `list_photos_for_session` read path — vision analysis and document-artifact photo refs are named future work. FFI: `add_photo`/`list_photos`/`remove_photo`/`list_live_photo_filenames` on `MurmurEngine` (throwing, panic-free, `EngineError::Photo`), `WalkSession.session_id()`. iOS: functional-plain capture (PhotosPicker) + gallery wired through `WalkEngine` (demo + real-core), **visuals sac's** (`// sac:` markers). Follow-ups named, not built: vision-model photo analysis, document/PDF photo embedding, cross-device photo sharing (bytes are local-only forever). Plan: `docs/superpowers/plans/2026-07-06-rust-core-11-photo-attachments.md`.
+
+**Photo count fast-follow LANDED (#174)** — the one follow-up from Plan 11 that didn't wait: `BoardItem.photo_count` is now wired to real per-item counts on the live board snapshot, batched one query per snapshot tick (not per-item), stale-until-next-tick accepted as the posture rather than chased with per-write invalidation.
+
+**Base-URL Info.plist fix LANDED (#173, sac)** — `ANTHROPIC_BASE_URL` now bakes into the built app's Info.plist the same way `PPQ_API_KEY` already did, so icon-tap launches (not just simctl-launched ones) pick up a non-default provider base URL.
+
+**Whisper model provisioning LANDED (#175)** — `fetch-whisper-model.sh` does a sha256-verified download of the bundled ggml model; `small.en` is now the default (strictly better WER/hallucination than base.en at every measured SNR on the Mac-proxy spike), with a one-arg revert (`STT_MODEL=base.en` / `sttmodel=base.en`) kept live pending the iPhone T5 on-device RTF proof.
 
 ## Done 2026-07-05 (the big day)
 
@@ -35,9 +41,9 @@ Re-unification complete (repo = **damsac/sitewalk**, one history, Swift Era I pr
 
 ## Decisions needed (joint)
 
-- Template keys: adopt `landscape | property | inspection` as canonical? (dam: yes — needs sac's ack)
-- STT DONE semantics: flush final utterance vs speed
 - Fate of the Gallery/Screens static twins after design freeze
+
+Template keys (`landscape | property | inspection`) and STT DONE semantics (flush over speed) are **closed** — see CANON.md's 2026-07-06 entry (sac ack via PR #167, dam via Plan 08 D6).
 
 ## Completed (rebuild era)
 

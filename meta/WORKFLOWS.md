@@ -1,6 +1,6 @@
 # Workflows
 
-How dam and sac work together on Murmur. The day-to-day practices.
+How dam and sac work together on Sitewalk. The day-to-day practices.
 
 ---
 
@@ -21,25 +21,29 @@ How dam and sac work together on Murmur. The day-to-day practices.
 
 ### 2. Build
 
-- Work on your branch (`dam` or `sac`) — commit freely
+- Work on your own branch — commit freely
 - Each person works with their own Claude instance
 - Claude's reasoning is the valuable artifact — not just the code it produces
+- Build with `direnv allow` (Nix dev shell: Rust toolchain, xcodegen, ...);
+  see `CLAUDE.md` for the full Rust + iOS command table — not duplicated here
 
 ### 3. Ship (`/ship`)
 
 - Update your STATE.md with decisions, open questions, needs
-- Branch off for the PR: `git checkout -b pr/dam/<pr-name>`
-- Open PR from `pr/dam/<pr-name>` → `main` with **Thinking** section
+- Branch off for the PR: `git checkout -b pr/dam/<pr-name>` (or `pr/sac/<pr-name>`)
+- Open PR from `pr/<you>/<pr-name>` → `main` with a **Thinking** section
+- CI gates every PR automatically (nix Rust build+test+clippy, iOS demo build) —
+  don't merge until it's green
 - Update ROADMAP.md if priorities changed
 - Propose CANON.md additions if decisions were made
-- Go back to your working branch and keep going: `git checkout dam`
+- Merges land on `main` via PR only (no direct pushes)
 
 ### After a PR merges
 
 Rebase your working branch onto main to stay clean:
 ```
 git checkout main && git pull
-git checkout dam && git rebase main
+git checkout <your-branch> && git rebase main
 ```
 
 This keeps your next PR's diff clean — no duplicate commits from already-merged work.
@@ -57,7 +61,8 @@ Read in this order:
 If the thinking is wrong, the code doesn't matter. Push back on the thinking.
 If the thinking is sound but the code is off, that's a smaller conversation.
 
-Sac reviews dam's PRs in order. Dam reviews sac's PRs in order. Linear thinking review.
+Sac reviews dam's PRs; dam reviews sac's PRs. Linear thinking review — see
+`meta/RECONCILIATION.md` for the full protocol.
 
 ### 5. Reconcile
 
@@ -68,11 +73,10 @@ After merging:
 
 ## Who does what
 
-**dam** focuses on architecture, backend, and core systems — the pipeline in `Packages/MurmurCore/`, data models, agent protocol, and LLM integration. Also contributes to the frontend.
-
-**sac** focuses on frontend — SwiftUI views, interactions, gestures, and the user-facing experience in `Murmur/`.
-
-These are centers of gravity, not walls. Both touch whatever needs touching.
+**dam** — harness / murmur-core / STT / FFI: `crates/harness`, `crates/murmur-core`,
+`crates/stt`, `crates/ffi`. **sac** — renderers / component library / visual
+direction: `apps/ios/` (SwiftUI shell). Both touch whatever needs touching — these
+are centers of gravity, not walls.
 
 ## Communication patterns
 
@@ -87,15 +91,6 @@ These are centers of gravity, not walls. Both touch whatever needs touching.
 - When STATE files show conflicting assumptions
 - When both are touching the same area of the codebase
 
-## Tool conventions
-
-- **Claude Code:** Both dam and sac use Claude Code with project-specific skills
-- **Metacraft skills:** Installed at user level (`~/.claude/skills/`). Both collaborators have: `/genesis`, `/meta-agent`, `/session-lifecycle`, `/tmux-lanes`, `/gather`, `/skill-creator`
-- **Project commands:** `/start`, `/status`, `/ship` — the mechanical workflow (project-level, in `.claude/commands/`)
-- **GitHub:** PRs, issues, project board — the collaboration surface
-- **Nix:** Reproducible dev environment — no "works on my machine"
-- **XcodeGen:** Xcode project generated from project.yml — no merge conflicts on .xcodeproj
-
 ## What goes where
 
 | Artifact | Location | When to update |
@@ -104,13 +99,10 @@ These are centers of gravity, not walls. Both touch whatever needs touching.
 | Priorities | `meta/ROADMAP.md` | When work ships or priorities shift |
 | Your current state | `meta/<you>/STATE.md` | Every PR |
 | Your process | `meta/<you>/PROCESS.md` | When your workflow changes |
-| Feature plans | `docs/plans/` | Before building |
-| Design explorations | `docs/brainstorms/` | When exploring |
-| Product spec | `.claude/project-spec.yml` | When product decisions change |
-| How we work | `meta/WORKFLOWS.md` | When practices evolve |
-| PR reconciliation | `meta/RECONCILIATION.md` | Rarely (it's the protocol) |
-| In-app help | `Murmur/Views/Settings/HelpView.swift` | When releasing a new version or changing features |
+| Plans (specs before building) | `docs/plans/`, `docs/superpowers/plans/` | Before building |
+| Research / design explorations | `docs/research/`, `docs/brainstorms/` | When exploring |
+| How we work | `meta/WORKFLOWS.md` (this file) | When practices evolve |
+| PR reconciliation protocol | `meta/RECONCILIATION.md` | Rarely (it's the protocol) |
 
-## Release checklist reminder
-
-When releasing a new version or changing user-facing features, review the in-app help page (`HelpView.swift`) to ensure its content is up to date with the current feature set.
+Build commands, architecture, and dev-shell detail live in `CLAUDE.md` (repo root)
+and `apps/ios/README.md` — don't duplicate them here; link to them instead.
