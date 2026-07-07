@@ -38,6 +38,14 @@ gitignored `project.local.yml` and the generated (gitignored) `.xcodeproj`;
 xcodebuild expands `$(PPQ_API_KEY)` into the built app's Info.plist at build
 time. No tracked file ever holds the secret.
 
+`./generate.sh` also fetches the on-device whisper model via
+`./fetch-whisper-model.sh` (gitignored binary, sha256-verified, cached after
+the first fetch): default **small.en** (~190 MB), with a one-arg revert to
+**base.en** (~60 MB) via `STT_MODEL=base.en ./generate.sh` or the runtime
+`sttmodel=base.en` launch arg. small.en's promotion is Mac-proxy evidence only
+— see `fetch-whisper-model.sh`'s header and `spikes/stt-whisper/RESULTS.md`
+(iPhone T5 device tier still PENDING).
+
 > Switching modes in an existing checkout can leave a stale SwiftPM package graph
 > in DerivedData — if a build errors with `Unable to find module dependency:
 > 'ffiFFI'`, delete DerivedData and rebuild. A clean checkout is unaffected.
@@ -54,4 +62,6 @@ Design source of truth: `../../docs/design/BRIEF.md` (rationale) and
 `../../docs/design/mockup.html` (visual reference, open in a browser).
 
 Launch args: `autoflow=1` (scripted walk plays itself), `autopdf=1` (+ PDF),
-`live=1` (real mic + on-device STT), `screen=<page>` (design gallery).
+`live=1` (real mic + on-device STT), `screen=<page>` (design gallery),
+`sttmodel=base.en|small.en` (which bundled whisper model to load; default
+small.en).
