@@ -14,6 +14,10 @@ pub struct DocLine {
     /// Template-aware (D2a) — set by the `build_document` tool, never derived
     /// by the FFI layer from `amount_cents == None`.
     pub is_gap: bool,
+    /// The core item this row was built from (Plan 12). `None` for
+    /// total/rollup lines, or an old document body written before Plan 12.
+    /// Additive; never derived by the FFI layer.
+    pub item_id: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]

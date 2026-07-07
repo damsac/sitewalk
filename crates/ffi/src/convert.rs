@@ -50,6 +50,7 @@ pub fn document_payload(artifact: &Artifact) -> Result<DocumentPayload, ConvertE
                     amount_cents: line.get("amount_cents").and_then(|x| x.as_i64()),
                     section: line.get("section").and_then(|x| x.as_str()).map(str::to_string),
                     is_gap: line.get("is_gap").and_then(|x| x.as_bool()).unwrap_or(false),
+                    item_id: line.get("item_id").and_then(|x| x.as_str()).map(str::to_string),
                 })
                 .collect()
         })
@@ -107,6 +108,7 @@ pub fn partial_document_from_items(
                 amount_cents: None,
                 section: None,
                 is_gap: true,
+                item_id: Some(item.id.clone()),
             })
             .collect(),
         queued,
@@ -186,6 +188,52 @@ mod tests {
         let est = partial_document_from_items("estimate", &[], true);
         assert_eq!(est.total_kind, "sum");
         assert_eq!(est.total_label_key, "total");
+    }
+
+    #[test]
+    fn document_line_carries_item_id_when_present_and_none_when_absent() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        let body = serde_json::json!({
+            "doc_kind":"estimate","doc_number":47,"job_date_unix":1000,
+            "total_kind":"sum","total_label_key":"total","static_total_cents":null,
+            "lines":[
+                {"id":"l1","title":"Mulch","detail":"","qty":"","amount_cents":28500,"section":null,"is_gap":false,"item_id":"item-A1"},
+                {"id":"l2","title":"Subtotal","detail":"","qty":"","amount_cents":90600,"section":null,"is_gap":false}
+            ],
+            "queued":false
+        });
+        let art = store.add_artifact(&session.id, "document", "estimate #47", &body.to_string()).unwrap();
+        let payload = document_payload(&art).unwrap();
+        assert_eq!(payload.lines[0].item_id.as_deref(), Some("item-A1"));
+        assert_eq!(payload.lines[1].item_id, None, "a line with no item_id parses to None");
+    }
+
+    #[test]
+    fn pre_plan12_document_body_parses_all_item_ids_as_none() {
+        // A body written before Plan 12 (no item_id on any line) renders unchanged.
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        let body = serde_json::json!({
+            "doc_kind":"estimate","doc_number":1,"job_date_unix":0,
+            "total_kind":"sum","total_label_key":"total","static_total_cents":null,
+            "lines":[{"id":"l1","title":"Mulch","detail":"","qty":"","amount_cents":100,"section":null,"is_gap":false}],
+            "queued":false
+        });
+        let art = store.add_artifact(&session.id, "document", "estimate #1", &body.to_string()).unwrap();
+        assert_eq!(document_payload(&art).unwrap().lines[0].item_id, None);
+    }
+
+    #[test]
+    fn offline_partial_document_carries_the_item_id() {
+        use murmur_core::{ItemSource, Store};
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        let item = store.add_item_with_source(&session.id, "todo", "haul debris", ItemSource::Live).unwrap();
+        let doc = partial_document_from_items("estimate", std::slice::from_ref(&item), true);
+        assert_eq!(doc.lines[0].item_id.as_deref(), Some(item.id.as_str()),
+            "the offline fallback builds rows from items — item_id is trivially the item's id");
+        assert_eq!(doc.lines[0].id, item.id, "line id also equals the item id in the fallback path");
     }
 
     #[test]
