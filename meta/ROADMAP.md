@@ -15,15 +15,24 @@ Updated when priorities shift. Either person can propose changes via PR.
 
 ## Up Next (sequenced)
 
-1. **TestFlight first publish** — pipeline BUILT (`pr/dam/testflight-rebuild`, unmerged: merging arms auto-publish on every main push). Sequence: dam signs the Apple agreement → dry-run (workflow_dispatch upload=false) → coordinate with sac → merge. CI itself landed (#160, every PR gated).
-2. **Accuracy hardening** (Plan 09): thread 1 (word-level timestamps) **landed** — `token_timestamps` → per-word timing → word-anchored coarse-seam drop, degrading to segment-coarse when absent/mismatched; thread 2 (live-prompt pins) **landed as scaffolding** — golden assembled-prompt snapshot + grader-over-live-board, hermetic. The real-API live-grading extension (non-circular F0.5 movement) is **flagged/deferred** to the optimization loop (item 4). The SNR sweep rerun (`--token-timestamps`, WER/RTF delta + the `word_timestamps: true` default verdict) is **device-gated for dam** (Task 7).
-3. **Prompt-optimization loop** on the 05b eval suite (rank on F0.5, gate on recall).
+1. sac's bug-fix PR (`pr/sac/testflight-bug-fixes`) — thinking-first review once it's up.
+2. Recover-walk UI (future) — todo-leak named deliberately in #185; crash-orphaned sessions resolve to `Failed`, not recovered, today.
+3. Real-engine-beta decision — how a release build gets its API key/base-url (bake vs. runtime config); #18/#19 both ship on the demo engine pending this.
+4. ASC listing rename to **Sitewalk** (dam/sac shared App Store Connect access).
+5. **Accuracy hardening** (Plan 09): thread 1 (word-level timestamps) **landed** — `token_timestamps` → per-word timing → word-anchored coarse-seam drop, degrading to segment-coarse when absent/mismatched; thread 2 (live-prompt pins) **landed as scaffolding** — golden assembled-prompt snapshot + grader-over-live-board, hermetic. The real-API live-grading extension (non-circular F0.5 movement) is **flagged/deferred** to the optimization loop (item 4). The SNR sweep rerun (`--token-timestamps`, WER/RTF delta + the `word_timestamps: true` default verdict) is **device-gated for dam** (Task 7).
+6. **Prompt-optimization loop** on the 05b eval suite (rank on F0.5, gate on recall).
 
 ### Vocabulary → STT biasing loop (Plan 10)
 
 **Write half LANDED** — the differentiator's data path is now closable end-to-end. A vocabulary management surface on `harness::Memory` (`VOCABULARY_SECTION`/`MAX_VOCABULARY_TERMS`(100)/`MAX_VOCABULARY_TERM_WORDS`(6) constants, `VocabAdd`, symmetric-normalized case-insensitive dedup, write-time reject-when-full cap, a `Stated` provenance floor so user terms outlive `Inferred` ones under cap pressure); FFI CRUD on `MurmurEngine` (`list`/`add`/`remove_vocabulary_term`, throwing/panic-free, lock-then-save, `EngineError::Memory`); a functional-plain iOS editor wired through `WalkEngine` (**visuals are sac's** — `// sac:` handoff markers throughout); and a hermetic e2e proving add-via-FFI → `collect_bias_terms` → `build_bias_prompt`. Reflection carries one preserve-vocabulary prompt sentence (no new machinery). Real recall-lift on device is spike-harness-measured, **flagged for dam** (not CI). Plan: `docs/plans/2026-07-05-rust-core-10-vocabulary-loop.md`.
 
 **Still open:** the **onboarding interview** that SEEDS vocabulary (D9, joint dam+sac) — the `add_vocabulary_term` path is ready to receive its output; **auto-harvest** of proper nouns from live extraction (D9 seam — the `source` param takes `Inferred`, detection not built); a **protected-vocabulary tier** (D3, dam) — v1 ships the `Stated` floor + reflection prompt line and measures on device before escalating (`Corrected` overload vs. a new `Pinned` rank vs. vocabulary-aware `prune_stale`).
+
+## Done 2026-07-08
+
+**TestFlight pipeline reconciled and merged/ARMED, first publish SUCCESS (#184)** — the branch carried over from #183's Up Next (`pr/dam/testflight-rebuild`) landed reconciled, dry-run green on run `28900094459` (workflow_dispatch, upload=false: build + sign + export the .ipa, no ASC upload). Merging armed the two live lanes: a push to main now means internal auto-publish (continuous, team dogfoods), a `v*` tag means an external candidate. **The milestone**: merging #184 fired the first-ever publish — **build #18, 2026-07-08, the rebuild is live on internal TestFlight**. It ships the demo engine (no PPQ key baked into the archive) — a standing decision, not an oversight, pending the real-engine-beta call below.
+
+**Zombie-Recording sweep (#185)**, published as build #19 — a session crash-orphaned mid-recording (app killed, device reboot) previously sat in `Recording` state forever, invisible to any UI. On app open, the core now sweeps and flips any such session to `Failed`. The race (a session finishing normally *during* the sweep) is closed by a pinned ordering invariant. The todo-leak — orphaned partial work is failed-out, not recovered — persists **deliberately**; a future recover-walk UI is named, not built.
 
 ## Done 2026-07-07
 

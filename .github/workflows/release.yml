@@ -58,6 +58,17 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # paths-ignore only filters BRANCH pushes (per GitHub Actions docs: "Path
+    # filters are not evaluated for pushes of tags") — a v* tag push always
+    # fires this workflow regardless of what files it touches, and
+    # workflow_dispatch is a separate trigger entirely, also unaffected.
+    # Code merges to main publish (internal TestFlight); docs/meta-only
+    # merges to main do not — nothing in those changes affects the shipped
+    # app, so there's no reason to burn a build number or a TestFlight slot.
+    paths-ignore:
+      - 'docs/**'
+      - 'meta/**'
+      - '**.md'
   workflow_dispatch:
     inputs:
       upload:
