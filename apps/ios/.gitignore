@@ -8,3 +8,4 @@ project.local.yml
 
 # MurmurCoreFFI xcframework (large binary, regenerate with build-ffi.sh)
 Packages/MurmurCoreFFI/Frameworks/
+build-device/
