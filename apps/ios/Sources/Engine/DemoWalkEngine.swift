@@ -135,11 +135,31 @@ final class DemoWalkEngine: WalkEngine {
         0
     }
 
-    func finish() async -> DocumentModel {
+    // Plan 13: finish() = scripted NOTES (items + a canned summary line), no
+    // document. `buildDocument(kind:)` below returns the canned DocumentModel
+    // this used to return directly — the demo mirrors the real engine's
+    // notes-first shape so DONE -> Notes -> button -> ReviewView is drivable
+    // with zero backend.
+    func finish() async -> NotesModel {
         continuation?.finish()
         continuation = nil
-        // Simulate the document build beat (the real engine targets < 8 s).
-        try? await Task.sleep(for: .seconds(1.6))
+        // Simulate the notes-compute beat (the real engine targets < 8 s).
+        try? await Task.sleep(for: .seconds(0.8))
+        let itemWord = board.count == 1 ? "item" : "items"
+        return NotesModel(
+            summary: "Walked \(trade.site.capitalized(with: nil)) — \(board.count) \(itemWord) captured.",
+            items: board,
+            docKind: DocKinds.primaryKind(for: trade.key),
+            queued: false
+        )
+    }
+
+    // Plan 13 D1: the on-demand build, engine-keyed. The demo has no real
+    // per-kind rendering — it returns the trade's canned document rows
+    // regardless of `kind` (Worked Ex B shape), so the button -> ReviewView
+    // wiring is exercised end to end without a backend.
+    func buildDocument(sessionId: String, kind: String) async throws -> DocumentModel {
+        try? await Task.sleep(for: .seconds(0.8))
         return DocumentModel(
             rows: trade.rows,
             totalKey: trade.totalKey,

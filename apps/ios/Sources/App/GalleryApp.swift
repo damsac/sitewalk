@@ -108,6 +108,8 @@ struct AppRoot: View {
                         WalkView(model: model)
                     case .building:
                         BuildView(model: model)
+                    case .notes:
+                        NotesView(model: model)
                     case .review:
                         ReviewView(model: model)
                     case .board:
@@ -155,6 +157,15 @@ struct AppRoot: View {
                     model.finishWalk()
                 }
                 try? await Task.sleep(for: .seconds(3))
+                // Plan 13: finishWalk() now lands on the notes screen, not
+                // review — the document is built deliberately via the one
+                // wired button (Task 7). Drive it here so autoflow still
+                // reaches ReviewView for the existing PDF/send screenshot
+                // hooks below.
+                if model.phase == .notes {
+                    model.buildPrimaryDocument()
+                    try? await Task.sleep(for: .seconds(2))
+                }
             }
             // Screenshot-automation hook: render the PDF unattended.
             if autoflowRounds > 0, ProcessInfo.processInfo.arguments.contains("autopdf=1") {

@@ -42,6 +42,7 @@ typealias FFIWalkSession = MurmurCoreFFI.WalkSession
 typealias FFIEngineConfig = MurmurCoreFFI.EngineConfig
 private typealias FFIDocumentPayload = MurmurCoreFFI.DocumentPayload
 private typealias FFIDocLine = MurmurCoreFFI.DocLine
+private typealias FFINotesPayload = MurmurCoreFFI.NotesPayload
 private typealias FFIBoardItem = MurmurCoreFFI.BoardItem
 private typealias FFIWalkEvent = MurmurCoreFFI.WalkEvent
 private typealias FFIWalkEventListener = MurmurCoreFFI.WalkEventListener
@@ -87,15 +88,15 @@ final class MurmurEngine: WalkEngine {
     private let engine: FFIMurmurEngine
     private var session: FFIWalkSession?
     private var continuation: AsyncStream<WalkEvent>.Continuation?
-    /// The document built by the most recent `finish()` call. `session` is
+    /// The notes returned by the most recent `finish()` call. `session` is
     /// nil'd out once `finish()` has run (below) — a re-entrant `finish()`
     /// call (e.g. a double-tap racing the UI transition) has no session left
-    /// to call into, so it returns this instead of a blank document. Rust's
+    /// to call into, so it returns this instead of blank notes. Rust's
     /// `WalkSession.finish()` is itself safe to call twice (it degrades
     /// rather than panicking — see crates/ffi/src/session.rs), but nothing
     /// on the Swift side should ever issue that second call in the first
     /// place once we already have the answer.
-    private var lastDocument: DocumentModel?
+    private var lastNotes: NotesModel?
 
     // Throwing: the Rust constructor is fallible across FFI now (opening the
     // store / starting the runtime can fail) — no panics across the boundary.
@@ -113,7 +114,7 @@ final class MurmurEngine: WalkEngine {
         // handing out a fresh one.
         continuation?.finish()
         continuation = nil
-        lastDocument = nil
+        lastNotes = nil
         // Tear down any surviving prior session DETERMINISTICALLY before the
         // fallible start (review finding 1c): just nil-ing it would strand the
         // Rust pump thread + whisper Metal context (and the Recording rows)
@@ -178,15 +179,15 @@ final class MurmurEngine: WalkEngine {
         continuation = nil
         await session?.cancel()
         session = nil
-        lastDocument = nil
+        lastNotes = nil
     }
 
-    func finish() async -> DocumentModel {
+    func finish() async -> NotesModel {
         // Re-entrant call: `session` was already nil'd out by a prior
         // `finish()` (or none ever began). Harmless no-op — hand back
-        // whatever we already built instead of calling into a session that
+        // whatever we already learned instead of calling into a session that
         // no longer exists on this side.
-        guard let session else { return lastDocument ?? Self.emptyDocument() }
+        guard let session else { return lastNotes ?? Self.emptyNotes() }
 
         continuation?.finish()
         continuation = nil
@@ -195,9 +196,19 @@ final class MurmurEngine: WalkEngine {
         // guard above fire on any subsequent call, instead of issuing a
         // second `finish()` down through the FFI.
         self.session = nil
-        let document = Self.document(payload)
-        lastDocument = document
-        return document
+        let notes = Self.notes(payload)
+        lastNotes = notes
+        return notes
+    }
+
+    // Plan 13 D1: engine-keyed, not session-scoped — `session` is nil by the
+    // time the notes screen's action row can call this (finish() already ran
+    // and dropped its handle). Throwing across the boundary: an illegal kind
+    // for the template or a non-Processed session surfaces as an error the
+    // caller can retry from, never a crash.
+    func buildDocument(sessionId: String, kind: String) async throws -> DocumentModel {
+        let payload = try await engine.buildDocument(sessionId: sessionId, kind: kind)
+        return Self.document(payload)
     }
 
     // MARK: - Vocabulary (Plan 10): forward to the FFI CRUD methods. Each is
@@ -324,8 +335,12 @@ final class MurmurEngine: WalkEngine {
         let prefix: String
         switch docKind {
         case "estimate": prefix = "EST"
+        case "invoice": prefix = "INV"
+        case "work_order": prefix = "WO"
         case "inspection": prefix = "IR"
-        default: prefix = "MO"
+        case "condition": prefix = "COND"
+        case "move_out": prefix = "MO"
+        default: prefix = "DOC"
         }
         return "\(prefix)-\(String(format: "%04d", docNumber))"
     }
@@ -333,7 +348,11 @@ final class MurmurEngine: WalkEngine {
     /// Per-`doc_kind` display copy the milestone doesn't yet source from
     /// core — letterhead/board chrome stays in `TradeFixture` (D2); this
     /// table is the document-body chrome only (total label, footer note,
-    /// send button copy).
+    /// send button copy). // sac: the notes-screen button labels/taxonomy
+    /// are yours (D8 open question) — this table only keeps the document
+    /// body's OWN chrome (reached via the button, in the unchanged
+    /// ReviewView) correct for every Plan 13 kind, so no template silently
+    /// falls through to the old "estimate" default copy.
     private static func totalLabel(_ key: String) -> String {
         switch key {
         case "deposit_deduction": return "DEPOSIT DEDUCTION"
@@ -348,7 +367,8 @@ final class MurmurEngine: WalkEngine {
         }
         switch docKind {
         case "inspection": return "FINDINGS MARKED — NOT YET ASSESSED"
-        case "report": return "DEDUCTIONS LEFT OPEN ARE MARKED — CONFIRM BEFORE SENDING"
+        case "report", "condition", "move_out": return "DEDUCTIONS LEFT OPEN ARE MARKED — CONFIRM BEFORE SENDING"
+        case "work_order": return "GAPS ARE MARKED — CONFIRM SCOPE BEFORE SENDING"
         default: return "GAPS ARE MARKED — TAP TO FILL BEFORE SENDING"
         }
     }
@@ -356,7 +376,9 @@ final class MurmurEngine: WalkEngine {
     private static func sendLabel(for docKind: String) -> String {
         switch docKind {
         case "inspection": return "SEND REPORT"
-        case "report": return "SEND REPORT"
+        case "report", "condition", "move_out": return "SEND REPORT"
+        case "invoice": return "SEND INVOICE"
+        case "work_order": return "SEND WORK ORDER"
         default: return "SEND ESTIMATE"
         }
     }
@@ -387,6 +409,21 @@ final class MurmurEngine: WalkEngine {
 
     private static func emptyDocument() -> DocumentModel {
         DocumentModel(rows: [], totalKey: "TOTAL", staticTotal: "——", note: "", send: "SEND")
+    }
+
+    // MARK: - Notes mapping (Plan 13 D2/D3)
+
+    private static func notes(_ payload: FFINotesPayload) -> NotesModel {
+        NotesModel(
+            summary: payload.summary,
+            items: payload.items.map(Self.board),
+            docKind: payload.docKind,
+            queued: payload.queued
+        )
+    }
+
+    private static func emptyNotes() -> NotesModel {
+        NotesModel(summary: "", items: [], docKind: "report", queued: false)
     }
 }
 #endif

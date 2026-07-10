@@ -1097,22 +1097,26 @@ public protocol WalkSessionProtocol : AnyObject {
     func cancel() async 
     
     /**
-     * D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
-     * the terminal swap snapshot + the structured document.
+     * Plan 13 Stage 2 (D1/D3/D9): `end_and_record_session` +
+     * `SessionProcessor::process`, then the terminal swap snapshot. A walk's
+     * finish output is now NOTES (items + summary) — phase B is gone, so
+     * `process()` no longer builds a document; the finished document is
+     * built later, on demand, by `MurmurEngine::build_document(kind)`.
      *
-     * Three degrade paths, none of which may panic across the FFI boundary
-     * (a `uniffi::export`ed async fn returns a bare `DocumentPayload`, not a
+     * Two degrade paths, neither of which may panic across the FFI boundary
+     * (a `uniffi::export`ed async fn returns a bare `NotesPayload`, not a
      * `Result` — an unwind here is a fatal crash in the host app, not a
      * catchable error):
      * - `end_and_record_session` fails (most commonly: a second `finish()`
-     * call on an already-ended session) -> `degraded_document()`.
-     * - phase B ran but the transcript was empty/whitespace-only, so
-     * `murmur-core`'s pipeline short-circuited before building a document
-     * artifact -> a truthful, non-queued `partial_document`.
-     * - phase B failed outright (offline/LLM-down, D9) -> a queued partial
-     * document built from the live board — capture is never lost.
+     * call on an already-ended session) -> `degraded_notes()`.
+     * - `process()` fails outright (offline/LLM-down, D9) -> queued notes
+     * built from the live board — capture is never lost.
+     *
+     * The empty-transcript short circuit is no longer a separate branch:
+     * `process()` succeeds either way (with summary `"(empty session)"` for
+     * a silent walk), so the `Ok` arm below handles it uniformly.
      */
-    func finish() async  -> DocumentPayload
+    func finish() async  -> NotesPayload
     
     /**
      * Enqueue mic PCM for the STT pump (D1/D2). A CHEAP enqueue: buffers the
@@ -1241,22 +1245,26 @@ open func cancel()async  {
 }
     
     /**
-     * D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
-     * the terminal swap snapshot + the structured document.
+     * Plan 13 Stage 2 (D1/D3/D9): `end_and_record_session` +
+     * `SessionProcessor::process`, then the terminal swap snapshot. A walk's
+     * finish output is now NOTES (items + summary) — phase B is gone, so
+     * `process()` no longer builds a document; the finished document is
+     * built later, on demand, by `MurmurEngine::build_document(kind)`.
      *
-     * Three degrade paths, none of which may panic across the FFI boundary
-     * (a `uniffi::export`ed async fn returns a bare `DocumentPayload`, not a
+     * Two degrade paths, neither of which may panic across the FFI boundary
+     * (a `uniffi::export`ed async fn returns a bare `NotesPayload`, not a
      * `Result` — an unwind here is a fatal crash in the host app, not a
      * catchable error):
      * - `end_and_record_session` fails (most commonly: a second `finish()`
-     * call on an already-ended session) -> `degraded_document()`.
-     * - phase B ran but the transcript was empty/whitespace-only, so
-     * `murmur-core`'s pipeline short-circuited before building a document
-     * artifact -> a truthful, non-queued `partial_document`.
-     * - phase B failed outright (offline/LLM-down, D9) -> a queued partial
-     * document built from the live board — capture is never lost.
+     * call on an already-ended session) -> `degraded_notes()`.
+     * - `process()` fails outright (offline/LLM-down, D9) -> queued notes
+     * built from the live board — capture is never lost.
+     *
+     * The empty-transcript short circuit is no longer a separate branch:
+     * `process()` succeeds either way (with summary `"(empty session)"` for
+     * a silent walk), so the `Ok` arm below handles it uniformly.
      */
-open func finish()async  -> DocumentPayload {
+open func finish()async  -> NotesPayload {
     return
         try!  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -1268,7 +1276,7 @@ open func finish()async  -> DocumentPayload {
             pollFunc: ffi_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeDocumentPayload.lift,
+            liftFunc: FfiConverterTypeNotesPayload.lift,
             errorHandler: nil
             
         )
@@ -1934,6 +1942,128 @@ public func FfiConverterTypeEngineConfig_lower(_ value: EngineConfig) -> RustBuf
 }
 
 
+public struct NotesPayload {
+    public var sessionId: String
+    /**
+     * The template's DEFAULT kind (`doc_kind_for_template`) — advisory only,
+     * for button curation. Swift's button wiring keys off the client-known
+     * template (D2), never off this field.
+     */
+    public var docKind: String
+    /**
+     * `session.summary`; `"(empty session)"` for a silent walk.
+     */
+    public var summary: String
+    /**
+     * The authoritative+manual board post-swap, with batched photo_count
+     * (reuses `BoardItem` — no new item record).
+     */
+    public var items: [BoardItem]
+    /**
+     * `true` when `finish()` degraded offline (D9) — the session did NOT
+     * reach `Processed`; the client disables build-document buttons.
+     */
+    public var queued: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(sessionId: String, 
+        /**
+         * The template's DEFAULT kind (`doc_kind_for_template`) — advisory only,
+         * for button curation. Swift's button wiring keys off the client-known
+         * template (D2), never off this field.
+         */docKind: String, 
+        /**
+         * `session.summary`; `"(empty session)"` for a silent walk.
+         */summary: String, 
+        /**
+         * The authoritative+manual board post-swap, with batched photo_count
+         * (reuses `BoardItem` — no new item record).
+         */items: [BoardItem], 
+        /**
+         * `true` when `finish()` degraded offline (D9) — the session did NOT
+         * reach `Processed`; the client disables build-document buttons.
+         */queued: Bool) {
+        self.sessionId = sessionId
+        self.docKind = docKind
+        self.summary = summary
+        self.items = items
+        self.queued = queued
+    }
+}
+
+
+
+extension NotesPayload: Equatable, Hashable {
+    public static func ==(lhs: NotesPayload, rhs: NotesPayload) -> Bool {
+        if lhs.sessionId != rhs.sessionId {
+            return false
+        }
+        if lhs.docKind != rhs.docKind {
+            return false
+        }
+        if lhs.summary != rhs.summary {
+            return false
+        }
+        if lhs.items != rhs.items {
+            return false
+        }
+        if lhs.queued != rhs.queued {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(sessionId)
+        hasher.combine(docKind)
+        hasher.combine(summary)
+        hasher.combine(items)
+        hasher.combine(queued)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNotesPayload: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NotesPayload {
+        return
+            try NotesPayload(
+                sessionId: FfiConverterString.read(from: &buf), 
+                docKind: FfiConverterString.read(from: &buf), 
+                summary: FfiConverterString.read(from: &buf), 
+                items: FfiConverterSequenceTypeBoardItem.read(from: &buf), 
+                queued: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NotesPayload, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sessionId, into: &buf)
+        FfiConverterString.write(value.docKind, into: &buf)
+        FfiConverterString.write(value.summary, into: &buf)
+        FfiConverterSequenceTypeBoardItem.write(value.items, into: &buf)
+        FfiConverterBool.write(value.queued, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNotesPayload_lift(_ buf: RustBuffer) throws -> NotesPayload {
+    return try FfiConverterTypeNotesPayload.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNotesPayload_lower(_ value: NotesPayload) -> RustBuffer {
+    return FfiConverterTypeNotesPayload.lower(value)
+}
+
+
 /**
  * A display-copy-free projection of `murmur_core::Photo` (D-Plan07 posture):
  * the shell resolves `filename` to a real file URL under its own
@@ -2561,7 +2691,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_walksession_cancel() != 21818) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_ffi_checksum_method_walksession_finish() != 48721) {
+    if (uniffi_ffi_checksum_method_walksession_finish() != 63833) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walksession_push_audio() != 33536) {

@@ -14,15 +14,14 @@ pub(crate) mod prompts;
 use std::sync::{Arc, Mutex};
 
 use harness::{
-    Agent, AgentConfig, CompletionRequest, ContentBlock, ContextAssembler, ContextSection,
-    LlmProvider, Memory, MemoryStore, Message, Tool, ToolRegistry, ToolSpec, UpdateMemoryTool,
-    Usage,
+    Agent, AgentConfig, ContextAssembler, ContextSection, LlmProvider, Memory, MemoryStore,
+    Message, ToolRegistry, UpdateMemoryTool, Usage,
 };
 
 use crate::domain::{Session, SessionStatus};
 use crate::error::CoreError;
 use crate::store::Store;
-use tools::{AddItemTool, BuildDocumentTool, UpsertContactTool, WriteReportTool};
+use tools::{AddItemTool, UpsertContactTool, WriteReportTool};
 
 /// Plan 13 D8: the legal `doc_kind` vocabulary for a session's template, in
 /// priority order (`[0]` becomes the template's default kind when Stage 2
@@ -45,43 +44,27 @@ pub fn is_pricing_kind(kind: &str) -> bool {
 }
 
 /// Maps a session's template key (D4: `landscape`|`property`|`inspection`) to
-/// the document's `doc_kind` vocabulary (D2/D5: `estimate`|`report`|
-/// `inspection`) that `BuildDocumentTool` and document-number minting use.
-/// `None`/unrecognized defaults to `report` — the safest shape (mixed
-/// dollar/non-dollar lines, gaps only where explicitly flagged).
+/// its DEFAULT `doc_kind` — carried as the advisory `NotesPayload.doc_kind`
+/// hint and used by the FFI offline fallback (`ffi/src/session.rs::partial_notes`).
 ///
-/// **Plan 13 N3 — deliberately DEFERRED to Stage 2 (review blocker).** The
-/// plan redefines this as `doc_kinds_for_template(t)[0]` (property →
-/// `condition`), but this function is still called by Stage 1's LIVE
-/// phase-B path (`process()` below) and the FFI offline fallback
-/// (`ffi/src/session.rs::partial_document`), and the shipped
-/// `MurmurEngine.swift` has no `"condition"` arm in its `switch docKind` —
-/// flipping it here would send a property walk down Swift's default arm
-/// ("SEND ESTIMATE" chrome on a move-out report) on the auto-published
-/// build. Stage 1 must behave identically to #27, so the old body stays;
-/// Stage 2 (which removes phase B and rewires Swift) performs the N3
-/// redefinition to `doc_kinds_for_template(template)[0]`. `DocumentBuilder`
-/// never calls this — it validates against `doc_kinds_for_template`
-/// (plural) + `is_pricing_kind` directly, so the new on-demand path is
-/// unaffected either way.
+/// **Plan 13 N3 — the Stage 2 flip.** Redefined as `doc_kinds_for_template(t)[0]`
+/// (property's default is now `condition`, not `report` — property's own
+/// legal-kind list starts with `condition`). This is safe now that phase B
+/// is gone (this function is no longer the LIVE build path) and Swift's
+/// `switch docKind` chrome tables gained `condition`/`move_out`/`invoice`/
+/// `work_order` arms alongside this flip (`MurmurEngine.swift`). `doc_kind`
+/// is advisory only — Swift's button wiring keys off the client-known
+/// template (D2), never off this value, so the copy switch cannot mis-route.
+/// `DocumentBuilder` never calls this — it validates against
+/// `doc_kinds_for_template` (plural) + `is_pricing_kind` directly.
 pub fn doc_kind_for_template(template: Option<&str>) -> &'static str {
-    match template {
-        Some("landscape") => "estimate",
-        Some("inspection") => "inspection",
-        _ => "report",
-    }
+    doc_kinds_for_template(template)[0]
 }
 
 #[derive(Debug)]
 pub struct ProcessOutcome {
     pub session: Session,
     pub usage: Usage,
-    /// The id of the `document` artifact this run built, if it reached phase B.
-    /// `None` when phase B was skipped (empty/whitespace-only transcript).
-    /// Callers (the FFI `finish()`) read *this* artifact rather than sweeping
-    /// the session's artifacts, so a future non-processing `document` writer
-    /// can't be misread as the processing document (Plan 07 D2, carry-note 6).
-    pub document_artifact_id: Option<String>,
 }
 
 pub struct SessionProcessor {
@@ -96,9 +79,6 @@ pub struct SessionProcessor {
     pub transcript_budget_tokens: usize,
     /// Summary-call output budget.
     pub summary_max_tokens: u32,
-    /// Forced build_document call output budget (phase B, D6: budgeted < 8s
-    /// total alongside the extraction pass + summary call).
-    pub build_document_max_tokens: u32,
 }
 
 impl SessionProcessor {
@@ -117,7 +97,6 @@ impl SessionProcessor {
             max_tokens: 4096,
             transcript_budget_tokens: 12_000,
             summary_max_tokens: 512,
-            build_document_max_tokens: 1024,
         }
     }
 
@@ -135,10 +114,13 @@ impl SessionProcessor {
     /// processed — status is re-validated only at the exit write, so a
     /// concurrent tombstone would produce a silent no-op or a store error.
     pub async fn process(&self, session_id: &str) -> Result<ProcessOutcome, CoreError> {
-        // Phase 0: validate, snapshot the template/existing doc number, sweep
-        // prior FAILED-run authoritative leftovers (never the live board), and
-        // snapshot the transcript.
-        let (transcript, template, existing_doc_number) = {
+        // Phase 0: validate, sweep prior FAILED-run authoritative leftovers
+        // (never the live board), and snapshot the transcript. Plan 13 Stage
+        // 2 dropped phase B (the forced build_document call), so the
+        // template/existing-doc-number snapshot that fed it is gone too —
+        // documents are now built on demand (`DocumentBuilder::build`,
+        // engine-keyed, not part of `process()`).
+        let transcript = {
             let store = self.locked()?;
             let session = store.get_session(session_id)?;
             if !matches!(
@@ -150,22 +132,16 @@ impl SessionProcessor {
                     session.status.as_str()
                 )));
             }
-            // D5: a re-process of the same session reuses its already-minted
-            // document number rather than minting a new one — read it back
-            // from any existing document artifact BEFORE the sweep clears it.
-            let existing_doc_number = store
-                .latest_document_artifact(session_id)?
-                .and_then(|a| serde_json::from_str::<serde_json::Value>(&a.body).ok())
-                .and_then(|v| v.get("doc_number").and_then(|n| n.as_u64()));
-            // Sweep a prior FAILED attempt's authoritative leftovers (+ artifacts)
-            // so repeated retries can't accumulate duplicate todos. Never touches
-            // the live board (the safety net) or manual items.
+            // Sweep a prior FAILED attempt's authoritative leftovers (+ artifacts,
+            // including any `session_meta` spoken-total artifact) so repeated
+            // retries can't accumulate duplicate todos or a stale hint. Never
+            // touches the live board (the safety net) or manual items.
             store.clear_authoritative_outputs(session_id)?;
-            (session.transcript, session.template.clone(), existing_doc_number)
+            session.transcript
         };
 
         // Empty guard: an empty/whitespace-only transcript would send empty
-        // content blocks to the real API (rejected). Skip both LLM phases and
+        // content blocks to the real API (rejected). Skip the LLM phase and
         // process with a placeholder summary; zero usage is correct — no call
         // was made, and the tx helper's contract is status+usage together.
         if transcript.trim().is_empty() {
@@ -176,17 +152,8 @@ impl SessionProcessor {
                 &usage,
                 &[],
             )?;
-            return Ok(ProcessOutcome { session, usage, document_artifact_id: None });
+            return Ok(ProcessOutcome { session, usage });
         }
-
-        // D5: the document number is minted lazily in phase B
-        // (`run_build_document`), only once the model has actually produced a
-        // document to write. A run that fails before phase B (extraction or
-        // summary) therefore never consumes a number, so a retry can't leave a
-        // gap in the sequence. `existing_doc_number` is threaded through so a
-        // re-process of the same session reuses its already-minted number
-        // instead of minting a fresh one.
-        let doc_kind = doc_kind_for_template(template.as_deref());
 
         // Memory lock in its own scope — never held alongside the store guard
         // (no store→memory lock ordering for a second caller to deadlock on).
@@ -202,34 +169,37 @@ impl SessionProcessor {
             budget_tokens: self.transcript_budget_tokens,
         }]);
 
-        // Phase 1+2: extraction agent pass, forced summary, forced
-        // build_document. The id sink records which items THIS run created,
-        // for the finish swap.
+        // Phase 1+2: extraction agent pass, forced summary (D5a: the summary
+        // call may also return an optional spoken grand-total scalar). The id
+        // sink records which items THIS run created, for the finish swap.
         let mut usage = Usage::default();
         let created_ids = Arc::new(Mutex::new(Vec::<String>::new()));
         let result = self
-            .run_llm_phases(
-                session_id,
-                &assembled.text,
-                &memory_prompt,
-                template.as_deref(),
-                doc_kind,
-                existing_doc_number,
-                &mut usage,
-                created_ids.clone(),
-            )
+            .run_llm_phases(session_id, &assembled.text, &memory_prompt, &mut usage, created_ids.clone())
             .await;
 
         // Exit: persist outcome + cost atomically, success or not.
         let store = self.locked()?;
         match result {
-            Ok((summary, document_artifact_id)) => {
+            Ok((summary, spoken_total_cents)) => {
                 let ids = created_ids
                     .lock()
                     .map_err(|_| CoreError::InvalidState("created-ids lock poisoned".into()))?
                     .clone();
+                // D5a: persist the spoken grand-total scalar (if any) as a tiny
+                // per-session artifact BEFORE the finish swap — no migration,
+                // `kind` is free-form (artifacts.rs:24). Absent unless the
+                // model clearly heard a stated total (R6).
+                if let Some(cents) = spoken_total_cents {
+                    store.add_artifact(
+                        session_id,
+                        "session_meta",
+                        "session_meta",
+                        &serde_json::json!({ "spoken_total_cents": cents }).to_string(),
+                    )?;
+                }
                 let session = store.finish_session_processed(session_id, &summary, &usage, &ids)?;
-                Ok(ProcessOutcome { session, usage, document_artifact_id })
+                Ok(ProcessOutcome { session, usage })
             }
             Err(e) => {
                 // Bookkeeping errors are secondary: the original LLM error is
@@ -240,18 +210,14 @@ impl SessionProcessor {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn run_llm_phases(
         &self,
         session_id: &str,
         assembled_transcript: &str,
         memory_prompt: &str,
-        template: Option<&str>,
-        doc_kind: &str,
-        existing_doc_number: Option<u64>,
         usage: &mut Usage,
         created_ids: Arc<Mutex<Vec<String>>>,
-    ) -> Result<(String, Option<String>), harness::HarnessError> {
+    ) -> Result<(String, Option<i64>), harness::HarnessError> {
         let mut registry = ToolRegistry::new();
         registry.register(AddItemTool::authoritative(
             self.store.clone(),
@@ -290,7 +256,7 @@ impl SessionProcessor {
         };
         usage.add(&outcome.usage);
 
-        let (summary, summary_usage) = prompts::summarize(
+        let (summary, spoken_total_cents, summary_usage) = prompts::summarize(
             self.provider.clone(),
             assembled_transcript,
             self.summary_max_tokens,
@@ -303,134 +269,7 @@ impl SessionProcessor {
             harness::HarnessError::Provider("summary response missing write_summary call".into())
         })?;
 
-        // Phase B: forced build_document call — the single most important
-        // core addition for a demo-able document (D6). Only reached once the
-        // summary succeeded (a doomed session shouldn't also spend on this).
-        let document_artifact_id = self
-            .run_build_document(
-                session_id,
-                assembled_transcript,
-                memory_prompt,
-                template,
-                doc_kind,
-                existing_doc_number,
-                usage,
-                &created_ids,
-            )
-            .await?;
-
-        Ok((summary, Some(document_artifact_id)))
-    }
-
-    /// Forced `build_document` call (mirrors `prompts::summarize`'s one-shot
-    /// forced-tool pattern), then executes the tool so the structured document
-    /// artifact actually lands (D6).
-    #[allow(clippy::too_many_arguments)]
-    async fn run_build_document(
-        &self,
-        session_id: &str,
-        assembled_transcript: &str,
-        memory_prompt: &str,
-        template: Option<&str>,
-        doc_kind: &str,
-        existing_doc_number: Option<u64>,
-        usage: &mut Usage,
-        created_ids: &Arc<Mutex<Vec<String>>>,
-    ) -> Result<String, harness::HarnessError> {
-        // The tool spec (name/description/schema) is independent of the document
-        // number, so build it up front; the number is stamped only at execute.
-        let name = BuildDocumentTool::NAME;
-        let tool_spec = ToolSpec {
-            name: name.to_string(),
-            description: BuildDocumentTool::description_str().to_string(),
-            input_schema: BuildDocumentTool::input_schema_json(),
-        };
-
-        // Plan 12 C1: the validation set is the SAME `created_ids` Arc the
-        // finish-swap sweeps by — never a fresh store query — so a validated
-        // row id can never dangle on a tombstoned item (D3, by construction).
-        let valid_item_ids: Vec<String> = created_ids
-            .lock()
-            .map_err(|_| harness::HarnessError::Provider("created-ids lock poisoned".into()))?
-            .clone();
-        // The reference block's display text (kind/text) is looked up for
-        // exactly those ids — set membership still comes from the Arc above;
-        // the store is consulted only to render display strings.
-        let ids: std::collections::HashSet<&String> = valid_item_ids.iter().collect();
-        let items: Vec<crate::domain::CapturedItem> = self
-            .store
-            .lock()
-            .map_err(|_| harness::HarnessError::Provider("store lock poisoned".into()))?
-            .list_items_for_session(session_id)
-            .map_err(|e| harness::HarnessError::Provider(e.to_string()))?
-            .into_iter()
-            .filter(|i| ids.contains(&i.id))
-            .collect();
-        let items_block = prompts::format_document_items(&items);
-        let user_message = if items_block.is_empty() {
-            format!("Build the document for this session.\n\n{assembled_transcript}")
-        } else {
-            format!(
-                "Build the document for this session.\n\n{assembled_transcript}\n\n\
-                 Items already captured (copy the matching item_id onto each line built from an item):\n{items_block}"
-            )
-        };
-
-        let response = self
-            .provider
-            .complete(CompletionRequest {
-                system: prompts::build_document_prompt(template.unwrap_or("report"), memory_prompt),
-                messages: vec![Message::user_text(user_message)],
-                tools: vec![tool_spec],
-                max_tokens: self.build_document_max_tokens,
-                tool_choice: Some(name.to_string()),
-            })
-            .await?;
-        usage.add(&response.usage);
-
-        let input = response.content.iter().find_map(|b| match b {
-            ContentBlock::ToolUse { name: n, input, .. } if n == name => Some(input.clone()),
-            _ => None,
-        });
-        match input {
-            Some(input) => {
-                // D5 + carry-note 1 follow-up: the mint lives INSIDE the
-                // tool's execute, in the same store transaction as the
-                // artifact write — a number is durably consumed if and only
-                // if the document lands. Everything that can fail earlier
-                // (extraction, summary, the forced call, payload validation)
-                // burns nothing. A re-process reuses the number read back
-                // from the prior document artifact (`existing_doc_number`).
-                let tool = BuildDocumentTool::new(
-                    self.store.clone(),
-                    session_id,
-                    doc_kind,
-                    existing_doc_number,
-                    valid_item_ids,
-                );
-                tool.execute(input).await?;
-                // Return the id of the artifact we just wrote so `finish()` can
-                // read exactly this run's document (carry-note 6). We just
-                // cleared prior documents in phase 0 and wrote one here, so the
-                // latest document for the session is unambiguously ours.
-                let id = self
-                    .store
-                    .lock()
-                    .map_err(|_| harness::HarnessError::Provider("store lock poisoned".into()))?
-                    .latest_document_artifact(session_id)
-                    .map_err(|e| harness::HarnessError::Provider(e.to_string()))?
-                    .map(|a| a.id)
-                    .ok_or_else(|| {
-                        harness::HarnessError::Provider(
-                            "document artifact missing immediately after build".into(),
-                        )
-                    })?;
-                Ok(id)
-            }
-            None => Err(harness::HarnessError::Provider(
-                "build_document response missing build_document call".into(),
-            )),
-        }
+        Ok((summary, spoken_total_cents))
     }
 
     /// Drains the awaiting_processing queue (spec §6: offline sessions queue
@@ -521,15 +360,6 @@ mod tests {
         tool_use("write_summary", serde_json::json!({"summary": text}))
     }
 
-    /// A minimal successful `build_document` response — every successful
-    /// `process()` run now makes this forced call as phase B (D6).
-    fn document_response() -> CompletionResponse {
-        tool_use(
-            "build_document",
-            serde_json::json!({"total_kind": "sum", "total_label_key": "total", "lines": []}),
-        )
-    }
-
     #[tokio::test]
     async fn processes_a_session_end_to_end() {
         let (processor, store, sid) = processor_with(vec![
@@ -537,13 +367,13 @@ mod tests {
             tool_use("upsert_contact", serde_json::json!({"name": "Dev", "trade": "framer"})),
             end_turn("done"),
             summary_response("Ordered lumber; Dev handles framing."),
-            document_response(),
         ]);
         let outcome = processor.process(&sid).await.unwrap();
         assert_eq!(outcome.session.status, SessionStatus::Processed);
         assert_eq!(outcome.session.summary.as_deref(), Some("Ordered lumber; Dev handles framing."));
-        // usage: 100+20, 100+20, 50+10 agent + 100+20 summary + 100+20 build_document
-        assert_eq!(outcome.usage, Usage { input_tokens: 450, output_tokens: 90 });
+        // usage: 100+20, 100+20, 50+10 agent + 100+20 summary — NO build_document
+        // call (Plan 13 Stage 2 drops phase B): finish is strictly cheaper.
+        assert_eq!(outcome.usage, Usage { input_tokens: 350, output_tokens: 70 });
 
         let store = store.lock().unwrap();
         assert_eq!(store.list_items_for_session(&sid).unwrap().len(), 1);
@@ -551,118 +381,33 @@ mod tests {
         let usage_rows = store.list_llm_usage_for_session(&sid).unwrap();
         assert_eq!(usage_rows.len(), 1);
         assert_eq!(usage_rows[0].purpose, "processing");
-        assert_eq!(usage_rows[0].input_tokens, 450);
+        assert_eq!(usage_rows[0].input_tokens, 350);
         let artifacts = store.list_artifacts_for_session(&sid).unwrap();
-        assert!(artifacts.iter().any(|a| a.kind == "document"), "phase B built a document artifact");
+        assert!(!artifacts.iter().any(|a| a.kind == "document"), "phase B is gone — no document artifact");
     }
 
     #[tokio::test]
-    async fn processes_and_builds_a_document_artifact() {
-        let (processor, store, sid) = processor_with(vec![
-            end_turn("nothing to extract"),
-            summary_response("Walked the site."),
-            document_response(),
-        ]);
-        processor.process(&sid).await.unwrap();
-        let store = store.lock().unwrap();
-        let artifacts = store.list_artifacts_for_session(&sid).unwrap();
-        assert!(artifacts.iter().any(|a| a.kind == "document"), "phase B built a document artifact");
-        // one folded usage row (purpose stays "processing" across all phases)
-        let usage_rows = store.list_llm_usage_for_session(&sid).unwrap();
-        assert_eq!(usage_rows.len(), 1);
-        assert_eq!(usage_rows[0].purpose, "processing");
-    }
-
-    /// Plan 12 Task 1 Step 6 (C2): pins the echo-and-validate mechanism
-    /// end-to-end with the run's REAL minted item id — fed, degrade, and
-    /// survives-the-swap (D3), all in one `process()` call. The real id
-    /// can't be pre-scripted (it's minted mid-run), so it's captured by
-    /// read-back after the run rather than hardcoded into the response.
-    #[tokio::test]
-    async fn build_document_echoes_real_id_degrades_bad_ids_and_survives_the_swap() {
+    async fn no_build_document_request_is_made_across_a_run() {
         let store = Store::open_in_memory("device-a").unwrap();
         let session = store.start_session(None).unwrap();
-        store.append_transcript(&session.id, "we need lumber for the deck.").unwrap();
+        store.append_transcript(&session.id, "we need lumber. call Dev the framer.").unwrap();
         store.end_and_record_session(&session.id).unwrap();
-        let store = Arc::new(Mutex::new(store));
-        let sid = session.id.clone();
-
         let provider = Arc::new(MockProvider::new(vec![
             tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
             end_turn("done"),
             summary_response("Ordered lumber."),
-            tool_use(
-                "build_document",
-                serde_json::json!({
-                    "total_kind": "sum", "total_label_key": "total",
-                    "lines": [
-                        {"title": "Lumber", "item_id": "__REPLACED_BELOW__"},
-                        {"title": "Ghost", "item_id": "bogus-id"},
-                        {"title": "Subtotal"}
-                    ]
-                }),
-            ),
         ]));
         let processor = SessionProcessor::new(
             provider.clone(),
-            store.clone(),
+            Arc::new(Mutex::new(store)),
             Arc::new(Mutex::new(Memory::default())),
             Arc::new(NullMemoryStore),
         );
-
-        // We can't know the run's minted id before scripting, so the
-        // "Lumber" line's item_id in the scripted response is a placeholder;
-        // what matters is that the model is FED the real id in its user
-        // message (asserted below), which is a fact about the request, not
-        // the (unmodifiable, already-scripted) response.
-        processor.process(&sid).await.unwrap();
-
-        let store = store.lock().unwrap();
-        // Post-swap: the only surviving item is the run's real authoritative one.
-        let live_items = store.list_items_for_session(&sid).unwrap();
-        assert_eq!(live_items.len(), 1, "the run's one authoritative item survives the swap");
-        let real_id = &live_items[0].id;
-
-        // Fed (C2, positive): the build_document request's user message
-        // contains the real minted id in its "Items already captured" block.
-        let requests = provider.requests();
-        let build_doc_request = requests
-            .iter()
-            .find(|r| r.tool_choice.as_deref() == Some("build_document"))
-            .expect("a build_document request was made");
-        let user_text = match &build_doc_request.messages[0].content[0] {
-            ContentBlock::Text { text } => text.clone(),
-            other => panic!("expected text content, got {other:?}"),
-        };
+        processor.process(&session.id).await.unwrap();
         assert!(
-            user_text.contains(real_id.as_str()),
-            "the reference block must carry the run's real minted item id: {user_text}"
+            !provider.requests().iter().any(|r| r.tool_choice.as_deref() == Some("build_document")),
+            "phase B is gone — process() must never request build_document"
         );
-
-        // Degrade pinned: the stored document body nulls both the bogus id
-        // and the omitted id — the build never failed on either.
-        let doc = store.latest_document_artifact(&sid).unwrap().unwrap();
-        let v: serde_json::Value = serde_json::from_str(&doc.body).unwrap();
-        assert_eq!(v["lines"][1]["item_id"], serde_json::Value::Null, "bogus id degrades");
-        assert_eq!(v["lines"][2]["item_id"], serde_json::Value::Null, "omitted id stays null");
-
-        // Survives-swap invariant (D3), stated honestly: in THIS script all
-        // three lines degrade to null (placeholder / bogus / omitted), so the
-        // loop body below never executes — it guards against non-null garbage
-        // being stored, not the positive path. The positive property (a valid
-        // echoed id is stored non-null AND survives the swap) is covered by
-        // the tool-level `build_document_echoes_and_validates_item_ids` test
-        // (valid id kept), sessions.rs' finish_processed swap tests
-        // (run_item_ids survive the sweep), and the C1 by-construction
-        // identity (the validation set == the same created_ids Arc the sweep
-        // keeps).
-        let live_ids: std::collections::HashSet<&str> =
-            live_items.iter().map(|i| i.id.as_str()).collect();
-        for line in v["lines"].as_array().unwrap() {
-            if let Some(id) = line["item_id"].as_str() {
-                assert!(live_ids.contains(id), "row item_id {id} must survive the swap");
-            }
-        }
     }
 
     #[tokio::test]
@@ -695,7 +440,6 @@ mod tests {
             tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
             end_turn("done"),
             summary_response("Lumber ordered."),
-            document_response(),
         ]);
         assert!(processor.process(&sid).await.is_err());
         processor.process(&sid).await.unwrap();
@@ -724,7 +468,6 @@ mod tests {
                 tool_use("add_item", serde_json::json!({"kind":"todo","text":"order 12 2x10s"})),
                 end_turn("done"),
                 summary_response("Lumber ordered."),
-                document_response(),
             ])),
             store.clone(), Arc::new(Mutex::new(Memory::default())), Arc::new(NullMemoryStore),
         );
@@ -763,8 +506,7 @@ mod tests {
                 tool_use("add_item", serde_json::json!({"kind":"todo","text":"order lumber"})),
                 end_turn("done"), end_turn("no summary tool"),          // attempt 2 fails
                 tool_use("add_item", serde_json::json!({"kind":"todo","text":"order 12 2x10s"})),
-                end_turn("done"), summary_response("Lumber ordered."), document_response(),  // attempt 3 succeeds
-            ])),
+                end_turn("done"), summary_response("Lumber ordered."),            ])),
             store.clone(), Arc::new(Mutex::new(Memory::default())), Arc::new(NullMemoryStore),
         );
 
@@ -792,35 +534,6 @@ mod tests {
         assert!(!items.iter().any(|i| i.source == ItemSource::Live), "live board swapped out on success");
     }
 
-    /// A document number is a scarce, user-visible sequence (EST-0047). A run
-    /// that fails before phase B never built a document, so it must not consume
-    /// a number — otherwise the retry shows a gap (EST-0048 with no 0047).
-    #[tokio::test]
-    async fn failed_attempt_does_not_burn_a_document_number() {
-        let (processor, store, sid) = processor_with(vec![
-            // attempt 1: extracts an item, then the summary call returns no tool
-            tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
-            end_turn("done"),
-            end_turn("no summary tool"),
-            // attempt 2: succeeds all the way through phase B
-            tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
-            end_turn("done"),
-            summary_response("Lumber ordered."),
-            document_response(),
-        ]);
-        assert!(processor.process(&sid).await.is_err());
-        processor.process(&sid).await.unwrap();
-        let store = store.lock().unwrap();
-        let doc = store
-            .list_artifacts_for_session(&sid)
-            .unwrap()
-            .into_iter()
-            .find(|a| a.kind == "document")
-            .unwrap();
-        let v: serde_json::Value = serde_json::from_str(&doc.body).unwrap();
-        assert_eq!(v["doc_number"], 1, "a failed attempt before phase B must not burn a number");
-    }
-
     #[tokio::test]
     async fn recording_session_is_rejected() {
         let (processor, store, _sid) = processor_with(vec![]);
@@ -834,7 +547,6 @@ mod tests {
         let provider = Arc::new(MockProvider::new(vec![
             end_turn("done"),
             summary_response("s"),
-            document_response(),
         ]));
         let store = Store::open_in_memory("device-a").unwrap();
         let session = store.start_session(None).unwrap();
@@ -982,25 +694,21 @@ mod tests {
         assert!(!is_pricing_kind("condition"));
     }
 
-    /// Stage-1 pin: `doc_kind_for_template` KEEPS its pre-Plan-13 behavior
-    /// (property → `"report"`) because it still drives the LIVE phase-B
-    /// build and the FFI offline fallback, and the shipped
-    /// `MurmurEngine.swift` has no `"condition"` arm — Stage 1 must behave
-    /// identically to #27 on the auto-published TestFlight build.
-    ///
-    /// **Stage 2 flips this** (Plan 13 N3): once phase B is removed and
-    /// Swift is rewired, redefine the function as
-    /// `doc_kinds_for_template(t)[0]` and change the property assertion
-    /// below to `"condition"`.
+    /// Plan 13 N3 (Stage 2 flip): `doc_kind_for_template` is now
+    /// `doc_kinds_for_template(t)[0]` — property's default flips from
+    /// `"report"` to `"condition"` (property's own legal-kind list starts
+    /// with `condition`, not `report`). `doc_kind` is advisory-only
+    /// (`NotesPayload.doc_kind`); Swift's button wiring keys off the
+    /// client-known template, never off this value.
     #[test]
-    fn doc_kind_for_template_keeps_stage1_defaults() {
+    fn doc_kind_for_template_is_the_templates_first_legal_kind() {
         assert_eq!(doc_kind_for_template(Some("landscape")), "estimate");
         assert_eq!(doc_kind_for_template(Some("inspection")), "inspection");
         assert_eq!(doc_kind_for_template(None), "report");
         assert_eq!(
             doc_kind_for_template(Some("property")),
-            "report",
-            "Stage 1 pins the OLD default — Stage 2 (N3) flips this to \"condition\""
+            "condition",
+            "N3: property's default flips to condition in Stage 2"
         );
     }
 
@@ -1021,7 +729,6 @@ mod tests {
             Arc::new(MockProvider::new(vec![
                 end_turn("done b"),
                 summary_response("B done."),
-                document_response(),
                 end_turn("done a"),
                 end_turn("no summary tool"),
             ])),
@@ -1039,5 +746,42 @@ mod tests {
         assert_eq!(store.get_session(&b.id).unwrap().status, SessionStatus::Processed);
         assert_eq!(store.get_session(&a.id).unwrap().status, SessionStatus::Failed);
         assert_eq!(store.get_session(&c.id).unwrap().status, SessionStatus::Recording);
+    }
+
+    /// D5a: a session whose transcript states a total captures a
+    /// `session_meta` artifact carrying `spoken_total_cents` — written by
+    /// `process()` on success, BEFORE the finish swap.
+    #[tokio::test]
+    async fn process_captures_the_spoken_total_as_a_session_meta_artifact() {
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            tool_use(
+                "write_summary",
+                serde_json::json!({
+                    "summary": "Mulch and railing; keep it under twelve hundred.",
+                    "spoken_total_cents": 120000
+                }),
+            ),
+        ]);
+        processor.process(&sid).await.unwrap();
+        let store = store.lock().unwrap();
+        let artifacts = store.list_artifacts_for_session(&sid).unwrap();
+        let meta = artifacts.iter().find(|a| a.kind == "session_meta").expect("session_meta written");
+        let v: serde_json::Value = serde_json::from_str(&meta.body).unwrap();
+        assert_eq!(v["spoken_total_cents"], 120000);
+    }
+
+    /// No total stated -> no `session_meta` artifact at all (D5a: absent
+    /// unless the model clearly heard a stated total, R6).
+    #[tokio::test]
+    async fn process_writes_no_session_meta_artifact_when_no_total_was_stated() {
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            summary_response("Walked the site."),
+        ]);
+        processor.process(&sid).await.unwrap();
+        let store = store.lock().unwrap();
+        let artifacts = store.list_artifacts_for_session(&sid).unwrap();
+        assert!(!artifacts.iter().any(|a| a.kind == "session_meta"), "no total stated -> no artifact");
     }
 }

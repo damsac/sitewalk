@@ -3,7 +3,10 @@ import Observation
 import os
 
 // One observable model drives the whole flow:
-//   board → walking (pause/resume, photos) → building → review (edit, fill gaps) → sent
+//   board → walking (pause/resume, photos) → building → notes → review (edit, fill gaps) → sent
+// (Plan 13: `building` computes NOTES, not a document — `notes` is the
+// primary result; `review` is reached deliberately via a build-document
+// button from the notes screen, not automatically at DONE.)
 // The engine behind it is injected; today that's DemoWalkEngine, tomorrow the
 // FFI bridge. The UI never knows the difference.
 
@@ -15,6 +18,7 @@ final class AppModel {
         case board
         case walking
         case building
+        case notes
         case review
     }
 
@@ -90,6 +94,20 @@ final class AppModel {
     /// (add/list/remove_photo) works on a `Processed` session too — there is
     /// no live `WalkSession` requirement, just this id.
     private(set) var currentSessionId: String?
+
+    // Notes state (Plan 13 D1/D2): the primary finish() result. // sac: the
+    // real notes screen (grouping, action-button set, transcript row) is
+    // yours (docs/design/notes-mockup.html) — this is the plumbing +
+    // plainest functional rendering (NotesView.swift).
+    var notes: NotesModel?
+    /// Set when a `buildDocument` tap fails (illegal kind, non-Processed
+    /// session) — surfaced by the notes screen; the button stays available
+    /// to retry. // sac: error chrome is yours; this is the plumbing.
+    var documentBuildError: String?
+    /// True while a build-document tap is in flight — the notes screen
+    /// disables the button so a double-tap can't burn two document numbers
+    /// (D7: numbers mint per generate).
+    var isBuildingDocument = false
 
     // Review state
     var document: DocumentModel?
@@ -355,10 +373,16 @@ final class AppModel {
         isPaused = false
         currentSessionId = nil // the session was just tombstoned in Rust
         photos = []
+        notes = nil
+        documentBuildError = nil
         phase = .board
         path = []
     }
 
+    /// Plan 13 D1: DONE ends the walk and computes NOTES — not a document.
+    /// The walk's items + summary land on the notes screen immediately; a
+    /// document is built later, deliberately, by a `buildPrimaryDocument()`
+    /// tap (or a future per-kind button — sac's taxonomy).
     func finishWalk() {
         source?.stop()
         audioSource?.stop()
@@ -371,10 +395,51 @@ final class AppModel {
             // pump ends when the source's stream finishes, so awaiting it
             // guarantees every flushed chunk reached engine.append first.
             _ = await pumpTask?.value
-            let doc = await engine.finish()
-            self.document = doc
-            self.phase = .review
-            self.path = [.review]
+            let notes = await engine.finish()
+            self.notes = notes
+            self.phase = .notes
+            self.path = [.notes]
+        }
+    }
+
+    /// Leaves the notes screen without building a document (e.g. the "not
+    /// now" / back-to-board path, or the empty-walk UX). The session already
+    /// reached `Processed` inside `finish()` — nothing to tombstone here,
+    /// unlike `discardWalk()` (which cancels a still-live session). Just
+    /// resets local UI state.
+    func dismissNotes() {
+        notes = nil
+        documentBuildError = nil
+        currentSessionId = nil
+        phase = .board
+        path = []
+    }
+
+    /// Plan 13 Task 7: the ONE build-document button wired per template's
+    /// primary kind (`DocKinds.primaryKind(for:)`) — engine-keyed
+    /// (`currentSessionId`, snapshotted at walk start and kept through
+    /// review), calling the Stage-1 FFI `build_document` method. On success,
+    /// routes to the EXISTING `ReviewView` (unchanged). Disabled by the
+    /// notes screen while `notes?.queued` (D9: no authoritative board yet).
+    /// // sac: this is the plumbing for ONE button; the full per-trade
+    /// button set (estimate/invoice/work_order, etc.) is yours.
+    func buildPrimaryDocument() {
+        guard let sessionId = currentSessionId else { return }
+        let kind = DocKinds.primaryKind(for: trade.key)
+        documentBuildError = nil
+        isBuildingDocument = true
+        Task {
+            defer { isBuildingDocument = false }
+            do {
+                let doc = try await engine.buildDocument(sessionId: sessionId, kind: kind)
+                self.document = doc
+                self.phase = .review
+                self.path = [.review]
+            } catch {
+                Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "document")
+                    .error("buildDocument failed: \(error, privacy: .public)")
+                self.documentBuildError = "\(error)"
+            }
         }
     }
 
@@ -515,6 +580,7 @@ final class AppModel {
         ))
         shareURL = nil
         document = nil
+        notes = nil
         phase = .board
         path = []
     }
@@ -529,6 +595,7 @@ final class AppModel {
         ))
         shareURL = nil
         document = nil
+        notes = nil
         phase = .board
         path = []
     }

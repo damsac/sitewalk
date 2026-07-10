@@ -89,19 +89,11 @@ mod tests {
         tool_use("write_summary", serde_json::json!({"summary": text}))
     }
 
-    /// Stage 1: `finish()` still runs the OLD forced phase-B `build_document`
-    /// call — every successful `process()` makes this call.
-    fn document_response() -> CompletionResponse {
-        tool_use(
-            "build_document",
-            serde_json::json!({"total_kind": "sum", "total_label_key": "total", "lines": []}),
-        )
-    }
-
     /// Drives a walk through `begin_walk` -> `append_transcript` ->
-    /// `finish()` on `processing` responses `[add_item, end_turn, summary,
-    /// document]` (the Stage-1 phase-B flow), leaving the session `Processed`
-    /// with exactly one authoritative item. Returns the engine + session id.
+    /// `finish()` on `processing` responses `[add_item, end_turn, summary]`
+    /// (Stage 2: `finish()` = notes only, no phase B), leaving the session
+    /// `Processed` with exactly one authoritative item. Returns the engine +
+    /// session id.
     async fn processed_landscape_session(
         extra_processing_responses: Vec<CompletionResponse>,
     ) -> (std::sync::Arc<MurmurEngine>, String) {
@@ -110,7 +102,6 @@ mod tests {
             tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
             end_turn("done"),
             summary_response("Lumber ordered."),
-            document_response(),
         ];
         responses.extend(extra_processing_responses);
         let engine = MurmurEngine::with_providers(
@@ -126,7 +117,7 @@ mod tests {
         let session = engine.clone().begin_walk(None, "landscape".into()).unwrap();
         session.clone().append_transcript("order twelve two by tens for the deck".into());
         let sid = session.session_id();
-        let _notes = session.finish().await; // Stage 1: still the old DocumentPayload
+        let _notes = session.finish().await; // Stage 2: NotesPayload, no document yet
         (engine, sid)
     }
 
@@ -141,10 +132,8 @@ mod tests {
         assert_eq!(payload.lines[0].title, "order lumber");
         assert!(!payload.queued);
 
-        // Two document artifacts now exist for the session: the OLD phase-B
-        // one written by finish(), and this NEW one — burn-per-tap (D7), and
-        // build_document reads back exactly the one it just wrote, not
-        // latest_document_artifact's ambiguous "most recent of either kind".
+        // Exactly one document artifact for the session: phase B is gone, so
+        // this build_document call is the only writer.
         let store = engine.store.lock().unwrap();
         let docs: Vec<_> = store
             .list_artifacts_for_session(&sid)
@@ -152,7 +141,7 @@ mod tests {
             .into_iter()
             .filter(|a| a.kind == "document")
             .collect();
-        assert_eq!(docs.len(), 2, "phase-B's document + build_document's new one coexist");
+        assert_eq!(docs.len(), 1, "build_document is the only document writer now (phase B is gone)");
     }
 
     #[tokio::test]

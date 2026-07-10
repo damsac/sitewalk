@@ -8,7 +8,8 @@ import Foundation
 //   begin(trade:)      → store.start_session(job_id)
 //   append(transcript:)→ store.append_transcript + LiveExtractor incremental pass
 //   events             → items the live pass lands on the board
-//   finish()           → end_and_record_session + SessionProcessor.process → artifact
+//   finish()           → end_and_record_session + SessionProcessor.process → NOTES
+//   buildDocument()    → MurmurEngine::build_document(kind), on demand (Plan 13)
 //
 // The UI owns speech-to-text (see TranscriptSource) and only ever sends text
 // down. The engine owns extraction and never receives audio.
@@ -61,6 +62,23 @@ struct DocumentModel {
     }
 }
 
+/// Plan 13 D2/D3: `finish()`'s notes-first result — items + summary, NOT a
+/// document. The document build moves to an explicit, later
+/// `buildDocument(sessionId:kind:)` call from the notes screen's action row.
+/// `docKind` is ADVISORY only (core's template default) — button wiring keys
+/// off the client-known `TradeFixture.key`/template, never off this field
+/// (Plan 13 D2). // sac: grouping items by `tag`/kind for the notes screen is
+/// yours; this is the plumbing shape only.
+struct NotesModel {
+    var summary: String
+    var items: [CapturedFixture]
+    var docKind: String
+    /// `true` when `finish()` degraded offline (D9) — no authoritative board
+    /// exists yet, so build-document actions must stay disabled until a
+    /// retry succeeds.
+    var queued: Bool
+}
+
 @MainActor
 protocol WalkEngine: AnyObject {
     /// Start a session for a trade and return THAT SESSION's event stream.
@@ -85,8 +103,23 @@ protocol WalkEngine: AnyObject {
     /// `DemoWalkEngine` no-ops it (the scripted demo needs no audio).
     func pushAudio(_ samples: [Float])
 
-    /// End the session and build the document. Target: < 8 s, no spinner lies.
-    func finish() async -> DocumentModel
+    /// End the session and return its NOTES (Plan 13 D1/D2) — items +
+    /// summary, computed by the pipeline's existing extraction+summary pass.
+    /// No document is built here anymore; that's the deliberate, on-demand
+    /// `buildDocument(sessionId:kind:)` call below. Target: < 8 s, no spinner
+    /// lies.
+    func finish() async -> NotesModel
+
+    /// Build the finished document for `kind` on demand (Plan 13 D1, Stage
+    /// 1's `MurmurEngine::build_document`) — called from the notes screen's
+    /// action row, NOT during `finish()`. Engine-keyed (not session-scoped):
+    /// `finish()` already dropped its live session handle, so this call
+    /// works from history/relaunch too. Burns a fresh document number per
+    /// tap (D7: regenerate is explicit, never silently reused). Throwing:
+    /// the real FFI call is fallible (a non-`Processed` session, an illegal
+    /// `kind` for the template) — the caller (the notes screen) surfaces the
+    /// error and leaves the button available to retry, never crashes.
+    func buildDocument(sessionId: String, kind: String) async throws -> DocumentModel
 
     /// DISCARD the session (Plan 08 Task 4): stop the STT pump and tombstone
     /// the session in Rust. Async because the Rust `cancel()` `spawn_blocking`-

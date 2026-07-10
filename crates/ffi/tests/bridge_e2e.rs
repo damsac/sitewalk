@@ -55,22 +55,8 @@ fn summary_response(text: &str) -> CompletionResponse {
     tool_use("write_summary", serde_json::json!({"summary": text}))
 }
 
-fn document_response_with_a_gap() -> CompletionResponse {
-    tool_use(
-        "build_document",
-        serde_json::json!({
-            "total_kind": "sum",
-            "total_label_key": "total",
-            "lines": [
-                {"title": "Mulch", "qty": "3 CU YD", "amount_cents": 28500},
-                {"title": "Haul & disposal", "qty": "× 1"}
-            ]
-        }),
-    )
-}
-
 #[tokio::test]
-async fn begin_append_live_snapshot_finish_document_with_gap() {
+async fn begin_append_live_snapshot_finish_returns_notes() {
     let store = Store::open_in_memory("device-a").unwrap();
     let engine = MurmurEngine::with_providers(
         store,
@@ -85,7 +71,6 @@ async fn begin_append_live_snapshot_finish_document_with_gap() {
                 tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order 12 2x10 joists"})),
                 end_turn("done"),
                 summary_response("Landscape walk: mulch and haul planned."),
-                document_response_with_a_gap(),
             ])),
             reflection: Arc::new(MockProvider::new(vec![])),
         },
@@ -109,14 +94,13 @@ async fn begin_append_live_snapshot_finish_document_with_gap() {
 
     let payload = session.finish().await;
 
-    assert_eq!(payload.doc_kind, "estimate", "landscape template maps to the estimate doc_kind");
-    assert_eq!(payload.doc_number, 1);
+    // Plan 13 Stage 2: finish() = notes only. No build_document call was made
+    // (phase B is gone) — one folded "processing" usage row only.
+    assert_eq!(payload.doc_kind, "estimate", "landscape template's advisory default kind");
+    assert_eq!(payload.summary, "Landscape walk: mulch and haul planned.");
     assert!(!payload.queued);
-    assert_eq!(payload.lines.len(), 2);
-    assert_eq!(payload.lines[0].amount_cents, Some(28500));
-    assert!(!payload.lines[0].is_gap);
-    assert_eq!(payload.lines[1].amount_cents, None);
-    assert!(payload.lines[1].is_gap, "unheard amount on a dollar template is a gap (R6)");
+    assert_eq!(payload.items.len(), 1, "the authoritative item survives the swap");
+    assert_eq!(payload.items[0].text, "order 12 2x10 joists");
 
     // Terminal snapshot: the authoritative item replaced the live one (swap).
     let events = listener.0.lock().unwrap().clone();
@@ -163,11 +147,10 @@ async fn finish_degrades_to_a_partial_queued_document_when_offline() {
 
     let payload = session.finish().await;
 
-    assert!(payload.queued, "offline finish returns a queued partial document (D9)");
-    assert_eq!(payload.lines.len(), 1, "built from the live board — capture is never lost");
-    assert_eq!(payload.lines[0].title, "order lumber");
-    assert_eq!(payload.lines[0].amount_cents, None);
-    assert!(payload.lines[0].is_gap, "an offline partial document is all gaps");
+    assert!(payload.queued, "offline finish returns queued notes (D9)");
+    assert_eq!(payload.summary, "", "D3: offline degrade carries no summary");
+    assert_eq!(payload.items.len(), 1, "built from the live board — capture is never lost");
+    assert_eq!(payload.items[0].text, "order lumber");
 }
 
 /// A processing provider whose first call blocks on a barrier — used to
@@ -210,10 +193,6 @@ async fn a_tick_mid_finish_never_observes_an_empty_board() {
                     tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order 12 2x10s"})),
                     end_turn("done"),
                     summary_response("Lumber ordered."),
-                    tool_use(
-                        "build_document",
-                        serde_json::json!({"total_kind": "sum", "total_label_key": "total", "lines": []}),
-                    ),
                 ])),
                 first: AtomicBool::new(true),
             }),
@@ -247,13 +226,10 @@ async fn a_tick_mid_finish_never_observes_an_empty_board() {
 }
 
 /// A genuinely silent walk (no `append_transcript` at all): `murmur-core`'s
-/// pipeline short-circuits on an empty transcript before phase B ever runs,
-/// so no `document` artifact exists. `finish()` must not panic on the
-/// now-false "phase B always builds a document" invariant — it must degrade
-/// to a truthful, non-queued (nothing pending — the session IS Processed)
-/// empty document.
+/// pipeline short-circuits on an empty transcript. `finish()` returns
+/// truthful empty notes — the session IS Processed, nothing pending.
 #[tokio::test]
-async fn finish_on_a_silent_walk_returns_a_truthful_empty_document_without_panicking() {
+async fn finish_on_a_silent_walk_returns_truthful_empty_notes_without_panicking() {
     let store = Store::open_in_memory("device-a").unwrap();
     let engine = MurmurEngine::with_providers(
         store,
@@ -271,17 +247,14 @@ async fn finish_on_a_silent_walk_returns_a_truthful_empty_document_without_panic
     let payload = session.finish().await;
 
     assert!(!payload.queued, "an empty session is genuinely Processed — nothing pending");
-    assert_eq!(payload.lines.len(), 0);
-    // Phase B (and doc-number minting, which only phase B triggers) never
-    // ran, so the mint never happened — 0 is the honest value, not a real
-    // document number.
-    assert_eq!(payload.doc_number, 0);
+    assert_eq!(payload.summary, "(empty session)");
+    assert_eq!(payload.items.len(), 0);
 }
 
 /// Same short circuit, reached via whitespace-only content instead of a
 /// total absence of transcript.
 #[tokio::test]
-async fn finish_on_a_whitespace_only_transcript_also_skips_phase_b() {
+async fn finish_on_a_whitespace_only_transcript_also_returns_empty_notes() {
     let store = Store::open_in_memory("device-a").unwrap();
     let engine = MurmurEngine::with_providers(
         store,
@@ -299,16 +272,16 @@ async fn finish_on_a_whitespace_only_transcript_also_skips_phase_b() {
     let payload = session.finish().await;
 
     assert!(!payload.queued);
-    assert_eq!(payload.lines.len(), 0);
-    assert_eq!(payload.doc_number, 0);
+    assert_eq!(payload.summary, "(empty session)");
+    assert_eq!(payload.items.len(), 0);
 }
 
 /// A second `finish()` call on an already-finished session used to panic
 /// (`end_and_record_session`'s `.expect` on an `InvalidState` error, since
 /// the session already left `Recording`). It must now return the
-/// already-built document — a harmless, idempotent re-finish — not crash.
+/// already-known notes — a harmless, idempotent re-finish — not crash.
 #[tokio::test]
-async fn a_second_finish_call_returns_the_already_built_document_instead_of_panicking() {
+async fn a_second_finish_call_returns_the_already_known_notes_instead_of_panicking() {
     let store = Store::open_in_memory("device-a").unwrap();
     let engine = MurmurEngine::with_providers(
         store,
@@ -323,7 +296,6 @@ async fn a_second_finish_call_returns_the_already_built_document_instead_of_pani
                 tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order 12 2x10 joists"})),
                 end_turn("done"),
                 summary_response("Landscape walk: mulch and haul planned."),
-                document_response_with_a_gap(),
             ])),
             reflection: Arc::new(MockProvider::new(vec![])),
         },
@@ -341,9 +313,9 @@ async fn a_second_finish_call_returns_the_already_built_document_instead_of_pani
     let second = session.clone().finish().await;
 
     assert_eq!(first.doc_kind, second.doc_kind);
-    assert_eq!(first.doc_number, second.doc_number);
-    assert_eq!(first.lines.len(), second.lines.len());
-    assert!(!second.queued, "the already-built document was never queued");
+    assert_eq!(first.summary, second.summary);
+    assert_eq!(first.items.len(), second.items.len());
+    assert!(!second.queued, "the already-known notes were never queued");
 }
 
 async fn wait_for(listener: &Arc<CollectingListener>, count: usize) -> Vec<WalkEvent> {

@@ -46,7 +46,14 @@ fn summary_tool_spec() -> ToolSpec {
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
-                "summary": { "type": "string", "description": "1-2 plain sentences: what happened, key outcomes" }
+                "summary": { "type": "string", "description": "1-2 plain sentences: what happened, key outcomes" },
+                "spoken_total_cents": {
+                    "type": "integer",
+                    "description": "The operator's stated target/grand total for the WHOLE job, in cents \
+                                     — ONLY when a specific dollar total was clearly spoken (e.g. \"keep it \
+                                     under twelve hundred\" -> 120000). Omit entirely if no total was stated \
+                                     or you are unsure — never guess."
+                }
             },
             "required": ["summary"]
         }),
@@ -56,15 +63,20 @@ fn summary_tool_spec() -> ToolSpec {
 /// One-shot forced summary call (the Plan 02 reflection-engine pattern).
 ///
 /// Provider errors stay `Err` (no tokens were incurred). A successful call
-/// that lacks a `write_summary` block returns `Ok((None, usage))` so the
-/// caller can log the spend (R9) before deciding it's a failure. The
+/// that lacks a `write_summary` block returns `Ok((None, None, usage))` so
+/// the caller can log the spend (R9) before deciding it's a failure. The
 /// transcript excerpt is passed through as-is — it already carries its own
 /// `## transcript` header from the context assembler.
+///
+/// D5a: the optional `spoken_total_cents` is captured HERE — the only pass
+/// that legitimately reads the transcript — and threaded as a scalar hint
+/// into the on-demand pricing pass (`DocumentBuilder::build`) later, so the
+/// pricing prompt itself never needs transcript access.
 pub(crate) async fn summarize(
     provider: Arc<dyn LlmProvider>,
     transcript_excerpt: &str,
     max_tokens: u32,
-) -> Result<(Option<String>, Usage), HarnessError> {
+) -> Result<(Option<String>, Option<i64>, Usage), HarnessError> {
     let response = provider
         .complete(CompletionRequest {
             system: "Summarize one transcribed field-work session in 1-2 plain sentences \
@@ -77,13 +89,15 @@ pub(crate) async fn summarize(
         })
         .await?;
 
-    let summary = response.content.iter().find_map(|b| match b {
-        ContentBlock::ToolUse { name, input, .. } if name == WRITE_SUMMARY => {
-            input.get("summary").and_then(|s| s.as_str()).map(str::to_string)
-        }
+    let tool_input = response.content.iter().find_map(|b| match b {
+        ContentBlock::ToolUse { name, input, .. } if name == WRITE_SUMMARY => Some(input),
         _ => None,
     });
-    Ok((summary, response.usage))
+    let summary =
+        tool_input.and_then(|i| i.get("summary").and_then(|s| s.as_str()).map(str::to_string));
+    let spoken_total_cents =
+        tool_input.and_then(|i| i.get("spoken_total_cents").and_then(|s| s.as_i64()));
+    Ok((summary, spoken_total_cents, response.usage))
 }
 
 /// Formats a session's existing items as a newest-first dedup list for a live
@@ -131,64 +145,6 @@ pub(crate) fn live_extraction_system_prompt(memory_prompt: &str) -> String {
     )
 }
 
-/// Formats this run's authoritative items as a reference block for the
-/// forced `build_document` call (Plan 12 D1) — one line per item, carrying
-/// the exact `item_id` the model should copy onto a matching document line.
-/// Empty string when there are no authoritative items (the caller omits the
-/// block entirely).
-pub(crate) fn format_document_items(items: &[CapturedItem]) -> String {
-    items
-        .iter()
-        .map(|i| format!("- [{}] {} (item_id: {})", i.kind, i.text, i.id))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// System prompt for the forced `build_document` call (Plan 07 D6). Template-
-/// parameterized: each template gets its own instruction for what a normal
-/// non-dollar line looks like, so the model doesn't over-flag gaps (D2a).
-/// `memory_prompt` is `Memory::to_prompt()` output ("" when empty).
-pub(crate) fn build_document_prompt(template: &str, memory_prompt: &str) -> String {
-    let memory_block = if memory_prompt.trim().is_empty() {
-        String::new()
-    } else {
-        format!("\n\nWhat you know about this user:\n{memory_prompt}")
-    };
-    let template_block = match template {
-        "landscape" | "estimate" => {
-            "This is a landscape ESTIMATE: every line should carry a price. Build one line \
-             per priced item or service, in the speaker's own terms."
-        }
-        "property" | "report" => {
-            "This is a PROPERTY report: most lines describe condition (\"OK\", \"NOTE\", normal \
-             wear) and carry no dollar amount — that is expected, not a gap. Only lines that are \
-             genuine deductions need an amount; mark a line a gap only when a deduction was left \
-             open, never for a normal condition note."
-        }
-        "inspection" => {
-            "This is an INSPECTION report: findings are grouped by section and normally carry no \
-             dollar amount at all — that is expected, not a gap. Mark a finding a gap only when \
-             you flagged it as not-yet-assessed."
-        }
-        _ => {
-            "Build the document from what was actually said. Only mark a line a gap when it was \
-             genuinely left open."
-        }
-    };
-    format!(
-        "You build the structured job document from this session's transcript. {template_block}\n\
-         Put an amount only on a line whose number was actually spoken. If a quantity or price \
-         was not said, omit amount_cents — never guess. On a priced template an unheard amount is \
-         a gap; on a report or inspection, only mark a line a gap when it was genuinely left open \
-         — a normal 'OK' row or a §-section finding with no dollar figure is not a gap.\n\
-         You will be given the items already captured for this session, each with an item_id. \
-         When a document line corresponds to one of those items, copy its item_id exactly onto \
-         that line. The item list is a REFERENCE, not a checklist — do not invent a line for \
-         every item, and do not drop a line just because it has no item. Total or rollup lines \
-         have no item_id.{memory_block}"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -223,8 +179,10 @@ mod tests {
             stop_reason: StopReason::ToolUse,
             usage: Usage { input_tokens: 40, output_tokens: 12 },
         }]));
-        let (summary, usage) = summarize(provider.clone(), "transcript text", 512).await.unwrap();
+        let (summary, spoken_total_cents, usage) =
+            summarize(provider.clone(), "transcript text", 512).await.unwrap();
         assert_eq!(summary.as_deref(), Some("Walked the deck; two todos."));
+        assert_eq!(spoken_total_cents, None, "no total was stated");
         assert_eq!(usage, Usage { input_tokens: 40, output_tokens: 12 });
         let reqs = provider.requests();
         assert_eq!(reqs[0].tool_choice.as_deref(), Some("write_summary"));
@@ -278,8 +236,29 @@ mod tests {
             stop_reason: StopReason::EndTurn,
             usage: Usage { input_tokens: 50, output_tokens: 10 },
         }]));
-        let (summary, usage) = summarize(provider, "t", 512).await.unwrap();
+        let (summary, spoken_total_cents, usage) = summarize(provider, "t", 512).await.unwrap();
         assert!(summary.is_none(), "missing tool call is not an Err — spend must be loggable");
+        assert_eq!(spoken_total_cents, None);
         assert_eq!(usage, Usage { input_tokens: 50, output_tokens: 10 });
+    }
+
+    #[tokio::test]
+    async fn summarize_captures_the_spoken_total_when_stated() {
+        let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+            content: vec![ContentBlock::ToolUse {
+                id: "tu_1".into(),
+                name: "write_summary".into(),
+                input: serde_json::json!({
+                    "summary": "Mulch and railing; keep it under twelve hundred.",
+                    "spoken_total_cents": 120000
+                }),
+            }],
+            stop_reason: StopReason::ToolUse,
+            usage: Usage { input_tokens: 40, output_tokens: 12 },
+        }]));
+        let (summary, spoken_total_cents, _usage) =
+            summarize(provider, "transcript text", 512).await.unwrap();
+        assert!(summary.is_some());
+        assert_eq!(spoken_total_cents, Some(120000));
     }
 }

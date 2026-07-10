@@ -1,17 +1,21 @@
 //! `WalkSession`: append/finish, the `LiveExtractor` actor, batched board
 //! events (Plan 07 D3/D7).
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex as StdMutex};
 
 use harness::{LlmProvider, Memory, MemoryStore};
-use murmur_core::{doc_kind_for_template, LiveExtractOutcome, LiveExtractor, SessionProcessor, Store};
+use murmur_core::{
+    doc_kind_for_template, CapturedItem, LiveExtractOutcome, LiveExtractor, SessionProcessor,
+    Store,
+};
 use tokio::sync::Mutex as TokioMutex;
 
 use crate::convert;
-use crate::document::DocumentPayload;
 use crate::engine::{EngineError, MurmurEngine};
 use crate::events::{WalkEvent, WalkEventListener};
+use crate::notes::{notes_payload, NotesPayload};
 
 /// One recording session's bridge state. `finish` lands in Task 8.
 #[derive(uniffi::Object)]
@@ -408,41 +412,40 @@ impl WalkSession {
         listener.on_event(WalkEvent::BoardUpdated { items: board_items });
     }
 
-    /// Builds a partial, all-gaps document from whatever is on the current
-    /// live board. Shared by: the offline-degrade path (`queued: true`, D9)
-    /// and the "nothing left to process" paths below (`queued: false`) — the
-    /// empty-transcript short circuit and the double-finish degrade.
-    fn partial_document(&self, queued: bool) -> DocumentPayload {
+    /// The current board (items + batched per-item photo counts), shared by
+    /// `emit_board_snapshot` and the notes builders below.
+    fn board_items_and_photo_counts(&self) -> (Vec<CapturedItem>, HashMap<String, u32>) {
+        let store = self.store.lock().unwrap();
+        let items = store.list_items_for_session(&self.session_id).unwrap_or_default();
+        let counts =
+            store.count_live_photos_by_item_for_session(&self.session_id).unwrap_or_default();
+        (items, counts)
+    }
+
+    /// Builds a `NotesPayload` from whatever is on the current board (Plan
+    /// 13 D3). Shared by: the offline-degrade path (`queued: true`, D9), the
+    /// empty-transcript short circuit, and the double-finish/degraded exit
+    /// (all `queued: false` — nothing is pending in those cases).
+    fn partial_notes(&self, summary: &str, queued: bool) -> NotesPayload {
         let doc_kind = doc_kind_for_template(self.template.as_deref());
-        let items = self
-            .store
-            .lock()
-            .unwrap()
-            .list_items_for_session(&self.session_id)
-            .unwrap_or_default();
-        convert::partial_document_from_items(doc_kind, &items, queued)
+        let (items, photo_counts) = self.board_items_and_photo_counts();
+        notes_payload(&self.session_id, doc_kind, summary, &items, &photo_counts, queued)
     }
 
     /// Degrade path for a `finish()` call that can't transition the session
     /// out of `Recording` — in practice, almost always a second `finish()`
     /// call on a session that already finished. This call has already
     /// crossed into async/FFI territory, so there is no safe panic here: any
-    /// unwind here is fatal to the host app. Every failure mode (already
-    /// ended, or a genuinely unexpected store error) degrades the same way:
-    /// return the document that's already there if phase B built one, else
-    /// project the current board into a partial (non-queued — there is
-    /// nothing left pending) document.
-    fn degraded_document(&self) -> DocumentPayload {
-        let existing = {
+    /// unwind here is fatal to the host app. D3's double-finish row: the
+    /// session's already-stored summary (or `""` if unreadable), the current
+    /// board, `queued: false` — there is nothing left pending.
+    fn degraded_notes(&self) -> NotesPayload {
+        let summary = {
             let store = self.store.lock().unwrap();
-            // Scoped to the session's document artifact (carry-note 6), not a
-            // sweep of every artifact.
-            store.latest_document_artifact(&self.session_id).unwrap_or_default()
-        };
-        match existing.as_ref().map(convert::document_payload) {
-            Some(Ok(payload)) => payload,
-            _ => self.partial_document(false),
+            store.get_session(&self.session_id).ok().and_then(|s| s.summary)
         }
+        .unwrap_or_default();
+        self.partial_notes(&summary, false)
     }
 }
 
@@ -615,27 +618,31 @@ impl WalkSession {
         self.session_id.clone()
     }
 
-    /// D6/D9: `end_and_record_session` + `SessionProcessor::process`, then
-    /// the terminal swap snapshot + the structured document.
+    /// Plan 13 Stage 2 (D1/D3/D9): `end_and_record_session` +
+    /// `SessionProcessor::process`, then the terminal swap snapshot. A walk's
+    /// finish output is now NOTES (items + summary) — phase B is gone, so
+    /// `process()` no longer builds a document; the finished document is
+    /// built later, on demand, by `MurmurEngine::build_document(kind)`.
     ///
-    /// Three degrade paths, none of which may panic across the FFI boundary
-    /// (a `uniffi::export`ed async fn returns a bare `DocumentPayload`, not a
+    /// Two degrade paths, neither of which may panic across the FFI boundary
+    /// (a `uniffi::export`ed async fn returns a bare `NotesPayload`, not a
     /// `Result` — an unwind here is a fatal crash in the host app, not a
     /// catchable error):
     /// - `end_and_record_session` fails (most commonly: a second `finish()`
-    ///   call on an already-ended session) -> `degraded_document()`.
-    /// - phase B ran but the transcript was empty/whitespace-only, so
-    ///   `murmur-core`'s pipeline short-circuited before building a document
-    ///   artifact -> a truthful, non-queued `partial_document`.
-    /// - phase B failed outright (offline/LLM-down, D9) -> a queued partial
-    ///   document built from the live board — capture is never lost.
-    pub async fn finish(self: Arc<Self>) -> DocumentPayload {
+    ///   call on an already-ended session) -> `degraded_notes()`.
+    /// - `process()` fails outright (offline/LLM-down, D9) -> queued notes
+    ///   built from the live board — capture is never lost.
+    ///
+    /// The empty-transcript short circuit is no longer a separate branch:
+    /// `process()` succeeds either way (with summary `"(empty session)"` for
+    /// a silent walk), so the `Ok` arm below handles it uniformly.
+    pub async fn finish(self: Arc<Self>) -> NotesPayload {
         // Terminal transition FIRST, guard second — the SAME order as
         // `cancel()` (see `try_enter_terminal`). A second finish() (or a
-        // finish() after cancel()) degrades to the already-built document
+        // finish() after cancel()) degrades to the already-known notes
         // rather than reprocessing or resurrecting a tombstoned session.
         if !self.try_enter_terminal() {
-            return self.degraded_document();
+            return self.degraded_notes();
         }
 
         // D3b: hold the extractor mutex across the rest of the call so no
@@ -656,7 +663,7 @@ impl WalkSession {
             store.end_and_record_session(&self.session_id)
         };
         if ended.is_err() {
-            return self.degraded_document();
+            return self.degraded_notes();
         }
 
         let processor = SessionProcessor::new(
@@ -668,34 +675,15 @@ impl WalkSession {
         match processor.process(&self.session_id).await {
             Ok(outcome) => {
                 self.emit_board_snapshot();
-                // Read EXACTLY the document this run built (carry-note 6) — never
-                // sweep the session's artifacts, so a future non-processing
-                // `document` writer can't be misread as the document.
-                match outcome.document_artifact_id {
-                    // The common case: phase B ran and built a document. If the
-                    // artifact is somehow unreadable, degrade rather than panic
-                    // across FFI (this is a bare `DocumentPayload` return).
-                    Some(id) => {
-                        let art = {
-                            let store = self.store.lock().unwrap();
-                            store.get_artifact(&id)
-                        };
-                        match art.as_ref().map(convert::document_payload) {
-                            Ok(Ok(payload)) => payload,
-                            _ => self.partial_document(false),
-                        }
-                    }
-                    // The empty-transcript short circuit (murmur-core's
-                    // pipeline skips phase B entirely for a
-                    // whitespace-only/empty transcript): the session is
-                    // genuinely Processed with nothing pending, so this is a
-                    // truthful zero/items-only document — not queued.
-                    None => self.partial_document(false),
-                }
+                // Processed either way (normal or the empty-transcript short
+                // circuit, whose summary is "(empty session)") — not queued.
+                let summary = outcome.session.summary.unwrap_or_default();
+                self.partial_notes(&summary, false)
             }
             // Offline / LLM-down degradation (D9): the session did NOT reach
-            // Processed, so there's real pending work — queued: true.
-            Err(_) => self.partial_document(true),
+            // Processed, so there's real pending work — queued: true, summary
+            // "" per the D3 table.
+            Err(_) => self.partial_notes("", true),
         }
     }
 
@@ -784,13 +772,6 @@ mod tests {
 
     fn summary_response(text: &str) -> CompletionResponse {
         tool_use("write_summary", serde_json::json!({"summary": text}))
-    }
-
-    fn document_response() -> CompletionResponse {
-        tool_use(
-            "build_document",
-            serde_json::json!({"total_kind": "sum", "total_label_key": "total", "lines": []}),
-        )
     }
 
     /// A provider whose FIRST call blocks on a barrier before answering —
@@ -1499,7 +1480,6 @@ mod tests {
                 tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order 12 2x10s"})),
                 end_turn("done"),
                 summary_response("Lumber ordered."),
-                document_response(),
             ])),
             first: AtomicBool::new(true),
         });
@@ -1522,7 +1502,8 @@ mod tests {
 
         barrier.wait().await;
         let payload = finish_task.await.unwrap();
-        assert_eq!(payload.lines.len(), 0); // the empty-lines document_response
+        assert_eq!(payload.items.len(), 1, "the one authoritative item survives the swap");
+        assert!(!payload.queued);
 
         // Every snapshot actually delivered carries a non-empty board — the
         // authoritative swap never exposes the pre-06a empty window.

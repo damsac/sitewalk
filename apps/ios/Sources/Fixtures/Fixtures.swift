@@ -84,6 +84,35 @@ struct TradeFixture {
     let send: String
 }
 
+/// Plan 13 D8 — the Swift mirror of core's `doc_kinds_for_template`/
+/// `is_pricing_kind` (`crates/murmur-core/src/pipeline/mod.rs`): the legal
+/// `kind` vocabulary per template, in priority order, and which kinds need a
+/// price. Button WIRING (which kind an action calls `buildDocument` with)
+/// keys off `TradeFixture.key` via this table, never off the FFI payload's
+/// advisory `doc_kind` (D2). Which button *leads*, its label, and the full
+/// per-trade button-set content are sac's (`docs/design/notes-mockup.html`);
+/// this table only guarantees the wiring is correct.
+enum DocKinds {
+    static func legalKinds(for templateKey: String) -> [String] {
+        switch templateKey {
+        case "landscape": return ["estimate", "invoice", "work_order"]
+        case "property": return ["condition", "move_out"]
+        case "inspection": return ["inspection"]
+        default: return ["report"]
+        }
+    }
+
+    /// The template's default/lead kind — `legalKinds(for:).first`. The one
+    /// build-document button Task 7 wires per template calls this.
+    static func primaryKind(for templateKey: String) -> String {
+        legalKinds(for: templateKey).first ?? "report"
+    }
+
+    static func isPricingKind(_ kind: String) -> Bool {
+        kind == "estimate" || kind == "invoice"
+    }
+}
+
 enum Fixtures {
 
     static let landscape = TradeFixture(
