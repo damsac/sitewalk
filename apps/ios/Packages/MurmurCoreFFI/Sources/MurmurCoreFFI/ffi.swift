@@ -560,6 +560,8 @@ public protocol MurmurEngineProtocol : AnyObject {
      */
     func beginWalk(jobId: String?, template: String) throws  -> WalkSession
     
+    func buildDocument(sessionId: String, kind: String) async throws  -> DocumentPayload
+    
     /**
      * Core's entire file contract (Plan 11 D4): every live photo filename,
      * across all sessions. The shell sweep deletes any file on disk not in
@@ -726,6 +728,23 @@ open func beginWalk(jobId: String?, template: String)throws  -> WalkSession {
         FfiConverterString.lower(template),$0
     )
 })
+}
+    
+open func buildDocument(sessionId: String, kind: String)async throws  -> DocumentPayload {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_ffi_fn_method_murmurengine_build_document(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(sessionId),FfiConverterString.lower(kind)
+                )
+            },
+            pollFunc: ffi_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeDocumentPayload.lift,
+            errorHandler: FfiConverterTypeEngineError.lift
+        )
 }
     
     /**
@@ -2058,6 +2077,15 @@ public enum EngineError {
      */
     case Session(message: String)
     
+    /**
+     * An on-demand `build_document(kind)` call failed (Plan 13 D1/D8): a
+     * non-`Processed` session, an illegal `kind` for the session's
+     * template, a poisoned lock, or a store error reading back the
+     * artifact. Never a pricing-LLM failure — that degrades to a queued,
+     * unpriced document instead (R7); this variant is validation/store only.
+     */
+    case Document(message: String)
+    
 }
 
 
@@ -2098,6 +2126,10 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 7: return .Document(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2121,6 +2153,8 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(5))
         case .Session(_ /* message is ignored*/):
             writeInt(&buf, Int32(6))
+        case .Document(_ /* message is ignored*/):
+            writeInt(&buf, Int32(7))
 
         
         }
@@ -2495,6 +2529,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_begin_walk() != 41375) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_build_document() != 48464) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_list_live_photo_filenames() != 39240) {
