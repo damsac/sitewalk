@@ -7,6 +7,8 @@ pub mod tools;
 
 pub mod live;
 
+pub mod document;
+
 pub(crate) mod prompts;
 
 use std::sync::{Arc, Mutex};
@@ -22,17 +24,34 @@ use crate::error::CoreError;
 use crate::store::Store;
 use tools::{AddItemTool, BuildDocumentTool, UpsertContactTool, WriteReportTool};
 
-/// Maps a session's template key (D4: `landscape`|`property`|`inspection`) to
-/// the document's `doc_kind` vocabulary (D2/D5: `estimate`|`report`|
-/// `inspection`) that `BuildDocumentTool` and document-number minting use.
-/// `None`/unrecognized defaults to `report` — the safest shape (mixed
-/// dollar/non-dollar lines, gaps only where explicitly flagged).
-pub fn doc_kind_for_template(template: Option<&str>) -> &'static str {
+/// Plan 13 D8: the legal `doc_kind` vocabulary for a session's template, in
+/// priority order (`[0]` is the template's default kind — see
+/// `doc_kind_for_template`). This is core's concern (kind vocabulary +
+/// pricing flags); which button *leads* and its label copy are sac's.
+pub fn doc_kinds_for_template(template: Option<&str>) -> &'static [&'static str] {
     match template {
-        Some("landscape") => "estimate",
-        Some("inspection") => "inspection",
-        _ => "report",
+        Some("landscape") => &["estimate", "invoice", "work_order"],
+        Some("property") => &["condition", "move_out"],
+        Some("inspection") => &["inspection"],
+        _ => &["report"],
     }
+}
+
+/// Plan 13 D5: whether a `doc_kind` needs a pricing pass (an amount on every
+/// line). Only `estimate`/`invoice` are pricing kinds.
+pub fn is_pricing_kind(kind: &str) -> bool {
+    matches!(kind, "estimate" | "invoice")
+}
+
+/// Maps a session's template key (D4: `landscape`|`property`|`inspection`) to
+/// the document's default `doc_kind` (D2/D5) that `BuildDocumentTool` and
+/// document-number minting use. **Plan 13 N3:** redefined as
+/// `doc_kinds_for_template(t)[0]` — the property default CHANGES from
+/// `"report"` to `"condition"` (property's own legal-kind list starts with
+/// `condition`, not `report`; the old `_ => "report"` arm landed outside
+/// property's own list). `None`/unrecognized still defaults to `report`.
+pub fn doc_kind_for_template(template: Option<&str>) -> &'static str {
+    doc_kinds_for_template(template)[0]
 }
 
 #[derive(Debug)]
@@ -920,6 +939,45 @@ mod tests {
             Arc::new(NullMemoryStore),
         );
         assert!(processor.process_pending().await.unwrap().is_empty());
+    }
+
+    /// Plan 13 Task 1: the legal `doc_kind` vocabulary + pricing flags per
+    /// template.
+    #[test]
+    fn doc_kinds_for_template_lists_the_legal_kinds_per_template() {
+        assert_eq!(
+            doc_kinds_for_template(Some("landscape")),
+            &["estimate", "invoice", "work_order"]
+        );
+        assert_eq!(doc_kinds_for_template(Some("property")), &["condition", "move_out"]);
+        assert_eq!(doc_kinds_for_template(Some("inspection")), &["inspection"]);
+        assert_eq!(doc_kinds_for_template(None), &["report"]);
+    }
+
+    #[test]
+    fn is_pricing_kind_flags_only_estimate_and_invoice() {
+        assert!(is_pricing_kind("estimate"));
+        assert!(is_pricing_kind("invoice"));
+        assert!(!is_pricing_kind("work_order"));
+        assert!(!is_pricing_kind("inspection"));
+        assert!(!is_pricing_kind("report"));
+        assert!(!is_pricing_kind("condition"));
+    }
+
+    /// Plan 13 N3: `doc_kind_for_template` is redefined as
+    /// `doc_kinds_for_template(t)[0]` — the property default CHANGES from
+    /// today's `"report"` to `"condition"` (property's own legal-kind list
+    /// starts with `condition`, not `report`).
+    #[test]
+    fn doc_kind_for_template_is_the_first_legal_kind() {
+        assert_eq!(doc_kind_for_template(Some("landscape")), "estimate");
+        assert_eq!(doc_kind_for_template(Some("inspection")), "inspection");
+        assert_eq!(doc_kind_for_template(None), "report");
+        assert_eq!(
+            doc_kind_for_template(Some("property")),
+            "condition",
+            "property's default CHANGES from report to condition (N3)"
+        );
     }
 
     #[tokio::test]
