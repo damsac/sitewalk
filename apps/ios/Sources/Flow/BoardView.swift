@@ -14,7 +14,9 @@ struct BoardView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .top) {
-                    Text(model.trade.dateLabel)
+                    // Real current date once a profile exists; the frozen
+                    // fixture date only survives on the no-profile demo path.
+                    Text(model.boardDateLabel)
                         .font(Theme.F.mono(10, .semibold))
                         .tracking(2.0)
                         .foregroundStyle(Theme.C.orangeDeep)
@@ -56,23 +58,36 @@ struct BoardView: View {
                     .buttonStyle(.plain)
                     .padding(-6)
                 }
-                Text(model.trade.countTitle)
-                    .font(Theme.F.ui(26, .bold))
-                Menu {
-                    ForEach(Fixtures.all, id: \.key) { trade in
-                        Button(trade.biz) { model.switchTrade(trade) }
+                if let profile = model.profile {
+                    // Operator mode: the board carries THEIR business. Trade
+                    // comes from the profile, so no switcher — plain text.
+                    Text(model.sessionTitle)
+                        .font(Theme.F.ui(26, .bold))
+                    Text(profile.businessName.uppercased())
+                        .font(Theme.F.mono(9.5))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.C.ink60)
+                        .lineLimit(1)
+                        .padding(.top, 1)
+                } else {
+                    Text(model.trade.countTitle)
+                        .font(Theme.F.ui(26, .bold))
+                    Menu {
+                        ForEach(Fixtures.all, id: \.key) { trade in
+                            Button(trade.biz) { model.switchTrade(trade) }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(model.trade.bizCaps)
+                                .font(Theme.F.mono(9.5))
+                                .tracking(0.8)
+                            Text("⌄")
+                                .font(Theme.F.mono(9))
+                        }
+                        .foregroundStyle(Theme.C.ink60)
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(model.trade.bizCaps)
-                            .font(Theme.F.mono(9.5))
-                            .tracking(0.8)
-                        Text("⌄")
-                            .font(Theme.F.mono(9))
-                    }
-                    .foregroundStyle(Theme.C.ink60)
+                    .padding(.top, 1)
                 }
-                .padding(.top, 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Theme.S.screenPad)
@@ -105,16 +120,49 @@ struct BoardView: View {
                 .padding(.bottom, 10)
             }
 
-            MetaStrip(left: model.trade.boardMeta, right: "SYNCED 07:58")
+            if model.profile != nil {
+                // Operator mode: no fixture crew/sync strip, no fixture jobs.
+                // The board logs the walks actually finished this session.
+                SectionHead(
+                    left: "TODAY",
+                    right: "\(model.sessionWalks.count) \(model.sessionWalks.count == 1 ? "WALK" : "WALKS")",
+                    rightColor: Theme.C.orangeDeep
+                )
 
-            SectionHead(
-                left: "TODAY",
-                right: "\(model.jobs.filter { !$0.done }.count) OPEN",
-                rightColor: Theme.C.orangeDeep
-            )
+                if model.sessionWalks.isEmpty {
+                    // Honest empty state, same dashed-box idiom as the
+                    // vocabulary editor's.
+                    Text("NO WALKS YET — TAP START WALK")
+                        .font(Theme.F.mono(8.5))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.C.ink35)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 26)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                .foregroundStyle(Theme.C.ink35)
+                        )
+                        .padding(.horizontal, Theme.S.screenPad)
+                        .padding(.top, 16)
+                } else {
+                    ForEach(model.sessionWalks) { walk in
+                        WalkLogRow(walk: walk)
+                    }
+                }
+            } else {
+                MetaStrip(left: model.trade.boardMeta, right: "SYNCED 07:58")
 
-            ForEach(model.jobs) { job in
-                JobRow(job: job)
+                SectionHead(
+                    left: "TODAY",
+                    right: "\(model.jobs.filter { !$0.done }.count) OPEN",
+                    rightColor: Theme.C.orangeDeep
+                )
+
+                ForEach(model.jobs) { job in
+                    JobRow(job: job)
+                }
             }
 
             Spacer(minLength: 0)
@@ -136,5 +184,38 @@ struct BoardView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.C.paper)
         }
+    }
+}
+
+// MARK: - Session walk row (airport-board discipline, JobRow's bones)
+
+private struct WalkLogRow: View {
+    let walk: AppModel.WalkRecord
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(walk.time)
+                .font(Theme.F.mono(11, .medium))
+                .foregroundStyle(Theme.C.ink)
+                .frame(width: 46, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(walk.docNo)
+                    .font(Theme.F.ui(14.5, .semibold))
+                    .lineLimit(1)
+                Text(walk.docKind.capitalized)
+                    .font(Theme.F.cond(11.5, .medium))
+                    .foregroundStyle(Theme.C.ink60)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            FieldTag(tag: TagFixture(
+                kind: walk.sent ? .green : .plain,
+                label: walk.sent ? "SENT" : "DISCARDED"
+            ))
+        }
+        .padding(.horizontal, Theme.S.screenPad)
+        .padding(.vertical, 13)
+        .opacity(walk.sent ? 1 : 0.55)
+        .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
     }
 }

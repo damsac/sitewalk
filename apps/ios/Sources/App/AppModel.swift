@@ -25,6 +25,25 @@ final class AppModel {
     var phase: Phase = .board
     var path: [Phase] = []
 
+    /// The operator's business (nil until onboarding saves one). When set,
+    /// the fixture business disappears: the board header carries the
+    /// profile name, the trade comes from the profile (no switcher), and
+    /// every letterhead is stamped with the operator — see letterheadBiz/
+    /// letterheadSub/letterheadDate. App-side only for now (BusinessProfile).
+    private(set) var profile: BusinessProfile?
+
+    /// One board row per walk finished THIS SESSION (profile mode replaces
+    /// the fixture jobs list with this honest log). In-memory on purpose —
+    /// walk history is a core concern; this is the interim surface.
+    struct WalkRecord: Identifiable {
+        let id = UUID()
+        let time: String     // "9:41"
+        let docNo: String
+        let docKind: String  // "ESTIMATE" / "MOVE-OUT REPORT" / ...
+        let sent: Bool       // false = discarded at review
+    }
+    private(set) var sessionWalks: [WalkRecord] = []
+
     // Walk state
     var transcript = ""
     /// Volatile greyed preview tail from the Rust STT pump (Plan 08 D4) — the
@@ -136,6 +155,21 @@ final class AppModel {
         }
         self.wavFixture = wavFixture
         self.voiceProcessing = voiceProcessing
+        self.profile = BusinessProfile.current
+        if let trade = profile?.trade {
+            self.trade = trade
+            self.jobs = trade.jobs
+        }
+    }
+
+    /// Re-read the persisted profile (after onboarding FINISH) and align the
+    /// trade template with it.
+    func reloadProfile() {
+        profile = BusinessProfile.current
+        if let trade = profile?.trade {
+            self.trade = trade
+            self.jobs = trade.jobs
+        }
     }
 
     func toggleMode() {
@@ -387,6 +421,46 @@ final class AppModel {
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
+    // MARK: Profile-aware display (fixture values remain the no-profile
+    // fallback so the demo/gallery QA path keeps working unchanged)
+
+    private static func dateString(_ format: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        return formatter.string(from: Date()).uppercased()
+    }
+
+    /// Board date stamp — the REAL day in profile mode ("WED — JUL 08"),
+    /// the fixture's frozen day otherwise.
+    var boardDateLabel: String {
+        profile == nil ? trade.dateLabel : Self.dateString("EEE — MMM dd")
+    }
+
+    /// Board headline in profile mode — honest walk count, never fixture jobs.
+    var sessionTitle: String {
+        switch sessionWalks.count {
+        case 0: return "Ready to walk"
+        case 1: return "1 walk today"
+        default: return "\(sessionWalks.count) walks today"
+        }
+    }
+
+    var letterheadBiz: String { profile?.businessName ?? trade.biz }
+    var letterheadSub: String { profile?.letterheadSub ?? trade.bizSub }
+    /// Document date — real today in profile mode ("JUL 08 2026"); a
+    /// profile-stamped letterhead with the fixture's frozen date would lie.
+    var letterheadDate: String {
+        profile == nil ? trade.docDate : Self.dateString("MMM dd yyyy")
+    }
+
+    private static func clockNow() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "h:mm"
+        return formatter.string(from: Date())
+    }
+
     // MARK: Review interactions
 
     func beginEdit(_ row: DocRowFixture) {
@@ -422,7 +496,10 @@ final class AppModel {
 
     func makePDF() {
         guard let doc = document else { return }
-        shareURL = DocumentPDF.render(trade: trade, document: doc)
+        shareURL = DocumentPDF.render(
+            trade: trade, document: doc,
+            biz: letterheadBiz, bizSub: letterheadSub, docDate: letterheadDate
+        )
     }
 
     func completeSend() {
@@ -433,6 +510,9 @@ final class AppModel {
                 tag: TagFixture(kind: .green, label: "SENT"), done: true
             )
         }
+        sessionWalks.append(WalkRecord(
+            time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: true
+        ))
         shareURL = nil
         document = nil
         phase = .board
@@ -444,6 +524,9 @@ final class AppModel {
     /// to SENT). The persisted core artifact is untouched — only the app-side
     /// review state resets.
     func discardDocument() {
+        sessionWalks.append(WalkRecord(
+            time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: false
+        ))
         shareURL = nil
         document = nil
         phase = .board

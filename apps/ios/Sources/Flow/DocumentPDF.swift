@@ -7,12 +7,23 @@ import UIKit
 
 enum DocumentPDF {
 
+    /// `biz`/`bizSub`/`docDate` default to the trade fixture — callers with a
+    /// BusinessProfile pass the operator's letterhead (AppModel.makePDF); the
+    /// gallery/demo path keeps rendering fixture paperwork unchanged.
     @MainActor
-    static func render(trade: TradeFixture, document: DocumentModel) -> URL? {
+    static func render(
+        trade: TradeFixture, document: DocumentModel,
+        biz: String? = nil, bizSub: String? = nil, docDate: String? = nil
+    ) -> URL? {
         let pageSize = CGSize(width: 612, height: 792) // US Letter @ 72 dpi
 
-        let content = PDFPageView(trade: trade, document: document)
-            .frame(width: pageSize.width, height: pageSize.height)
+        let content = PDFPageView(
+            trade: trade, document: document,
+            biz: biz ?? trade.biz,
+            bizSub: bizSub ?? trade.bizSub,
+            docDate: docDate ?? trade.docDate
+        )
+        .frame(width: pageSize.width, height: pageSize.height)
 
         let renderer = ImageRenderer(content: content)
         renderer.scale = 3
@@ -37,15 +48,18 @@ enum DocumentPDF {
 private struct PDFPageView: View {
     let trade: TradeFixture
     let document: DocumentModel
+    let biz: String
+    let bizSub: String
+    let docDate: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Letterhead(
-                biz: trade.biz,
-                bizSub: trade.bizSub,
+                biz: biz,
+                bizSub: bizSub,
                 docKind: trade.docKind,
                 docNo: trade.docNo,
-                docDate: trade.docDate
+                docDate: docDate
             )
             ForEach(document.rows) { row in
                 DocRowView(row: row)

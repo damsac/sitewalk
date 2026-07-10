@@ -40,11 +40,11 @@ struct BuildView: View {
                 Theme.C.paperDeep
                 VStack(alignment: .leading, spacing: 0) {
                     Letterhead(
-                        biz: model.trade.biz,
-                        bizSub: model.trade.bizSub,
+                        biz: model.letterheadBiz,
+                        bizSub: model.letterheadSub,
                         docKind: model.trade.docKind,
                         docNo: model.trade.docNo,
-                        docDate: model.trade.docDate
+                        docDate: model.letterheadDate
                     )
                     ForEach(Array(model.trade.rows.prefix(3).enumerated()), id: \.element.id) { index, row in
                         DocRowView(row: row)
