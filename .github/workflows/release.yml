@@ -26,7 +26,7 @@
 #     rustup cargo + system Xcode toolchain). Device-only halves the whisper.cpp
 #     compile — a TestFlight archive is device-only anyway.
 #   - provisions the on-device whisper model via apps/ios/fetch-whisper-model.sh
-#     (sha256-pinned, small.en default, ~190 MB) cached with actions/cache.
+#     (sha256-pinned, base.en default) cached with actions/cache.
 #   - project-release.yml (xcodegen) replaces the removed project.yml/Makefile.
 #   - export uses destination=export (produces a signed .ipa artifact); the ASC
 #     upload is a SEPARATE, conditional altool step so a dry-run can verify the
@@ -84,8 +84,8 @@ concurrency:
 env:
   # Model choice + sha256 digests live in apps/ios/fetch-whisper-model.sh (the
   # same script ./generate.sh uses locally) — this is the default it fetches.
-  WHISPER_MODEL: small.en
-  MODEL_FILENAME: ggml-small.en-q5_1.bin
+  WHISPER_MODEL: base.en
+  MODEL_FILENAME: ggml-base.en-q5_1.bin
 
 jobs:
   release:
