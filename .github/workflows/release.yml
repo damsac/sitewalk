@@ -325,8 +325,17 @@ jobs:
             echo "::error::altool exited $STATUS — upload failed"
             exit "$STATUS"
           fi
-          if grep -qiE 'upload failed|error|\*\*\* Error' "$LOG"; then
+          # Match FAILURE signatures only. A bare 'error' pattern matched the
+          # word inside altool's SUCCESS line ("UPLOAD SUCCEEDED with no
+          # errors") and failed build #24's run AFTER Apple accepted it —
+          # require the explicit failure markers, and independently require
+          # the success line to be present.
+          if grep -qiE 'UPLOAD FAILED|ERROR: \[|\*\*\* Error' "$LOG"; then
             echo "::error::altool exited 0 but its output reports a failure — treating as a failed upload"
+            exit 1
+          fi
+          if ! grep -qi 'UPLOAD SUCCEEDED' "$LOG"; then
+            echo "::error::altool exited 0 but never printed UPLOAD SUCCEEDED — treating as a failed upload"
             exit 1
           fi
 
