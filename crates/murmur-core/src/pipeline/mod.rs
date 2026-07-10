@@ -7,6 +7,8 @@ pub mod tools;
 
 pub mod live;
 
+pub mod document;
+
 pub(crate) mod prompts;
 
 use std::sync::{Arc, Mutex};
@@ -22,11 +24,46 @@ use crate::error::CoreError;
 use crate::store::Store;
 use tools::{AddItemTool, BuildDocumentTool, UpsertContactTool, WriteReportTool};
 
+/// Plan 13 D8: the legal `doc_kind` vocabulary for a session's template, in
+/// priority order (`[0]` becomes the template's default kind when Stage 2
+/// redefines `doc_kind_for_template` as `[0]` — deferred, see that
+/// function's doc comment). This is core's concern (kind vocabulary +
+/// pricing flags); which button *leads* and its label copy are sac's.
+pub fn doc_kinds_for_template(template: Option<&str>) -> &'static [&'static str] {
+    match template {
+        Some("landscape") => &["estimate", "invoice", "work_order"],
+        Some("property") => &["condition", "move_out"],
+        Some("inspection") => &["inspection"],
+        _ => &["report"],
+    }
+}
+
+/// Plan 13 D5: whether a `doc_kind` needs a pricing pass (an amount on every
+/// line). Only `estimate`/`invoice` are pricing kinds.
+pub fn is_pricing_kind(kind: &str) -> bool {
+    matches!(kind, "estimate" | "invoice")
+}
+
 /// Maps a session's template key (D4: `landscape`|`property`|`inspection`) to
 /// the document's `doc_kind` vocabulary (D2/D5: `estimate`|`report`|
 /// `inspection`) that `BuildDocumentTool` and document-number minting use.
 /// `None`/unrecognized defaults to `report` — the safest shape (mixed
 /// dollar/non-dollar lines, gaps only where explicitly flagged).
+///
+/// **Plan 13 N3 — deliberately DEFERRED to Stage 2 (review blocker).** The
+/// plan redefines this as `doc_kinds_for_template(t)[0]` (property →
+/// `condition`), but this function is still called by Stage 1's LIVE
+/// phase-B path (`process()` below) and the FFI offline fallback
+/// (`ffi/src/session.rs::partial_document`), and the shipped
+/// `MurmurEngine.swift` has no `"condition"` arm in its `switch docKind` —
+/// flipping it here would send a property walk down Swift's default arm
+/// ("SEND ESTIMATE" chrome on a move-out report) on the auto-published
+/// build. Stage 1 must behave identically to #27, so the old body stays;
+/// Stage 2 (which removes phase B and rewires Swift) performs the N3
+/// redefinition to `doc_kinds_for_template(template)[0]`. `DocumentBuilder`
+/// never calls this — it validates against `doc_kinds_for_template`
+/// (plural) + `is_pricing_kind` directly, so the new on-demand path is
+/// unaffected either way.
 pub fn doc_kind_for_template(template: Option<&str>) -> &'static str {
     match template {
         Some("landscape") => "estimate",
@@ -920,6 +957,51 @@ mod tests {
             Arc::new(NullMemoryStore),
         );
         assert!(processor.process_pending().await.unwrap().is_empty());
+    }
+
+    /// Plan 13 Task 1: the legal `doc_kind` vocabulary + pricing flags per
+    /// template.
+    #[test]
+    fn doc_kinds_for_template_lists_the_legal_kinds_per_template() {
+        assert_eq!(
+            doc_kinds_for_template(Some("landscape")),
+            &["estimate", "invoice", "work_order"]
+        );
+        assert_eq!(doc_kinds_for_template(Some("property")), &["condition", "move_out"]);
+        assert_eq!(doc_kinds_for_template(Some("inspection")), &["inspection"]);
+        assert_eq!(doc_kinds_for_template(None), &["report"]);
+    }
+
+    #[test]
+    fn is_pricing_kind_flags_only_estimate_and_invoice() {
+        assert!(is_pricing_kind("estimate"));
+        assert!(is_pricing_kind("invoice"));
+        assert!(!is_pricing_kind("work_order"));
+        assert!(!is_pricing_kind("inspection"));
+        assert!(!is_pricing_kind("report"));
+        assert!(!is_pricing_kind("condition"));
+    }
+
+    /// Stage-1 pin: `doc_kind_for_template` KEEPS its pre-Plan-13 behavior
+    /// (property → `"report"`) because it still drives the LIVE phase-B
+    /// build and the FFI offline fallback, and the shipped
+    /// `MurmurEngine.swift` has no `"condition"` arm — Stage 1 must behave
+    /// identically to #27 on the auto-published TestFlight build.
+    ///
+    /// **Stage 2 flips this** (Plan 13 N3): once phase B is removed and
+    /// Swift is rewired, redefine the function as
+    /// `doc_kinds_for_template(t)[0]` and change the property assertion
+    /// below to `"condition"`.
+    #[test]
+    fn doc_kind_for_template_keeps_stage1_defaults() {
+        assert_eq!(doc_kind_for_template(Some("landscape")), "estimate");
+        assert_eq!(doc_kind_for_template(Some("inspection")), "inspection");
+        assert_eq!(doc_kind_for_template(None), "report");
+        assert_eq!(
+            doc_kind_for_template(Some("property")),
+            "report",
+            "Stage 1 pins the OLD default — Stage 2 (N3) flips this to \"condition\""
+        );
     }
 
     #[tokio::test]

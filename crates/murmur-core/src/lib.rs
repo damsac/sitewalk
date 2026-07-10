@@ -13,7 +13,11 @@ pub use domain::{
 };
 pub use error::CoreError;
 pub use ids::new_id;
+pub use pipeline::document::{BuildDocumentOutcome, DocumentBuilder};
 pub use pipeline::live::{LiveExtractOutcome, LiveExtractor};
-pub use pipeline::{doc_kind_for_template, ProcessOutcome, SessionProcessor};
+pub use pipeline::{
+    doc_kind_for_template, doc_kinds_for_template, is_pricing_kind, ProcessOutcome,
+    SessionProcessor,
+};
 pub use pipeline::tools::{AddItemTool, BuildDocumentTool, UpsertContactTool, WriteReportTool};
 pub use store::Store;

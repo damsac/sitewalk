@@ -41,6 +41,13 @@ pub enum EngineError {
     /// store error — recoverable, surface don't crash.
     #[error("session error: {0}")]
     Session(String),
+    /// An on-demand `build_document(kind)` call failed (Plan 13 D1/D8): a
+    /// non-`Processed` session, an illegal `kind` for the session's
+    /// template, a poisoned lock, or a store error reading back the
+    /// artifact. Never a pricing-LLM failure — that degrades to a queued,
+    /// unpriced document instead (R7); this variant is validation/store only.
+    #[error("document build error: {0}")]
+    Document(String),
 }
 
 /// Config crossing the FFI boundary. `api_key` is an opaque `String` from the

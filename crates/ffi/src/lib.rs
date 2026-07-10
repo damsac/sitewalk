@@ -7,6 +7,7 @@ uniffi::setup_scaffolding!();
 
 pub mod convert;
 pub mod document;
+pub mod document_build;
 pub mod engine;
 pub mod events;
 pub mod photos;
