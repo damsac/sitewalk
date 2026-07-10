@@ -258,6 +258,11 @@ jobs:
             "DEVELOPMENT_TEAM=$APPLE_TEAM_ID"
             "CURRENT_PROJECT_VERSION=${{ github.run_number }}"
             "PPQ_API_KEY=$PPQ_API_KEY"
+            # A PPQ key against the default Anthropic host 401s silently and
+            # the app LOOKS like the demo engine (sac's #173 icon-tap bug,
+            # release-lane edition). Key = PPQ_API_KEY repo secret; the host
+            # is not secret-sensitive so it lives here in the clear.
+            "ANTHROPIC_BASE_URL=https://api.ppq.ai"
           )
           if [ -n "$MARKETING_VERSION_OVERRIDE" ]; then
             BUILD_SETTINGS+=("MARKETING_VERSION=$MARKETING_VERSION_OVERRIDE")
