@@ -17,6 +17,13 @@ struct BusinessProfile: Codable, Equatable {
     var licenseNumber: String?
     /// Matches `Fixtures.all` keys: landscape | property | inspection.
     var tradeKey: String
+    /// Migration seam (dam review #190). `current` decodes with `try?`, so a
+    /// future breaking schema change silently returns nil and the operator
+    /// gets re-onboarded — the stored profile is gone, not just unreadable.
+    /// The contract to avoid that: bump this only for changes you're willing
+    /// to eat as a re-onboard, and prefer optional-only additions (like
+    /// `licenseNumber` above) that decode fine against old JSON instead.
+    var schemaVersion: Int = 1
 
     // MARK: Persistence (UserDefaults as JSON)
 
