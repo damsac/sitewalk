@@ -33,6 +33,10 @@ targets:
         # the key; empty => provider default (api.anthropic.com).
         ANTHROPIC_BASE_URL: "$(ANTHROPIC_BASE_URL)"
         CFBundleDisplayName: Sitewalk
+        # App uses only exempt (HTTPS/TLS) encryption — no custom crypto. Without
+        # this, every TestFlight build sits on a manual "Missing Compliance"
+        # answer in ASC before testers can install it.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "Sitewalk records your walk-and-talk so it can turn it into paperwork."
         NSSpeechRecognitionUsageDescription: "Sitewalk transcribes your walk on-device to build your document."

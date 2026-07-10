@@ -22,6 +22,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Photos you take during a walk pin to the item you're describing and land in the finished document.</string>
 	<key>NSMicrophoneUsageDescription</key>

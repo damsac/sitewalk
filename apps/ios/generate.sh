@@ -71,19 +71,16 @@ EOF
 
 # Whisper model fetch (Plan 08 D5, model-download PR): the model must be an
 # APP-TARGET resource under Sources/Resources (Bundle.main — a package
-# resource would land in Bundle.module and never resolve). Default model is
-# small.en (spike RESULTS.md: strictly better WER/hallucination than base.en
-# at every measured SNR, ~free RTF headroom on the Mac proxy) — override with
-# STT_MODEL=base.en for the one-arg revert (matches the `sttmodel=` runtime
-# launch arg in GalleryApp.swift). fetch-whisper-model.sh caches on sha256, so
-# repeat runs of generate.sh don't re-download once the file is verified
-# present.
-#
-# CAVEAT: small.en's promotion is decided on Mac-proxy RTF only — the iPhone
-# T5 device tier (spikes/stt-whisper/RESULTS.md Table 4) is still PENDING, so
-# small.en's on-device RTF is unproven. That's why this stays a one-var
-# revert (STT_MODEL=base.en / sttmodel=base.en) rather than a hard swap.
-STT_MODEL="${STT_MODEL:-small.en}"
+# resource would land in Bundle.module and never resolve). small.en was
+# promoted (spike RESULTS.md: strictly better WER/hallucination than base.en
+# at every measured SNR, ~free RTF headroom on the Mac proxy) but DEMOTED
+# 2026-07-10 after real-device lag on iPhone 16e (sac's felt-lag datapoint —
+# the T5 device tier the Mac-proxy numbers couldn't answer; CANON 2026-07-10).
+# Default model is back to base.en — override with STT_MODEL=small.en for the
+# accuracy opt-in (matches the `sttmodel=` runtime launch arg in
+# GalleryApp.swift). fetch-whisper-model.sh caches on sha256, so repeat runs
+# of generate.sh don't re-download once the file is verified present.
+STT_MODEL="${STT_MODEL:-base.en}"
 if ./fetch-whisper-model.sh "$STT_MODEL"; then
   # Exactly ONE model may be bundled: project.yml globs Sources/ wholesale, so
   # if both ggml bins are on disk (e.g. a default small.en run followed by a
