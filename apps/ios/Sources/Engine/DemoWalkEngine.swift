@@ -135,6 +135,11 @@ final class DemoWalkEngine: WalkEngine {
         0
     }
 
+    // Nothing ever reaches Failed in the scripted demo — nothing to retry.
+    func retryFailedSessions() -> UInt32 {
+        0
+    }
+
     // Plan 13: finish() = scripted NOTES (items + a canned summary line), no
     // document. `buildDocument(kind:)` below returns the canned DocumentModel
     // this used to return directly — the demo mirrors the real engine's

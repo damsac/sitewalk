@@ -200,6 +200,19 @@ protocol WalkEngine: AnyObject {
     /// scripted demo).
     func sweepZombieSessions() throws -> UInt64
 
+    /// Retries every `Failed` session (offline drop, LLM error, or a
+    /// zombie-swept crash-orphan — indistinguishable once they're `Failed`)
+    /// once each, oldest first. This is what makes the offline banner
+    /// ("SAVED OFFLINE — DOCUMENTS UNLOCK WHEN YOU RECONNECT") true: without
+    /// it, nothing ever revisited a `Failed` session. `async` because it
+    /// makes real LLM calls — callers must NOT await it inline on the
+    /// app-open path (see `AppModel+Photos.runAppOpenSweeps`, which fires
+    /// this from a separate detached `Task` AFTER the synchronous sweeps).
+    /// Returns the count that reached `Processed`; a still-Failed session
+    /// (still offline) is not an error, just uncounted. `DemoWalkEngine`
+    /// no-ops (nothing is ever `Failed` in the scripted demo).
+    func retryFailedSessions() async throws -> UInt32
+
     /// The active walk's session id, so the capture UI can call
     /// `attachPhoto(sessionId:...)` mid-walk (Plan 11 D7). `nil` when there is
     /// no live session (not walking, or the real engine has none yet).

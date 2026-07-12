@@ -112,6 +112,43 @@ extension AppModel {
     func runAppOpenSweeps() {
         sweepPhotoBytes()
         sweepZombieSessions()
+        retryFailedSessionsInBackground()
+    }
+
+    /// The offline banner ("SAVED OFFLINE — DOCUMENTS UNLOCK WHEN YOU
+    /// RECONNECT") makes a promise; this is what keeps it. Fired as a
+    /// separate, NOT-awaited `Task` after the two synchronous sweeps above
+    /// return — it must never delay `runAppOpenSweeps()` itself (invariant 1
+    /// on that function: fully synchronous, no suspension point before a
+    /// walk can start) and never sit in front of the start-walk path, since
+    /// `retryFailedSessions()` is slow (real LLM calls, one per Failed
+    /// session).
+    ///
+    /// Not `Task.detached`: `WalkEngine` is `@MainActor`-isolated, so a
+    /// literal detached task would just hop back to the main actor for the
+    /// `await engine.retryFailedSessions()` call anyway — this follows the
+    /// same plain, unstructured `Task { }` precedent already used for other
+    /// fire-and-forget engine calls in this file (`capturePhoto`'s attach
+    /// step). "Separate" is the property that matters: this task is never
+    /// awaited by `runAppOpenSweeps()`, so it runs concurrently with
+    /// whatever the user does next.
+    ///
+    /// Safe even if a retry completes mid-walk: the state machine guarantees
+    /// a live walk's session is `Recording`, and `retry_failed_sessions`
+    /// only ever queries and processes `Failed` sessions — it cannot touch
+    /// the session the user is currently walking. Picks up zombies from
+    /// `sweepZombieSessions()` above for free (crash-orphaned `Recording`
+    /// rows just became `Failed`).
+    ///
+    /// sac: this is a good hook for a badge/history refresh once the count
+    /// comes back, if a recovered walk should surface anywhere in the UI.
+    private func retryFailedSessionsInBackground() {
+        Task {
+            let recovered = (try? await engine.retryFailedSessions()) ?? 0
+            if recovered > 0 {
+                photoLogger.notice("retried and recovered \(recovered, privacy: .public) failed session(s)")
+            }
+        }
     }
 
     /// Reconciling sweep (Plan 11 D4): delete every file in <Documents>/photos/

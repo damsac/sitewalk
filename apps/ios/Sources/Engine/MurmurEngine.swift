@@ -276,6 +276,10 @@ final class MurmurEngine: WalkEngine {
         try engine.sweepZombieSessions()
     }
 
+    func retryFailedSessions() async throws -> UInt32 {
+        try await engine.retryFailedSessions()
+    }
+
     private nonisolated static func photo(_ ref: MurmurCoreFFI.PhotoRef) -> PhotoModel {
         PhotoModel(
             id: ref.id,
