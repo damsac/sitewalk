@@ -87,7 +87,7 @@ struct DocRowView: View {
                 Caret()
             }
             .padding(.bottom, 2)
-            .overlay(alignment: .bottom) { Theme.C.orange.frame(height: 2) }
+            .overlay(alignment: .bottom) { Theme.C.orangeDeep.frame(height: 2) }
         } else if row.isGap && row.amount == "——" {
             Text(row.amount)
                 .font(Theme.F.mono(12, .semibold))

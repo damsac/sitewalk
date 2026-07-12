@@ -110,7 +110,7 @@ struct VocabularyView: View {
                         .textInputAutocapitalization(.never)
                         .focused($fieldFocused)
                         .padding(.bottom, 6)
-                        .overlay(alignment: .bottom) { Theme.C.orange.frame(height: 2) }
+                        .overlay(alignment: .bottom) { Theme.C.orangeDeep.frame(height: 2) }
                     Button {
                         let term = newTerm.trimmingCharacters(in: .whitespaces)
                         newTerm = ""

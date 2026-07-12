@@ -47,7 +47,7 @@ struct OnboardingFlow: View {
     private var topBar: some View {
         HStack {
             HStack(spacing: 10) {
-                Rectangle().fill(Theme.C.orange).frame(width: 13, height: 13)
+                Rectangle().fill(Theme.C.orangeDeep).frame(width: 13, height: 13)
                 Text("SITEWALK")
                     .font(Theme.F.ui(20, .extraBold))
                     .tracking(3.0)

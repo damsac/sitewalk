@@ -211,7 +211,7 @@ struct GalleryRoot: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 10) {
-                        Rectangle().fill(Theme.C.orange).frame(width: 13, height: 13)
+                        Rectangle().fill(Theme.C.orangeDeep).frame(width: 13, height: 13)
                         Text("SITEWALK")
                             .font(Theme.F.ui(24, .extraBold))
                             .tracking(3.5)

@@ -249,7 +249,7 @@ struct ReviewView: View {
                     .focused($amountFocused)
             }
             .padding(.bottom, 4)
-            .overlay(alignment: .bottom) { Theme.C.orange.frame(height: 2) }
+            .overlay(alignment: .bottom) { Theme.C.orangeDeep.frame(height: 2) }
 
             Button { model.commitEdit() } label: {
                 ZStack {

@@ -1,7 +1,8 @@
 import SwiftUI
 
 // Field Instrument design tokens — source of truth is design/BRIEF.md in the
-// sitewalk repo. Paper/ink base, one safety-orange accent, job-site tag colors.
+// sitewalk repo. Paper/ink base, one amber accent (the Jefe hard-hat gold),
+// job-site tag colors.
 
 extension Color {
     init(hex: UInt32) {
@@ -27,10 +28,16 @@ enum Theme {
         static let hairline     = Color(hex: 0x141412).opacity(0.16)
         static let hairlineSoft = Color(hex: 0x141412).opacity(0.09)
 
-        static let orange     = Color(hex: 0xE8531F)
-        static let orangeDeep = Color(hex: 0xC43F12)
-        static let orangeTint = Color(hex: 0xFCEAE2)
-        static let onOrange   = Color(hex: 0xFFF8F5)
+        // Amber accent (Jefe hard-hat gold). Names kept for call-site stability.
+        // `orange`     — bright fills / buttons / live marks
+        // `orangeDeep` — dark amber: accent TEXT & rules on paper, button shadow
+        // `orangeTint` — pale gold wash behind selected chips
+        // `onOrange`   — text/marks ON the amber fill; ink, since white would
+        //                vanish on gold (the black-on-amber "caution label" look)
+        static let orange     = Color(hex: 0xFFBB26)
+        static let orangeDeep = Color(hex: 0x9A6A00)
+        static let orangeTint = Color(hex: 0xFAF1D9)
+        static let onOrange   = Color(hex: 0x141412)
 
         static let redTag     = Color(hex: 0xA63A2E)
         static let redTint    = Color(hex: 0xF7E8E5)
