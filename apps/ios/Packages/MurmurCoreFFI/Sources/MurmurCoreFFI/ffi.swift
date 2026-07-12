@@ -1942,6 +1942,80 @@ public func FfiConverterTypeEngineConfig_lower(_ value: EngineConfig) -> RustBuf
 }
 
 
+public struct NotesEntry {
+    public var bucket: NotesBucket
+    public var label: String
+    public var detail: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(bucket: NotesBucket, label: String, detail: String) {
+        self.bucket = bucket
+        self.label = label
+        self.detail = detail
+    }
+}
+
+
+
+extension NotesEntry: Equatable, Hashable {
+    public static func ==(lhs: NotesEntry, rhs: NotesEntry) -> Bool {
+        if lhs.bucket != rhs.bucket {
+            return false
+        }
+        if lhs.label != rhs.label {
+            return false
+        }
+        if lhs.detail != rhs.detail {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(bucket)
+        hasher.combine(label)
+        hasher.combine(detail)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNotesEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NotesEntry {
+        return
+            try NotesEntry(
+                bucket: FfiConverterTypeNotesBucket.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf), 
+                detail: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NotesEntry, into buf: inout [UInt8]) {
+        FfiConverterTypeNotesBucket.write(value.bucket, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+        FfiConverterString.write(value.detail, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNotesEntry_lift(_ buf: RustBuffer) throws -> NotesEntry {
+    return try FfiConverterTypeNotesEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNotesEntry_lower(_ value: NotesEntry) -> RustBuffer {
+    return FfiConverterTypeNotesEntry.lower(value)
+}
+
+
 public struct NotesPayload {
     public var sessionId: String
     /**
@@ -1959,6 +2033,12 @@ public struct NotesPayload {
      * (reuses `BoardItem` — no new item record).
      */
     public var items: [BoardItem]
+    /**
+     * Plan 14: the comprehensive, bucketed coordination entries captured at
+     * summary time (D1-14). Empty for pre-14 sessions, an empty/offline
+     * finish, or a `write_notes` response with no notes (D6-14 table).
+     */
+    public var notes: [NotesEntry]
     /**
      * `true` when `finish()` degraded offline (D9) — the session did NOT
      * reach `Processed`; the client disables build-document buttons.
@@ -1981,6 +2061,11 @@ public struct NotesPayload {
          * (reuses `BoardItem` — no new item record).
          */items: [BoardItem], 
         /**
+         * Plan 14: the comprehensive, bucketed coordination entries captured at
+         * summary time (D1-14). Empty for pre-14 sessions, an empty/offline
+         * finish, or a `write_notes` response with no notes (D6-14 table).
+         */notes: [NotesEntry], 
+        /**
          * `true` when `finish()` degraded offline (D9) — the session did NOT
          * reach `Processed`; the client disables build-document buttons.
          */queued: Bool) {
@@ -1988,6 +2073,7 @@ public struct NotesPayload {
         self.docKind = docKind
         self.summary = summary
         self.items = items
+        self.notes = notes
         self.queued = queued
     }
 }
@@ -2008,6 +2094,9 @@ extension NotesPayload: Equatable, Hashable {
         if lhs.items != rhs.items {
             return false
         }
+        if lhs.notes != rhs.notes {
+            return false
+        }
         if lhs.queued != rhs.queued {
             return false
         }
@@ -2019,6 +2108,7 @@ extension NotesPayload: Equatable, Hashable {
         hasher.combine(docKind)
         hasher.combine(summary)
         hasher.combine(items)
+        hasher.combine(notes)
         hasher.combine(queued)
     }
 }
@@ -2035,6 +2125,7 @@ public struct FfiConverterTypeNotesPayload: FfiConverterRustBuffer {
                 docKind: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterString.read(from: &buf), 
                 items: FfiConverterSequenceTypeBoardItem.read(from: &buf), 
+                notes: FfiConverterSequenceTypeNotesEntry.read(from: &buf), 
                 queued: FfiConverterBool.read(from: &buf)
         )
     }
@@ -2044,6 +2135,7 @@ public struct FfiConverterTypeNotesPayload: FfiConverterRustBuffer {
         FfiConverterString.write(value.docKind, into: &buf)
         FfiConverterString.write(value.summary, into: &buf)
         FfiConverterSequenceTypeBoardItem.write(value.items, into: &buf)
+        FfiConverterSequenceTypeNotesEntry.write(value.notes, into: &buf)
         FfiConverterBool.write(value.queued, into: &buf)
     }
 }
@@ -2299,6 +2391,81 @@ extension EngineError: Foundation.LocalizedError {
         String(reflecting: self)
     }
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The three entry buckets (D2-14). The top-level narrative summary is NOT
+ * a bucket — it's `NotesPayload.summary`.
+ */
+
+public enum NotesBucket {
+    
+    case scopeOfWork
+    case constraints
+    case conditionsAndIssues
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNotesBucket: FfiConverterRustBuffer {
+    typealias SwiftType = NotesBucket
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NotesBucket {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .scopeOfWork
+        
+        case 2: return .constraints
+        
+        case 3: return .conditionsAndIssues
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: NotesBucket, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .scopeOfWork:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .constraints:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .conditionsAndIssues:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNotesBucket_lift(_ buf: RustBuffer) throws -> NotesBucket {
+    return try FfiConverterTypeNotesBucket.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNotesBucket_lower(_ value: NotesBucket) -> RustBuffer {
+    return FfiConverterTypeNotesBucket.lower(value)
+}
+
+
+
+extension NotesBucket: Equatable, Hashable {}
+
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -2561,6 +2728,31 @@ fileprivate struct FfiConverterSequenceTypeDocLine: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeDocLine.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeNotesEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [NotesEntry]
+
+    public static func write(_ value: [NotesEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeNotesEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [NotesEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [NotesEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeNotesEntry.read(from: &buf))
         }
         return seq
     }
