@@ -9,6 +9,8 @@ pub mod live;
 
 pub mod document;
 
+pub mod notes;
+
 pub(crate) mod prompts;
 
 use std::sync::{Arc, Mutex};
