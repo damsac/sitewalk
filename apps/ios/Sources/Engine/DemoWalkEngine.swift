@@ -150,9 +150,31 @@ final class DemoWalkEngine: WalkEngine {
             summary: "Walked \(trade.site.capitalized(with: nil)) — \(board.count) \(itemWord) captured.",
             items: board,
             docKind: DocKinds.primaryKind(for: trade.key),
-            queued: false
+            queued: false,
+            notes: Self.sampleNotes
         )
     }
+
+    // Plan 14 Task 6: scripted sample buckets (WE-A shape) so the demo build
+    // exercises `NotesModel.notes` with zero backend. // sac: bucket
+    // rendering is your follow-up — this data is inert until then.
+    private static let sampleNotes: [NotesEntryFixture] = [
+        NotesEntryFixture(
+            bucket: .scopeOfWork,
+            label: "Mulch — front beds",
+            detail: "Darker mulch than last year; the old mulch faded."
+        ),
+        NotesEntryFixture(
+            bucket: .constraints,
+            label: "Budget",
+            detail: "Keep the whole job under $1,200."
+        ),
+        NotesEntryFixture(
+            bucket: .conditionsAndIssues,
+            label: "Zone-2 irrigation head broken",
+            detail: "Replace — parts + labor."
+        )
+    ]
 
     // Plan 13 D1: the on-demand build, engine-keyed. The demo has no real
     // per-kind rendering — it returns the trade's canned document rows

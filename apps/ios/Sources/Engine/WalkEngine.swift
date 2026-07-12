@@ -62,6 +62,30 @@ struct DocumentModel {
     }
 }
 
+/// Plan 14 D2-14: the three notes buckets. Mirrors the uniffi `NotesBucket`
+/// enum — an exhaustive `switch` over this is safe because the FFI
+/// conversion boundary (`crates/ffi/src/convert.rs::notes_entries`) already
+/// drops any row whose bucket string isn't one of the three known variants
+/// (R6: never fabricate/coerce a bucket).
+enum NotesBucket {
+    case scopeOfWork
+    case constraints
+    case conditionsAndIssues
+}
+
+/// Plan 14 D2-14: one comprehensive-notes coordination entry — the detail
+/// behind a terse board item (client preferences, budget, site conditions,
+/// deadlines). `label` is terse (mirrors a board label); `detail` is the
+/// full spoken context. // sac: the grouped bucket sections + visuals are
+/// your follow-up (NotesView.swift's kind-grouped rendering already covers
+/// the terse board — bucket rendering is additive on top).
+struct NotesEntryFixture: Identifiable {
+    var id: String { label + detail }
+    var bucket: NotesBucket
+    var label: String
+    var detail: String
+}
+
 /// Plan 13 D2/D3: `finish()`'s notes-first result — items + summary, NOT a
 /// document. The document build moves to an explicit, later
 /// `buildDocument(sessionId:kind:)` call from the notes screen's action row.
@@ -77,6 +101,12 @@ struct NotesModel {
     /// exists yet, so build-document actions must stay disabled until a
     /// retry succeeds.
     var queued: Bool
+    /// Plan 14: the comprehensive, bucketed coordination entries captured at
+    /// summary time. Defaults to `[]` — additive, so every existing caller
+    /// (including test fixtures) keeps compiling unchanged. // sac: unrendered
+    /// until the bucket-section follow-up lands; carrying data is this task's
+    /// only job.
+    var notes: [NotesEntryFixture] = []
 }
 
 @MainActor
