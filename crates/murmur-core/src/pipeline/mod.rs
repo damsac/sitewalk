@@ -310,6 +310,44 @@ impl SessionProcessor {
         }
         Ok(results)
     }
+
+    /// The offline-banner promise, made true: retries every `Failed` session
+    /// (offline drop, LLM error, or a `sweep_zombie_sessions` crash-orphan —
+    /// they land in the same bucket and are indistinguishable here) once per
+    /// call. Separate from `process_pending` on purpose — that drain's
+    /// no-retry pin (`process_pending_does_not_retry_failed_sessions`) stays
+    /// exactly as written; this is a distinct, explicit call site (the app's
+    /// app-open hook), not a weakening of that guarantee.
+    ///
+    /// One attempt per session per call — a session that fails again STAYS
+    /// Failed for the next app-open to try, never looped on and never
+    /// silently dropped (`process()`'s own Failed-marking + cost logging,
+    /// R9, is unchanged).
+    ///
+    /// Capped at `MAX_RETRIES_PER_CALL`, oldest-first: an app-open is a
+    /// latency-sensitive moment (this must not turn into a dozen serial LLM
+    /// calls blocking the UI), and R9 means a huge backlog isn't retried for
+    /// free — the longest-waiting walk gets first crack, the rest wait for a
+    /// future app-open.
+    pub async fn retry_failed_sessions(
+        &self,
+    ) -> Result<Vec<(String, Result<ProcessOutcome, CoreError>)>, CoreError> {
+        const MAX_RETRIES_PER_CALL: usize = 5;
+
+        // `list_session_summaries_by_status` is newest-first (started_at DESC);
+        // reverse to oldest-first before capping so the cap drops the NEWEST
+        // stragglers, not the ones that have been waiting longest.
+        let mut failed = self.locked()?.list_session_summaries_by_status(SessionStatus::Failed)?;
+        failed.reverse();
+        failed.truncate(MAX_RETRIES_PER_CALL);
+
+        let mut results = Vec::with_capacity(failed.len());
+        for summary in failed {
+            let outcome = self.process(&summary.id).await;
+            results.push((summary.id, outcome));
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -635,6 +673,189 @@ mod tests {
             results2.is_empty(),
             "failed session must not be re-pulled by a second process_pending call"
         );
+    }
+
+    /// The offline-banner promise: a `Failed` session (offline / LLM error)
+    /// is picked back up and can reach `Processed` — without `process_pending`
+    /// having to weaken its own no-retry pin (that test above stays as-is).
+    #[tokio::test]
+    async fn retry_failed_sessions_recovers_a_failed_session() {
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            end_turn("no summary tool"), // summary call returns no tool → Provider error
+        ]);
+        let results = processor.process_pending().await.unwrap();
+        assert!(results[0].1.is_err());
+        assert_eq!(
+            store.lock().unwrap().get_session(&sid).unwrap().status,
+            SessionStatus::Failed
+        );
+
+        // Reconnect: this time the LLM cooperates.
+        let retry_processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![
+                end_turn("nothing to extract"),
+                summary_response("recovered on retry"),
+            ])),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        let retried = retry_processor.retry_failed_sessions().await.unwrap();
+        assert_eq!(retried.len(), 1);
+        assert_eq!(retried[0].0, sid);
+        assert!(retried[0].1.is_ok());
+        assert_eq!(
+            store.lock().unwrap().get_session(&sid).unwrap().status,
+            SessionStatus::Processed
+        );
+
+        // Nothing left in Failed → a second call is a no-op.
+        let again = retry_processor.retry_failed_sessions().await.unwrap();
+        assert!(again.is_empty());
+    }
+
+    /// A still-offline retry makes exactly ONE attempt per app-open — it does
+    /// not loop, and the session stays Failed (not silently dropped) for the
+    /// next app-open to try again.
+    #[tokio::test]
+    async fn retry_failed_sessions_leaves_a_still_failing_session_failed() {
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            end_turn("no summary tool"),
+        ]);
+        processor.process_pending().await.unwrap();
+        assert_eq!(
+            store.lock().unwrap().get_session(&sid).unwrap().status,
+            SessionStatus::Failed
+        );
+
+        let retry_processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![
+                end_turn("nothing to extract"),
+                end_turn("still no summary tool"),
+            ])),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        let results = retry_processor.retry_failed_sessions().await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].1.is_err());
+        assert_eq!(
+            store.lock().unwrap().get_session(&sid).unwrap().status,
+            SessionStatus::Failed,
+            "a failed retry leaves the session Failed, not lost"
+        );
+    }
+
+    /// App-open latency + R9 (cost is measured, not free): a reconnect
+    /// backlog is capped per call, oldest-first — the longest-waiting walk
+    /// gets first crack, and a huge backlog can't turn one app-open into a
+    /// dozen LLM calls.
+    #[tokio::test]
+    async fn retry_failed_sessions_caps_at_five_oldest_first() {
+        let counter = Arc::new(std::sync::atomic::AtomicU64::new(1000));
+        let clock_counter = counter.clone();
+        let store = Store::open_in_memory("device-a").unwrap().with_clock(Arc::new(move || {
+            clock_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        }));
+        let mut ids = Vec::new();
+        for _ in 0..6 {
+            let session = store.start_session(None).unwrap();
+            store.append_transcript(&session.id, "we need lumber").unwrap();
+            store.end_and_record_session(&session.id).unwrap();
+            store.mark_session_failed(&session.id).unwrap();
+            ids.push(session.id);
+        }
+        let store = Arc::new(Mutex::new(store));
+
+        let mut responses = Vec::new();
+        for _ in 0..5 {
+            responses.push(end_turn("nothing to extract"));
+            responses.push(summary_response("recovered"));
+        }
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(responses)),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        let results = processor.retry_failed_sessions().await.unwrap();
+        assert_eq!(results.len(), 5, "capped at 5 per call");
+        let retried_ids: Vec<_> = results.iter().map(|(id, _)| id.clone()).collect();
+        assert_eq!(retried_ids, ids[0..5], "oldest five retried, oldest first");
+        assert!(results.iter().all(|(_, r)| r.is_ok()));
+
+        let locked = store.lock().unwrap();
+        for id in &ids[0..5] {
+            assert_eq!(locked.get_session(id).unwrap().status, SessionStatus::Processed);
+        }
+        assert_eq!(
+            locked.get_session(&ids[5]).unwrap().status,
+            SessionStatus::Failed,
+            "the newest session is left for a future app-open, untouched by this call's cap"
+        );
+    }
+
+    /// Crash-recovery for free: `sweep_zombie_sessions` marks a crash-orphaned
+    /// `Recording` session `Failed`; a retry run afterward (same app-open)
+    /// picks it up like any other Failed session.
+    #[tokio::test]
+    async fn retry_failed_sessions_recovers_a_zombie_swept_session() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        store.append_transcript(&session.id, "we need lumber").unwrap();
+        // No end_and_record_session: this session is still Recording, i.e. a
+        // crash left the app mid-walk.
+        let swept = store.sweep_zombie_sessions().unwrap();
+        assert_eq!(swept, 1);
+        assert_eq!(
+            store.get_session(&session.id).unwrap().status,
+            SessionStatus::Failed
+        );
+
+        let store = Arc::new(Mutex::new(store));
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![
+                end_turn("nothing to extract"),
+                summary_response("recovered from a crash"),
+            ])),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        let results = processor.retry_failed_sessions().await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].1.is_ok());
+        assert_eq!(
+            store.lock().unwrap().get_session(&session.id).unwrap().status,
+            SessionStatus::Processed
+        );
+    }
+
+    /// The empty-session contract holds for a zombie-swept session too — an
+    /// interrupted walk with no captured transcript never panics or reaches
+    /// the LLM; it resolves to Processed with the placeholder summary.
+    #[tokio::test]
+    async fn retry_failed_sessions_empty_zombie_session_never_panics() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let _session = store.start_session(None).unwrap(); // no transcript appended
+        let swept = store.sweep_zombie_sessions().unwrap();
+        assert_eq!(swept, 1);
+
+        let store = Arc::new(Mutex::new(store));
+        let processor = SessionProcessor::new(
+            Arc::new(MockProvider::new(vec![])),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        );
+        let results = processor.retry_failed_sessions().await.unwrap();
+        assert_eq!(results.len(), 1);
+        let outcome = results[0].1.as_ref().unwrap();
+        assert_eq!(outcome.session.status, SessionStatus::Processed);
+        assert_eq!(outcome.session.summary.as_deref(), Some("(empty session)"));
     }
 
     /// Empty (or whitespace-only) transcripts never reach the LLM — the real
