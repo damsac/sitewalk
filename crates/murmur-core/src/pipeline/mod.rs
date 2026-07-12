@@ -801,4 +801,86 @@ mod tests {
         let artifacts = store.list_artifacts_for_session(&sid).unwrap();
         assert!(!artifacts.iter().any(|a| a.kind == "session_meta"), "no total stated -> no artifact");
     }
+
+    /// Plan 14 D5-14/Task 3: a `write_notes` response carrying buckets
+    /// persists as a `kind="notes"` artifact, parseable back to the same
+    /// entries.
+    #[tokio::test]
+    async fn process_persists_notes_buckets_as_an_artifact() {
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            tool_use(
+                "write_notes",
+                serde_json::json!({
+                    "summary": "Estimate walk on the front yard.",
+                    "notes": [
+                        {"bucket": "scope_of_work", "label": "Mulch", "detail": "Darker than last year."},
+                        {"bucket": "constraints", "label": "Budget", "detail": "Under $1,200."}
+                    ]
+                }),
+            ),
+        ]);
+        processor.process(&sid).await.unwrap();
+        let store = store.lock().unwrap();
+        let artifacts = store.list_artifacts_for_session(&sid).unwrap();
+        let notes = artifacts.iter().find(|a| a.kind == "notes").expect("notes artifact written");
+        let parsed = notes::parse_notes_artifact(&notes.body);
+        assert_eq!(
+            parsed,
+            vec![
+                notes::NotesEntry {
+                    bucket: "scope_of_work".into(),
+                    label: "Mulch".into(),
+                    detail: "Darker than last year.".into(),
+                },
+                notes::NotesEntry {
+                    bucket: "constraints".into(),
+                    label: "Budget".into(),
+                    detail: "Under $1,200.".into(),
+                },
+            ]
+        );
+    }
+
+    /// No buckets in the response -> no `notes` artifact at all (mirrors the
+    /// `session_meta` absence test).
+    #[tokio::test]
+    async fn process_writes_no_notes_artifact_when_no_buckets_were_returned() {
+        let (processor, store, sid) = processor_with(vec![
+            end_turn("nothing to extract"),
+            summary_response("Walked the site."),
+        ]);
+        processor.process(&sid).await.unwrap();
+        let store = store.lock().unwrap();
+        let artifacts = store.list_artifacts_for_session(&sid).unwrap();
+        assert!(!artifacts.iter().any(|a| a.kind == "notes"), "no buckets -> no notes artifact");
+    }
+
+    /// R6 pin (D3-14): buckets never become item rows. The extraction agent
+    /// created exactly one item (`add_item`); the notes pass's two buckets
+    /// must add zero rows on top of that.
+    #[tokio::test]
+    async fn process_notes_pass_never_adds_item_rows() {
+        let (processor, store, sid) = processor_with(vec![
+            tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+            end_turn("done"),
+            tool_use(
+                "write_notes",
+                serde_json::json!({
+                    "summary": "Estimate walk.",
+                    "notes": [
+                        {"bucket": "scope_of_work", "label": "Mulch", "detail": "Darker."},
+                        {"bucket": "constraints", "label": "Budget", "detail": "Under $1,200."}
+                    ]
+                }),
+            ),
+        ]);
+        processor.process(&sid).await.unwrap();
+        let store = store.lock().unwrap();
+        assert_eq!(
+            store.list_items_for_session(&sid).unwrap().len(),
+            1,
+            "buckets must never become board items"
+        );
+    }
 }
