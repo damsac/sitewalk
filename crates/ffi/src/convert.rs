@@ -83,53 +83,6 @@ pub fn document_payload(artifact: &Artifact) -> Result<DocumentPayload, ConvertE
     })
 }
 
-/// Builds a partial, all-gaps `DocumentPayload` from the live board.
-///
-/// Two callers, two truths for `queued`:
-/// - `finish()` degrading offline (D9): phase B never ran and the session is
-///   still pending processing, so `queued: true`.
-/// - `finish()` on an empty/whitespace-only transcript, or a second
-///   (already-finished) `finish()` call: the session IS genuinely done —
-///   there is nothing left to process — so `queued: false`.
-pub fn partial_document_from_items(
-    doc_kind: &str,
-    items: &[CapturedItem],
-    queued: bool,
-) -> DocumentPayload {
-    // The degraded document must be truthful about its own shape: an
-    // inspection has no summable dollar total, so labeling it "sum"/"total"
-    // (as a hardcoded default did) is a copy mislabel — it would render a
-    // "TOTAL" the template can't compute. Derive the total shape from the
-    // doc_kind instead (mirrors what build_document would emit per template).
-    let (total_kind, total_label_key) = match doc_kind {
-        "inspection" => ("static", "findings"),
-        // estimate (priced) and report (summed deductions) both sum their lines.
-        _ => ("sum", "total"),
-    };
-    DocumentPayload {
-        doc_kind: doc_kind.to_string(),
-        doc_number: 0,
-        job_date_unix: 0,
-        total_kind: total_kind.to_string(),
-        total_label_key: total_label_key.to_string(),
-        static_total_cents: None,
-        lines: items
-            .iter()
-            .map(|item| DocLine {
-                id: item.id.clone(),
-                title: item.text.clone(),
-                detail: String::new(),
-                qty: String::new(),
-                amount_cents: None,
-                section: None,
-                is_gap: true,
-                item_id: Some(item.id.clone()),
-            })
-            .collect(),
-        queued,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use murmur_core::{ItemSource, Store};
@@ -192,20 +145,6 @@ mod tests {
     }
 
     #[test]
-    fn offline_partial_labels_the_total_truthfully_per_doc_kind() {
-        // An inspection has no summable dollar total — the degraded offline
-        // document must not claim a "sum"/"total" it cannot compute.
-        let insp = partial_document_from_items("inspection", &[], true);
-        assert_eq!(insp.total_kind, "static");
-        assert_eq!(insp.total_label_key, "findings");
-        assert_eq!(insp.static_total_cents, None);
-        // A priced estimate does sum its lines — "total" stays correct.
-        let est = partial_document_from_items("estimate", &[], true);
-        assert_eq!(est.total_kind, "sum");
-        assert_eq!(est.total_label_key, "total");
-    }
-
-    #[test]
     fn document_line_carries_item_id_when_present_and_none_when_absent() {
         let store = Store::open_in_memory("device-a").unwrap();
         let session = store.start_session(None).unwrap();
@@ -237,18 +176,6 @@ mod tests {
         });
         let art = store.add_artifact(&session.id, "document", "estimate #1", &body.to_string()).unwrap();
         assert_eq!(document_payload(&art).unwrap().lines[0].item_id, None);
-    }
-
-    #[test]
-    fn offline_partial_document_carries_the_item_id() {
-        use murmur_core::{ItemSource, Store};
-        let store = Store::open_in_memory("device-a").unwrap();
-        let session = store.start_session(None).unwrap();
-        let item = store.add_item_with_source(&session.id, "todo", "haul debris", ItemSource::Live).unwrap();
-        let doc = partial_document_from_items("estimate", std::slice::from_ref(&item), true);
-        assert_eq!(doc.lines[0].item_id.as_deref(), Some(item.id.as_str()),
-            "the offline fallback builds rows from items — item_id is trivially the item's id");
-        assert_eq!(doc.lines[0].id, item.id, "line id also equals the item id in the fallback path");
     }
 
     #[test]

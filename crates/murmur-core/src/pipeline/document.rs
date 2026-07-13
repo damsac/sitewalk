@@ -26,9 +26,10 @@ use crate::store::Store;
 ///
 /// `AllGap` is not constructed by any Stage-1 production caller —
 /// `DocumentBuilder::build` (the only caller) always renders with
-/// `PerPricingKind`; the offline/degraded fallback stays on its own
+/// `PerPricingKind`; the offline/degraded fallback lived on its own
 /// `ffi::convert::partial_document_from_items` implementation by design (see
-/// `render_structure_document`'s doc comment). It exists as the documented
+/// `render_structure_document`'s doc comment) until notes-first left it
+/// caller-less and it was removed. It exists as the documented
 /// N2 parity contract, pinned by the cross-check tests below — hence the
 /// explicit `allow` rather than deleting a variant this plan defines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,8 +44,9 @@ pub(crate) enum GapPolicy {
 /// `build_document`-tool convention). Field shape matches
 /// `BuildDocumentTool`'s emitted lines exactly.
 ///
-/// **Parity contract with the FFI offline fallback** (N2 —
-/// `crates/ffi/src/convert.rs::partial_document_from_items`): calling this
+/// **Parity contract with the FFI offline fallback** (N2 — formerly
+/// `crates/ffi/src/convert.rs::partial_document_from_items`, removed once
+/// notes-first left it caller-less): calling this
 /// with `GapPolicy::AllGap` produces lines with IDENTICAL
 /// title/detail/qty/amount_cents/section/item_id/is_gap semantics — title =
 /// item.text, detail = "", qty = "", amount_cents = None, section = None,
@@ -226,8 +228,8 @@ fn apply_prices(map: &HashMap<String, i64>, lines: &mut [serde_json::Value]) {
     }
 }
 
-/// Total-shape per `doc_kind` (mirrors `ffi::convert::partial_document_from_items`):
-/// an inspection has no summable dollar total; everything else sums its lines.
+/// Total-shape per `doc_kind`: an inspection has no summable dollar total;
+/// everything else sums its lines.
 fn total_shape(doc_kind: &str) -> (&'static str, &'static str) {
     match doc_kind {
         "inspection" => ("static", "findings"),
@@ -450,8 +452,10 @@ mod tests {
     }
 
     /// N2 cross-check: `AllGap` output matches the documented field contract
-    /// of `ffi::convert::partial_document_from_items` (title/detail/qty/
-    /// amount_cents/section/item_id/is_gap), waiving only `id`.
+    /// of the FFI's former offline fallback, `partial_document_from_items`
+    /// (title/detail/qty/amount_cents/section/item_id/is_gap), waiving only
+    /// `id`. The fallback was removed once notes-first left it caller-less;
+    /// the contract stays pinned here.
     #[test]
     fn all_gap_matches_the_offline_fallback_contract_except_id() {
         let store = Store::open_in_memory("device-a").unwrap();
