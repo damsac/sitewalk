@@ -57,6 +57,16 @@ struct AppRoot: View {
                 tradeKey: "landscape"
             ))
         }
+        // QA hooks for the Letterhead Studio (parallel to autoprofile): stamp a
+        // sample branding so headless screenshots exercise a customized letterhead.
+        if args.contains("resetbrand=1") { Branding.save(.default) }
+        if args.contains("autobrand=1") {
+            Branding.save(Branding(
+                presetKey: "field", accentHex: 0x3E6B35, fontKey: "sans",
+                phone: "(303) 555-0147", email: "quotes@aldercourt.co",
+                website: "aldercourt.co", showWatermark: true
+            ))
+        }
         // autoflow (screenshot/CI automation) must never be trapped behind
         // onboarding — dam review #190: fresh sim + autoflow=1 has to reach
         // the scripted walk, not stall on OnboardingFlow with no taps available.

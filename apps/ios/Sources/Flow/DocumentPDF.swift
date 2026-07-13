@@ -13,7 +13,8 @@ enum DocumentPDF {
     @MainActor
     static func render(
         trade: TradeFixture, document: DocumentModel,
-        biz: String? = nil, bizSub: String? = nil, docDate: String? = nil
+        biz: String? = nil, bizSub: String? = nil, docDate: String? = nil,
+        branding: Branding = .default
     ) -> URL? {
         let pageSize = CGSize(width: 612, height: 792) // US Letter @ 72 dpi
 
@@ -21,7 +22,8 @@ enum DocumentPDF {
             trade: trade, document: document,
             biz: biz ?? trade.biz,
             bizSub: bizSub ?? trade.bizSub,
-            docDate: docDate ?? trade.docDate
+            docDate: docDate ?? trade.docDate,
+            branding: branding
         )
         .frame(width: pageSize.width, height: pageSize.height)
 
@@ -51,6 +53,7 @@ private struct PDFPageView: View {
     let biz: String
     let bizSub: String
     let docDate: String
+    var branding: Branding = .default
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -59,7 +62,8 @@ private struct PDFPageView: View {
                 bizSub: bizSub,
                 docKind: trade.docKind,
                 docNo: trade.docNo,
-                docDate: docDate
+                docDate: docDate,
+                branding: branding
             )
             ForEach(document.rows) { row in
                 DocRowView(row: row)
@@ -67,12 +71,15 @@ private struct PDFPageView: View {
             TotalRow(key: document.totalKey, value: document.totalValue, gaps: document.gapCount)
                 .padding(.top, 2)
             Spacer(minLength: 0)
-            Text("PREPARED WITH SITEWALK")
-                .font(Theme.F.mono(7))
-                .tracking(1.6)
-                .foregroundStyle(Theme.C.ink35)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.bottom, 8)
+            // Free-tier footer ("PREPARED WITH JEFE"); nil once removed (Pro).
+            if let footer = branding.footerText {
+                Text(footer)
+                    .font(Theme.F.mono(7))
+                    .tracking(1.6)
+                    .foregroundStyle(Theme.C.ink35)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 8)
+            }
         }
         .padding(48)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

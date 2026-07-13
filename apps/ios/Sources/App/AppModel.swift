@@ -36,6 +36,12 @@ final class AppModel {
     /// letterheadSub/letterheadDate. App-side only for now (BusinessProfile).
     private(set) var profile: BusinessProfile?
 
+    /// The operator's document branding (logo / accent / letterhead font /
+    /// contact / footer). Loaded from persistence; the Letterhead Studio edits a
+    /// copy and commits via `saveBranding`. App-side only (design doc §5 — the
+    /// STYLE half). `.current` reads the stored record or falls back to stock.
+    var branding: Branding = .current
+
     /// One board row per walk finished THIS SESSION (profile mode replaces
     /// the fixture jobs list with this honest log). In-memory on purpose —
     /// walk history is a core concern; this is the interim surface.
@@ -602,8 +608,24 @@ final class AppModel {
         guard let doc = document else { return }
         shareURL = DocumentPDF.render(
             trade: trade, document: doc,
-            biz: letterheadBiz, bizSub: letterheadSub, docDate: letterheadDate
+            biz: letterheadBiz, bizSub: letterheadSub, docDate: letterheadDate,
+            branding: branding
         )
+    }
+
+    /// Persist branding edited in the Letterhead Studio and apply it live (the
+    /// review sheet + every future PDF read `branding`).
+    func saveBranding(_ updated: Branding) {
+        branding = updated
+        Branding.save(updated)
+    }
+
+    /// Persist business identity edited in the Letterhead Studio (name / city /
+    /// license — the letterhead text set at onboarding, now editable anytime).
+    /// `reloadProfile()` refreshes the board header + letterhead + trade.
+    func saveProfile(_ updated: BusinessProfile) {
+        BusinessProfile.save(updated)
+        reloadProfile()
     }
 
     func completeSend() {

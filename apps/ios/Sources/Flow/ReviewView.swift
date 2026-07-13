@@ -48,7 +48,8 @@ struct ReviewView: View {
                             bizSub: model.letterheadSub,
                             docKind: model.trade.docKind,
                             docNo: model.trade.docNo,
-                            docDate: model.letterheadDate
+                            docDate: model.letterheadDate,
+                            branding: model.branding
                         )
                         ForEach(doc.rows) { row in
                             DocRowView(row: row)

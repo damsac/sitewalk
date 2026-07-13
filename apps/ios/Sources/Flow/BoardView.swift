@@ -9,6 +9,7 @@ struct BoardView: View {
     // sac: entry point + presentation (sheet vs. a new AppModel.Phase) is your
     // call; a gear → .sheet is a functional default, not a design decision.
     @State private var showVocabulary = false
+    @State private var showLetterhead = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,6 +46,21 @@ struct BoardView: View {
                     // widens the tap target without growing the stamp.
                     Button { showVocabulary = true } label: {
                         Text("VOCAB")
+                            .font(Theme.F.mono(8, .semibold))
+                            .tracking(1.0)
+                            .foregroundStyle(Theme.C.ink60)
+                            .padding(.horizontal, 6)
+                            .padding(.top, 3)
+                            .padding(.bottom, 2)
+                            .background(Theme.C.paperDeep)
+                            .padding(6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(-6)
+                    // Letterhead / paperwork branding — same stamp grammar.
+                    Button { showLetterhead = true } label: {
+                        Text("PAPER")
                             .font(Theme.F.mono(8, .semibold))
                             .tracking(1.0)
                             .foregroundStyle(Theme.C.ink60)
@@ -180,6 +196,12 @@ struct BoardView: View {
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showVocabulary) {
             VocabularyView(model: model)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Theme.C.paper)
+        }
+        .sheet(isPresented: $showLetterhead) {
+            LetterheadStudioView(model: model)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.C.paper)

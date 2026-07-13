@@ -12,24 +12,41 @@ struct Letterhead: View {
     let docKind: String
     let docNo: String
     let docDate: String
+    /// The operator's branding — logo, accent, biz font, contact. `.default`
+    /// reproduces the stock look, so the demo/gallery path renders unchanged.
+    var branding: Branding = .default
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
+            if let logo = branding.logoImage {
+                Image(uiImage: logo)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 34, height: 34)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(biz)
-                    .font(Theme.F.serif(15, .bold))
+                    .font(branding.bizFont(15))
                     .lineLimit(2)
-                Text(bizSub)
-                    .font(Theme.F.mono(7.5))
-                    .tracking(0.6)
-                    .foregroundStyle(Theme.C.ink60)
+                if !bizSub.isEmpty {
+                    Text(bizSub)
+                        .font(Theme.F.mono(7.5))
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.C.ink60)
+                }
+                if !branding.contactLine.isEmpty {
+                    Text(branding.contactLine)
+                        .font(Theme.F.mono(7))
+                        .tracking(0.4)
+                        .foregroundStyle(Theme.C.ink60)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 3) {
                 Text(docKind)
                     .font(Theme.F.mono(8.5, .semibold))
                     .tracking(1.8)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(branding.accentColor)
                 Text(docNo)
                     .font(Theme.F.mono(11, .semibold))
                 Text(docDate)
