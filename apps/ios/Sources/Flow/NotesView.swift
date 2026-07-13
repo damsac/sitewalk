@@ -27,7 +27,7 @@ struct NotesView: View {
             // stays a stable skeleton, so nothing shifts when the notes land
             // (dam's UX note: navigate once, fill in place).
             if model.notesLoading {
-                ProgressView().progressViewStyle(.linear).tint(Theme.C.orange).frame(height: 2)
+                ProgressView().progressViewStyle(.linear).tint(Theme.C.orangeDeep).frame(height: 2)
             } else {
                 Theme.C.paper.frame(height: 2)
             }
@@ -113,7 +113,7 @@ struct NotesView: View {
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 0) {
-                Rectangle().fill(Theme.C.orange).frame(width: 3)
+                Rectangle().fill(Theme.C.orangeDeep).frame(width: 3)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("SUMMARY")
                         .font(Theme.F.mono(8, .semibold)).tracking(2.0)
