@@ -12,8 +12,34 @@ struct ReviewView: View {
     // wires PhotosPicker → bytes → engine.attachPhoto.
     @State private var photoPickerItem: PhotosPickerItem?
 
+    // Back to the notes screen (the reported gap: review previously had only
+    // Send / Discard). The doc-kind on the right reads what you're reviewing.
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Button { model.backToNotes() } label: {
+                Text("‹ NOTES")
+                    .font(Theme.F.mono(9, .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(Theme.C.ink60)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Text(model.reviewKind.map { DocKinds.label(for: $0).uppercased() } ?? "REVIEW")
+                .font(Theme.F.mono(9, .semibold))
+                .tracking(2.0)
+                .foregroundStyle(Theme.C.orangeDeep)
+        }
+        .padding(.horizontal, Theme.S.screenPad)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(Theme.C.paper)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            header
             ScrollView {
                 if let doc = model.document {
                     VStack(alignment: .leading, spacing: 0) {
