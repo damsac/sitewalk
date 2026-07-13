@@ -593,6 +593,14 @@ final class AppModel {
         Branding.save(updated)
     }
 
+    /// Persist business identity edited in the Letterhead Studio (name / city /
+    /// license — the letterhead text set at onboarding, now editable anytime).
+    /// `reloadProfile()` refreshes the board header + letterhead + trade.
+    func saveProfile(_ updated: BusinessProfile) {
+        BusinessProfile.save(updated)
+        reloadProfile()
+    }
+
     func completeSend() {
         if let index = jobs.firstIndex(where: { !$0.done }) {
             let old = jobs[index]

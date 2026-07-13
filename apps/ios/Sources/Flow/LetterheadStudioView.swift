@@ -12,11 +12,19 @@ struct LetterheadStudioView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft: Branding
+    @State private var draftProfile: BusinessProfile
     @State private var logoItem: PhotosPickerItem?
 
     init(model: AppModel) {
         self.model = model
         _draft = State(initialValue: model.branding)
+        // The letterhead's business identity (name / city / license) is set at
+        // onboarding but belongs here too — this is the one place to edit
+        // everything ON the letterhead. Seed from the profile, or a blank one on
+        // the no-profile demo path (saving a name creates the profile).
+        _draftProfile = State(initialValue: model.profile ?? BusinessProfile(
+            businessName: "", cityState: "", licenseNumber: nil, tradeKey: model.trade.key
+        ))
     }
 
     // Curated for v1 (design decision): a handful of brand colors + two bundled
@@ -30,6 +38,7 @@ struct LetterheadStudioView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     preview
+                    businessSection
                     logoSection
                     accentSection
                     fontSection
@@ -78,6 +87,11 @@ struct LetterheadStudioView: View {
     private var saveBar: some View {
         Button {
             model.saveBranding(draft)
+            // Only persist the profile when there's a name to carry — avoids
+            // minting an empty profile from the no-profile demo path.
+            if !draftProfile.businessName.trimmingCharacters(in: .whitespaces).isEmpty {
+                model.saveProfile(draftProfile)
+            }
             dismiss()
         } label: {
             Text("SAVE LETTERHEAD")
@@ -98,8 +112,8 @@ struct LetterheadStudioView: View {
     private var preview: some View {
         VStack(alignment: .leading, spacing: 0) {
             Letterhead(
-                biz: model.letterheadBiz,
-                bizSub: model.letterheadSub,
+                biz: draftProfile.businessName.isEmpty ? model.trade.biz : draftProfile.businessName,
+                bizSub: draftProfile.letterheadSub,
                 docKind: model.trade.docKind,
                 docNo: model.trade.docNo,
                 docDate: model.letterheadDate,
@@ -127,6 +141,39 @@ struct LetterheadStudioView: View {
     }
 
     // MARK: Sections
+
+    // Business identity — the letterhead's name line, editable here (not just at
+    // onboarding). Names take title/word case; the license is upper-cased.
+    private var businessSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("BUSINESS")
+            profileField("NAME", text: $draftProfile.businessName,
+                         placeholder: "Summit Lawn & Snow", caps: .words)
+            profileField("CITY/ST", text: $draftProfile.cityState,
+                         placeholder: "Denver CO", caps: .words)
+            profileField("LICENSE", text: Binding(
+                get: { draftProfile.licenseNumber ?? "" },
+                set: { draftProfile.licenseNumber = $0.isEmpty ? nil : $0 }
+            ), placeholder: "44-0781", caps: .characters)
+        }
+        .padding(.horizontal, Theme.S.screenPad).padding(.top, 18)
+    }
+
+    private func profileField(_ key: String, text: Binding<String>, placeholder: String,
+                              caps: TextInputAutocapitalization) -> some View {
+        HStack(spacing: 10) {
+            Text(key)
+                .font(Theme.F.mono(8, .semibold)).tracking(1.0)
+                .foregroundStyle(Theme.C.ink35)
+                .frame(width: 56, alignment: .leading)
+            TextField(placeholder, text: text)
+                .font(Theme.F.cond(13, .medium))
+                .textInputAutocapitalization(caps)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 11).padding(.vertical, 10)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+    }
 
     private var logoSection: some View {
         VStack(alignment: .leading, spacing: 10) {
