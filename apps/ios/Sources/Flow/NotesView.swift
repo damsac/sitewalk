@@ -18,7 +18,6 @@ struct NotesView: View {
 
     private var emptyNotes: NotesModel { NotesModel(summary: "", items: [], docKind: "report", queued: false) }
     private var notes: NotesModel { model.notes ?? emptyNotes }
-    private var isEmpty: Bool { notes.items.isEmpty }
     private var kinds: [String] { DocKinds.legalKinds(for: model.trade.key) }
 
     var body: some View {
