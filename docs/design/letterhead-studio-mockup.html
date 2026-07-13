@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JEFE — Customizable Paperwork Study (Style · Structure · Upload)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,600;0,8..60,700;1,8..60,400&family=Roboto+Slab:wght@500;700&family=Archivo:wght@600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAFAF7; --paper-deep:#F1F0EA; --sheet:#FFFFFE;
+    --ink:#141412; --ink-60:#5E5C54; --ink-35:#A7A49A;
+    --hair:rgba(20,20,18,.16); --hair-soft:rgba(20,20,18,.09);
+    --amber:#FFBB26; --amber-deep:#9A6A00; --amber-tint:#FAF1D9; --on-amber:#141412;
+    --red:#A63A2E; --red-tint:#F7E8E5; --yellow:#9A7213; --yellow-tint:#F6EFD9;
+    --green:#3E6B35; --green-tint:#E9F0E4; --violet:#5B3E8C; --violet-tint:#EFEAF6;
+    --ui:'Barlow',sans-serif; --cond:'Barlow Semi Condensed',sans-serif;
+    --mono:'IBM Plex Mono',monospace; --serif:'Source Serif 4',serif;
+    --accent:#9A6A00;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--paper)}
+  body{font-family:var(--ui);color:var(--ink);
+    background:repeating-linear-gradient(0deg,transparent 0 31px,var(--hair-soft) 31px 32px),
+      repeating-linear-gradient(90deg,transparent 0 31px,var(--hair-soft) 31px 32px),var(--paper);
+    padding:0 clamp(20px,4vw,64px) 72px;min-height:100vh}
+  body::after{content:'';position:fixed;inset:0;pointer-events:none;opacity:.05;z-index:60;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+  header{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:24px;
+    padding:34px 0 20px;border-bottom:2px solid var(--ink)}
+  .wordmark{display:flex;align-items:center;gap:14px}
+  .wordmark .mark{width:34px;height:34px;background:var(--ink);border-radius:6px;position:relative;flex:none}
+  .wordmark .mark::before{content:'';position:absolute;left:7px;right:7px;top:6px;height:11px;background:var(--amber);border-radius:6px 6px 0 0}
+  .wordmark .mark::after{content:'';position:absolute;left:11px;right:11px;top:17px;bottom:6px;background:var(--paper);border-radius:0 0 5px 5px}
+  .wordmark h1{font-weight:800;font-size:30px;letter-spacing:.14em}
+  .wordmark .sub{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--amber-deep);border:1.5px solid var(--amber-deep);padding:4px 8px 3px}
+  .tagline{font-family:var(--serif);font-style:italic;font-size:18px;color:var(--ink-60);margin-top:8px;max-width:560px}
+  .controls{display:flex;flex-direction:column;gap:10px;align-items:flex-end}
+  .switcher{display:flex;border:1.5px solid var(--ink)}
+  .switcher button{appearance:none;border:0;cursor:pointer;background:transparent;font-family:var(--mono);
+    font-size:11px;letter-spacing:.13em;padding:10px 14px 9px;color:var(--ink-60);border-left:1.5px solid var(--ink)}
+  .switcher button:first-child{border-left:0}
+  .switcher button.active{background:var(--ink);color:var(--paper)}
+  .switch-label{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink-60);margin-right:10px;align-self:center}
+  .row-ctrl{display:flex;align-items:center}
+
+  .band{max-width:1120px;margin:0 auto}
+  .band-h{display:flex;align-items:center;gap:12px;padding:34px 2px 4px}
+  .band-h .n{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.1em;color:var(--paper);background:var(--ink);padding:5px 9px}
+  .band-h .t{font-weight:800;font-size:17px;letter-spacing:.02em}
+  .band-h .d{font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--ink-60);flex:1}
+  .band-h .pill{font-family:var(--mono);font-size:8.5px;font-weight:600;letter-spacing:.1em;padding:4px 8px 3px;border-radius:2px}
+  .pill.free{color:var(--green);border:1.5px solid var(--green)}
+  .pill.pro{color:var(--amber-deep);border:1.5px solid var(--amber-deep)}
+  .pill.prem{color:var(--violet);border:1.5px solid var(--violet);background:var(--violet-tint)}
+
+  .frames{display:flex;flex-wrap:wrap;gap:clamp(26px,3.4vw,52px);justify-content:center;align-items:flex-start;padding:18px 0 4px}
+  .unit{width:330px;flex:none}
+  .cap{display:flex;gap:9px;margin:15px 2px 0;font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink-60);line-height:1.55}
+  .cap .i{color:var(--amber-deep);font-weight:600;flex:none}
+  .cap .t{text-transform:uppercase;letter-spacing:.12em;color:var(--ink);font-weight:600}
+
+  .phone{width:330px;height:708px;background:#1B1B19;border-radius:50px;padding:9px;position:relative;
+    box-shadow:0 2px 3px rgba(20,20,18,.18),0 18px 44px -14px rgba(20,20,18,.38),inset 0 0 0 1.5px #3A3A36}
+  .screen{width:100%;height:100%;background:var(--paper);border-radius:41px;overflow:hidden;position:relative;display:flex;flex-direction:column}
+  .island{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:92px;height:26px;background:#100F0E;border-radius:20px;z-index:12}
+  .statusbar{height:52px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 25px 6px;font-weight:600;font-size:13px;position:relative;z-index:11}
+  .bars{display:flex;align-items:flex-end;gap:1.5px;height:10px}
+  .bars i{width:3px;background:var(--ink);border-radius:1px}
+  .bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:6px}.bars i:nth-child(3){height:8px}.bars i:nth-child(4){height:10px}
+  .batt{width:22px;height:11px;border:1.5px solid var(--ink);border-radius:3px;position:relative}
+  .batt::before{content:'';position:absolute;inset:1.5px;right:6px;background:var(--ink);border-radius:1px}
+
+  .e-head{padding:9px 18px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--ink)}
+  .e-head .close{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink-60);font-weight:600}
+  .e-head .ttl{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--amber-deep);font-weight:600}
+  .e-scroll{flex:1;overflow:hidden;position:relative}
+  .e-inner{position:absolute;inset:0;overflow:hidden;padding:2px 0 4px}
+  .sec{padding:12px 18px 3px}
+  .sec .lbl{font-family:var(--mono);font-size:8.5px;letter-spacing:.2em;color:var(--ink-60);font-weight:600;display:flex;align-items:center;gap:8px}
+  .sec .lbl::after{content:'';flex:1;height:1px;background:var(--hair)}
+
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .chip{font-family:var(--mono);font-size:8.5px;letter-spacing:.05em;font-weight:600;padding:8px 9px;cursor:pointer;
+    border:1.5px solid var(--hair);color:var(--ink-60);background:transparent;display:flex;gap:6px;align-items:center}
+  .chip.on{border-color:var(--ink);color:var(--ink);background:var(--paper)}
+  .chip.on .dot{background:var(--amber)}
+  .chip .dot{width:7px;height:7px;background:var(--ink-35)}
+  .chip.upload{border-style:dashed}
+
+  .logo-row{display:flex;gap:10px;align-items:center;margin-top:9px;padding:0 18px}
+  .logo-box{width:48px;height:48px;flex:none;border:1.5px solid var(--hair);display:flex;align-items:center;justify-content:center;background:var(--sheet)}
+  .logo-meta{flex:1}
+  .logo-meta .n{font-family:var(--cond);font-weight:600;font-size:12.5px}
+  .logo-meta .s{font-family:var(--mono);font-size:7.5px;letter-spacing:.05em;color:var(--ink-60);margin-top:2px}
+  .mini-btn{font-family:var(--mono);font-size:8px;letter-spacing:.1em;font-weight:600;color:var(--ink);border:1.5px solid var(--ink);padding:6px 9px;cursor:pointer;background:transparent}
+
+  .swatches{display:flex;gap:8px;margin-top:9px;padding:0 18px}
+  .sw{width:28px;height:28px;cursor:pointer;border-radius:50%;position:relative;border:2px solid transparent}
+  .sw.on{border-color:var(--ink);box-shadow:inset 0 0 0 2px var(--paper)}
+
+  .fields{padding:0 18px;margin-top:8px;display:flex;flex-direction:column;gap:6px}
+  .field{display:flex;align-items:center;gap:9px;border:1.5px solid var(--hair);padding:7px 10px}
+  .field .k{font-family:var(--mono);font-size:8px;letter-spacing:.12em;color:var(--ink-35);font-weight:600;width:48px;flex:none}
+  .field .v{font-family:var(--cond);font-weight:500;font-size:12px}
+
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:11px 18px 4px;padding:10px 11px;border:1.5px solid var(--hair);background:var(--sheet)}
+  .toggle-row .tl .t{font-family:var(--cond);font-weight:600;font-size:12px}
+  .toggle-row .tl .s{font-family:var(--mono);font-size:7.5px;letter-spacing:.04em;color:var(--ink-60);margin-top:2px}
+  .switch{width:40px;height:23px;border-radius:14px;background:var(--amber);position:relative;flex:none;cursor:pointer;transition:.15s}
+  .switch.off{background:var(--ink-35)}
+  .switch::after{content:'';position:absolute;top:3px;left:3px;width:17px;height:17px;border-radius:50%;background:#fff;transition:.15s}
+  .switch.off::after{left:20px}
+
+  .e-foot{flex:none;padding:10px 18px 11px;border-top:1.5px solid var(--ink);background:var(--paper)}
+  .primary{width:100%;cursor:pointer;border:0;background:var(--amber);color:var(--on-amber);font-family:var(--ui);font-weight:700;font-size:13.5px;letter-spacing:.05em;padding:12px;box-shadow:0 3px 0 var(--amber-deep)}
+  .primary.prem{background:var(--violet);color:#fff;box-shadow:0 3px 0 #3F2A63}
+
+  /* structure builder rows */
+  .srow{display:flex;align-items:center;gap:10px;margin:0 18px;padding:9px 0;border-bottom:1px solid var(--hair-soft)}
+  .srow .grip{font-family:var(--mono);font-size:12px;color:var(--ink-35);flex:none;letter-spacing:-2px}
+  .srow .nm{flex:1}
+  .srow .nm .t{font-family:var(--cond);font-weight:600;font-size:12.5px}
+  .srow .nm .s{font-family:var(--mono);font-size:7.5px;letter-spacing:.05em;color:var(--ink-60);margin-top:1px}
+  .srow .lock{font-family:var(--mono);font-size:7px;letter-spacing:.1em;color:var(--ink-35);border:1px solid var(--hair);padding:2px 5px}
+  .srow .custom-tag{font-family:var(--mono);font-size:7px;letter-spacing:.08em;color:var(--amber-deep);border:1px solid var(--amber-deep);padding:2px 5px;border-radius:2px}
+  .addbtn{margin:10px 18px 0;display:flex;gap:8px}
+  .addbtn button{flex:1;cursor:pointer;background:transparent;border:1.5px dashed var(--hair);padding:9px 6px;font-family:var(--mono);font-size:8.5px;font-weight:600;letter-spacing:.06em;color:var(--ink-60)}
+  .doctype{display:flex;align-items:center;gap:8px;margin:9px 18px 0;padding:9px 11px;border:1.5px solid var(--ink);background:var(--paper)}
+  .doctype .dt-k{font-family:var(--mono);font-size:8px;letter-spacing:.14em;color:var(--ink-60);font-weight:600}
+  .doctype .dt-v{font-family:var(--ui);font-weight:700;font-size:14px;flex:1}
+  .doctype .dt-x{font-family:var(--mono);font-size:11px;color:var(--ink-60)}
+
+  /* upload flow */
+  .u-step{margin:12px 18px 0}
+  .u-num{font-family:var(--mono);font-size:8px;letter-spacing:.16em;font-weight:600;color:var(--violet);margin-bottom:6px;display:flex;align-items:center;gap:7px}
+  .u-num::after{content:'';flex:1;height:1px;background:var(--hair)}
+  .u-file{border:1.5px solid var(--hair);background:var(--sheet);padding:12px;display:flex;align-items:center;gap:10px}
+  .u-file .doc-ico{width:30px;height:38px;flex:none;border:1.5px solid var(--ink);position:relative;background:#fff}
+  .u-file .doc-ico::before{content:'';position:absolute;top:0;right:0;border-width:0 8px 8px 0;border-style:solid;border-color:var(--paper-deep) var(--paper) var(--paper) var(--paper-deep)}
+  .u-file .fn{font-family:var(--cond);font-weight:600;font-size:12px}
+  .u-file .fm{font-family:var(--mono);font-size:7.5px;color:var(--green);letter-spacing:.06em;margin-top:2px}
+  .u-note{font-family:var(--mono);font-size:8px;line-height:1.6;letter-spacing:.02em;color:var(--ink-60);border-left:2px solid var(--violet);padding:2px 0 2px 9px;margin-top:2px}
+  .u-note b{color:var(--ink)}
+  .map{border:1.5px solid var(--hair)}
+  .maprow{display:flex;align-items:center;gap:6px;padding:7px 9px;border-bottom:1px solid var(--hair-soft)}
+  .maprow:last-child{border-bottom:0}
+  .maprow .fld{font-family:var(--cond);font-weight:600;font-size:11px;flex:1}
+  .maprow .arw{font-family:var(--mono);font-size:10px;color:var(--ink-35);flex:none}
+  .maprow .src{font-family:var(--mono);font-size:8px;font-weight:600;letter-spacing:.03em;color:var(--violet);background:var(--violet-tint);padding:3px 6px;flex:none}
+  .maprow .src.manual{color:var(--ink-60);background:var(--paper-deep)}
+
+  /* ===== produced document ===== */
+  .d-head{padding:9px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--hair)}
+  .d-head .l{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink-60);font-weight:600}
+  .d-head .r{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--amber-deep);font-weight:600}
+  .d-body{flex:1;overflow:hidden;background:var(--paper-deep);padding:15px 15px 0}
+  .sheet{background:#fff;box-shadow:0 1px 2px rgba(20,20,18,.14),0 14px 30px -12px rgba(20,20,18,.4);padding:19px 19px 0;height:100%;display:flex;flex-direction:column;overflow:hidden}
+  .lh-logo{width:30px;height:30px;flex:none;position:relative}
+  .biz{font-family:var(--serif);font-weight:700;font-size:15px;line-height:1.05}
+  .contact{font-family:var(--mono);font-size:7px;letter-spacing:.05em;color:var(--ink-60);margin-top:3px;line-height:1.5}
+  .dk{font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;font-weight:600;color:var(--accent)}
+  .dno{font-family:var(--mono);font-size:11px;font-weight:600;margin-top:2px}
+  .ddate{font-family:var(--mono);font-size:8px;color:var(--ink-60);margin-top:1px}
+  .dsec{font-family:var(--mono);font-size:7px;letter-spacing:.16em;font-weight:600;color:var(--ink-60);margin:9px 0 2px}
+  .drow{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--hair-soft)}
+  .drow .tx{flex:1}
+  .drow .tx .t{font-family:var(--cond);font-weight:600;font-size:11.5px}
+  .drow .tx .s{font-family:var(--mono);font-size:6.5px;letter-spacing:.03em;color:var(--ink-60);margin-top:1px}
+  .drow .a{font-family:var(--mono);font-size:10.5px;font-weight:600;flex:none;min-width:42px;text-align:right}
+  .dtot{display:flex;align-items:baseline;justify-content:space-between;padding-top:8px;margin-top:2px;border-top:2px solid var(--ink)}
+  .dtot .k{font-family:var(--mono);font-size:8px;letter-spacing:.16em;font-weight:600}
+  .dtot .v{font-family:var(--mono);font-size:15px;font-weight:600}
+  .dextra{font-family:var(--mono);font-size:7.5px;letter-spacing:.03em;color:var(--ink-60);line-height:1.5;border:1px dashed var(--hair);padding:6px 8px;margin-top:8px}
+  .dsign{display:flex;gap:14px;margin-top:10px}
+  .dsign .sig{flex:1;border-top:1.5px solid var(--ink);padding-top:3px;font-family:var(--mono);font-size:6.5px;letter-spacing:.1em;color:var(--ink-60)}
+  .wm{margin-top:auto;text-align:center;font-family:var(--mono);font-size:6.5px;letter-spacing:.16em;color:var(--ink-35);padding:8px 0 7px}
+
+  .legend{max-width:1120px;margin:26px auto 0;font-family:var(--mono);font-size:11px;line-height:1.75;color:var(--ink-60);border:1.5px solid var(--hair);padding:16px 18px;background:var(--paper)}
+  .legend b{color:var(--ink);letter-spacing:.03em}
+  .legend .a{color:var(--amber-deep);font-weight:600}
+  .legend .v{color:var(--violet);font-weight:600}
+  .legend h4{font-family:var(--ui);font-weight:800;font-size:13px;letter-spacing:.04em;color:var(--ink);margin-bottom:6px}
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="wordmark"><div class="mark"></div><h1>JEFE</h1><span class="sub">CUSTOMIZABLE PAPERWORK · DS-07</span></div>
+      <p class="tagline">Voice → <em>your</em> paperwork. Brand it, decide what goes in it, or bring your own document entirely. The walk fills it in.</p>
+    </div>
+    <div class="controls">
+      <div class="row-ctrl"><span class="switch-label">TRADE</span>
+        <div class="switcher" id="trade-sw">
+          <button data-trade="landscape" class="active">LANDSCAPE</button>
+          <button data-trade="property">PROPERTY</button>
+          <button data-trade="inspection">INSPECTION</button>
+        </div></div>
+      <div class="row-ctrl"><span class="switch-label">TEMPLATE</span>
+        <div class="switcher" id="preset-sw">
+          <button data-preset="field" class="active">FIELD</button>
+          <button data-preset="modern">MODERN</button>
+          <button data-preset="minimal">MINIMAL</button>
+          <button data-preset="upload">UPLOAD</button>
+        </div></div>
+    </div>
+  </header>
+
+  <!-- ============ BAND 1 · STYLE ============ -->
+  <div class="band">
+    <div class="band-h"><span class="n">①</span><span class="t">STYLE — Letterhead Studio</span>
+      <span class="d">Brand the look: preset · logo · color · type · footer. Pure presentation, no LLM.</span>
+      <span class="pill free">FREE</span><span class="pill pro">PRO removes footer</span></div>
+    <div class="frames">
+      <!-- style editor -->
+      <div class="unit"><div class="phone"><div class="screen">
+        <div class="island"></div>
+        <div class="statusbar"><span>2:07</span><div style="display:flex;gap:6px;align-items:flex-end"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="batt"></div></div></div>
+        <div class="e-head"><span class="close">‹ BOARD</span><span class="ttl">LETTERHEAD</span><span class="close" style="opacity:0">·</span></div>
+        <div class="e-scroll"><div class="e-inner">
+          <div class="sec"><div class="lbl">TEMPLATE</div>
+            <div class="chips" id="ed-presets">
+              <div class="chip on" data-preset="field"><span class="dot"></span>FIELD</div>
+              <div class="chip" data-preset="modern"><span class="dot"></span>MODERN</div>
+              <div class="chip" data-preset="minimal"><span class="dot"></span>MINIMAL</div>
+              <div class="chip upload" data-preset="upload">⇪ UPLOAD</div></div></div>
+          <div class="sec"><div class="lbl">LOGO</div></div>
+          <div class="logo-row"><div class="logo-box"><div class="lh-logo" id="ed-logo"></div></div>
+            <div class="logo-meta"><div class="n">alder-court-mark.png</div><div class="s">PNG · 512² · TRANSPARENT</div></div>
+            <div class="mini-btn">REPLACE</div></div>
+          <div class="sec"><div class="lbl">BRAND COLOR</div></div>
+          <div class="swatches" id="ed-accent">
+            <div class="sw on" style="background:#9A6A00" data-accent="#9A6A00"></div>
+            <div class="sw" style="background:#3E6B35" data-accent="#3E6B35"></div>
+            <div class="sw" style="background:#2E5A78" data-accent="#2E5A78"></div>
+            <div class="sw" style="background:#A63A2E" data-accent="#A63A2E"></div>
+            <div class="sw" style="background:#141412" data-accent="#141412"></div></div>
+          <div class="sec"><div class="lbl">TYPEFACE</div>
+            <div class="chips" id="ed-font">
+              <div class="chip on" data-font="serif">SOURCE SERIF</div>
+              <div class="chip" data-font="slab">ROBOTO SLAB</div>
+              <div class="chip" data-font="grotesk">ARCHIVO</div>
+              <div class="chip upload" data-font="byo">BRING YOUR OWN ▸</div></div></div>
+          <div class="sec"><div class="lbl">CONTACT</div></div>
+          <div class="fields">
+            <div class="field"><span class="k">PHONE</span><span class="v">(303) 555-0147</span></div>
+            <div class="field"><span class="k">EMAIL</span><span class="v">quotes@aldercourt.co</span></div>
+            <div class="field"><span class="k">WEB</span><span class="v">aldercourt.co</span></div></div>
+          <div class="toggle-row"><div class="tl"><div class="t">“Prepared with Jefe” footer</div>
+            <div class="s">Off requires JEFE PRO</div></div><div class="switch" id="ed-wm"></div></div>
+        </div></div>
+        <div class="e-foot"><button class="primary">SAVE LETTERHEAD</button></div>
+      </div></div>
+      <div class="cap"><span class="i">01</span><span><span class="t">Letterhead Studio</span> — opened from the board. Only the letterhead + accent change per template; the row body is shared (like Document.swift). App-side, no core change.</span></div></div>
+
+      <!-- document -->
+      <div class="unit"><div class="phone"><div class="screen">
+        <div class="island"></div>
+        <div class="statusbar"><span>2:07</span><div style="display:flex;gap:6px;align-items:flex-end"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="batt"></div></div></div>
+        <div class="d-head"><span class="l">‹ REVIEW</span><span class="r" id="d-kindlabel">ESTIMATE · READY</span></div>
+        <div class="d-body"><div class="sheet" id="doc"></div></div>
+      </div></div>
+      <div class="cap"><span class="i">02</span><span><span class="t">The produced document</span> — the PDF that Sends. Reflects the Style band above AND the Structure band below. Switch TRADE / TEMPLATE up top.</span></div></div>
+    </div>
+  </div>
+
+  <!-- ============ BAND 2 · STRUCTURE ============ -->
+  <div class="band">
+    <div class="band-h"><span class="n">②</span><span class="t">STRUCTURE — Document Builder</span>
+      <span class="d">Decide what’s IN the doc: toggle/reorder sections, add fields, or make a new doc type. Schema stays named, so the fill is reliable.</span>
+      <span class="pill free">FREE basics</span><span class="pill pro">PRO custom fields</span></div>
+    <div class="frames">
+      <div class="unit"><div class="phone"><div class="screen">
+        <div class="island"></div>
+        <div class="statusbar"><span>2:07</span><div style="display:flex;gap:6px;align-items:flex-end"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="batt"></div></div></div>
+        <div class="e-head"><span class="close">‹ BOARD</span><span class="ttl">DOCUMENT BUILDER</span><span class="close" style="opacity:0">·</span></div>
+        <div class="e-scroll"><div class="e-inner">
+          <div class="sec"><div class="lbl">DOCUMENT TYPE</div></div>
+          <div class="doctype"><span class="dt-k">EDITING</span><span class="dt-v">Estimate</span><span class="dt-x">▾</span></div>
+          <div class="sec"><div class="lbl">SECTIONS · drag to reorder</div></div>
+          <div id="ed-sections"></div>
+          <div class="addbtn"><button>+ CUSTOM FIELD</button><button>+ NEW DOC TYPE</button></div>
+          <div class="sec"><div class="lbl" style="margin-top:6px">WHY IT’S RELIABLE</div></div>
+          <div class="u-note" style="margin:6px 18px 0;border-color:var(--amber-deep)">Every section is a <b>named field</b> the fill step already knows. Custom fields are added to the extraction prompt so the walk populates them — the target never becomes a mystery.</div>
+        </div></div>
+        <div class="e-foot"><button class="primary">SAVE DOCUMENT</button></div>
+      </div></div>
+      <div class="cap"><span class="i">03</span><span><span class="t">Document Builder</span> — toggle a section (try TERMS & DEPOSIT / SIGNATURE) and watch the document at top gain it. Custom fields thread into the fill prompt — <b>light core touch</b>.</span></div></div>
+
+      <!-- ============ BAND 3 · UPLOAD (premium) — placed beside structure ============ -->
+      <div class="unit"><div class="phone"><div class="screen">
+        <div class="island"></div>
+        <div class="statusbar"><span>2:07</span><div style="display:flex;gap:6px;align-items:flex-end"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="batt"></div></div></div>
+        <div class="e-head"><span class="close">‹ BOARD</span><span class="ttl" style="color:var(--violet)">③ UPLOAD YOUR DOCUMENT</span><span class="close" style="opacity:0">·</span></div>
+        <div class="e-scroll"><div class="e-inner">
+          <div class="u-step"><div class="u-num">STEP 1 · DROP YOUR FILE</div>
+            <div class="u-file"><div class="doc-ico"></div><div><div class="fn">acme-estimate-form.pdf</div><div class="fm">✓ UPLOADED · 1 PAGE</div></div></div></div>
+          <div class="u-step"><div class="u-num">STEP 2 · JEFE READS IT</div>
+            <div class="u-note"><b>Found 6 fields.</b> Comprehending an arbitrary document is an LLM pass — it costs tokens, so this is a <b style="color:var(--violet)">Premium</b> capability. You confirm the mapping <b>once</b>; every future walk fills it automatically.</div></div>
+          <div class="u-step"><div class="u-num">STEP 3 · CONFIRM THE MAPPING</div>
+            <div class="map">
+              <div class="maprow"><span class="fld">Client name</span><span class="arw">←</span><span class="src">WALK · client</span></div>
+              <div class="maprow"><span class="fld">Scope of work</span><span class="arw">←</span><span class="src">WALK · scope notes</span></div>
+              <div class="maprow"><span class="fld">Line items + prices</span><span class="arw">←</span><span class="src">WALK · items</span></div>
+              <div class="maprow"><span class="fld">Subtotal / total</span><span class="arw">←</span><span class="src">WALK · total</span></div>
+              <div class="maprow"><span class="fld">Deposit due</span><span class="arw">←</span><span class="src manual">RULE · 50%</span></div>
+              <div class="maprow"><span class="fld">Notes to client</span><span class="arw">←</span><span class="src">WALK · conditions</span></div>
+            </div></div>
+        </div></div>
+        <div class="e-foot"><button class="primary prem">CONFIRM — FILLS EVERY WALK</button></div>
+      </div></div>
+      <div class="cap"><span class="i">04</span><span><span class="t">Upload your own · <span style="color:var(--violet)">PREMIUM</span></span> — upload → Jefe infers the fields → you confirm <b>once</b>. The one-time confirm turns “fill a stranger’s doc” into a solved mapping. <b>dam’s core question.</b></span></div></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h4>THE MODEL — two axes, three tiers</h4>
+    <b>STYLE</b> (how it looks: logo/color/type) is a <span class="a">pure presentation layer</span> over data the core already returns — sac, app-side, no LLM. &nbsp;•&nbsp; <b>STRUCTURE</b> (what’s in it: sections/fields/new doc types) keeps a <b>named schema</b>, so the fill stays a solved mapping; custom fields thread into the extraction prompt (light core). &nbsp;•&nbsp; <b>UPLOAD</b> (bring any document) is the hard one — the LLM must <b>comprehend an unknown document</b>, so it’s gated as <span class="v">Premium</span> (token cost) and made reliable by <b>infer-schema → confirm-once</b>, never freeform-every-time.
+    <br><br><b>TIERS.</b> <span class="a">Free</span>: presets + basic branding + “Prepared with Jefe” footer. &nbsp; <span class="a">Pro</span>: remove footer, custom fields, more fonts. &nbsp; <span class="v">Premium</span>: upload your own document (comprehension tokens). &nbsp;•&nbsp; <b>THE ONE RULE:</b> the LLM only ever fills a <b>named schema</b> — authored (Structure) or inferred-then-confirmed (Upload). It never guesses a raw document live, because that’s someone’s bill.
+  </div>
+<script>
+const TRADES = {
+  landscape:{ biz:"Alder Court Landscaping", kind:"ESTIMATE", no:"EST-0047", date:"JUL 12 2026",
+    rows:[["Bark mulch — front beds","3 cu yd · dark","$285"],["Trim boxwood — walk","× 4","$120"],
+          ["Bed edging — front","~60 lf","$180"],["Irrigation head — zone 2","replace · parts+labor","$95"]],
+    totalK:"ESTIMATE TOTAL", totalV:"$680", plan:"ESTIMATE · READY",
+    terms:"50% deposit ($340) due to schedule · balance on completion · quote valid 30 days." },
+  property:{ biz:"Hollis Property Mgmt", kind:"CONDITION", no:"COND-1042", date:"JUL 12 2026",
+    rows:[["Carpet stain — main bedroom","deduction","$150"],["Kitchen blinds — missing","deduction","$85"],
+          ["Balcony door drag","maintenance ticket","——"],["Water heater — logged","OK","——"]],
+    totalK:"DEDUCTIONS", totalV:"$235", plan:"CONDITION · READY",
+    terms:"Deductions itemized against deposit per lease §7 · tenant may dispute within 14 days." },
+  inspection:{ biz:"Larkspur Home Inspections", kind:"INSPECTION", no:"INSP-0231", date:"JUL 12 2026",
+    rows:[["Hall-bath GFCI — won’t trip","SAFETY","——"],["Roof + site grading","repair","——"],
+          ["Furnace filter — overdue","monitor","——"],["Attic ventilation","checked · OK","——"]],
+    totalK:"ITEMS FLAGGED", totalV:"3 + 1 OK", plan:"INSPECTION · READY",
+    terms:"Report reflects conditions on inspection date · not a warranty · TREC §535." },
+};
+const SECTIONS = [
+  {key:"items", t:"Line items + prices", s:"from the walk · pricing", on:true, lock:true},
+  {key:"scope", t:"Scope of work", s:"from the walk · notes", on:true},
+  {key:"materials", t:"Materials list", s:"custom field", on:false, custom:true},
+  {key:"terms", t:"Terms & deposit", s:"custom text", on:true, custom:true},
+  {key:"signature", t:"Signature line", s:"static", on:false},
+];
+const FONT_STACK = { serif:"'Source Serif 4',serif", slab:"'Roboto Slab',serif", grotesk:"'Archivo',sans-serif", byo:"'Source Serif 4',serif" };
+const state = { trade:"landscape", preset:"field", accent:"#9A6A00", font:"serif", watermark:true,
+  sections:{items:true,scope:true,materials:false,terms:true,signature:false} };
+
+function logoSVG(c){ return `<svg viewBox="0 0 34 34" width="100%" height="100%">
+  <rect x="7" y="12" width="20" height="9" rx="4" fill="${c}"/><rect x="11" y="6" width="12" height="9" rx="4" fill="${c}"/>
+  <rect x="4" y="20" width="26" height="3" rx="1.5" fill="${c}"/></svg>`; }
+function shade(hex){const n=parseInt(hex.slice(1),16);let r=Math.max(0,(n>>16)-30),g=Math.max(0,((n>>8)&255)-24),b=Math.max(0,(n&255)-18);return `rgb(${r},${g},${b})`;}
+
+function letterhead(t){
+  const serif=FONT_STACK[state.font], logo=`<div class="lh-logo">${logoSVG(state.accent)}</div>`;
+  const contact=`<div class="contact">(303) 555-0147 · quotes@aldercourt.co · aldercourt.co</div>`;
+  if(state.preset==="field") return `<div style="display:flex;align-items:flex-start;gap:11px;padding-bottom:10px;border-bottom:2px solid var(--ink)">${logo}
+    <div style="flex:1"><div class="biz" style="font-family:${serif}">${t.biz}</div>${contact}</div>
+    <div style="text-align:right"><div class="dk">${t.kind}</div><div class="dno">${t.no}</div><div class="ddate">${t.date}</div></div></div>`;
+  if(state.preset==="modern") return `<div style="text-align:center"><div style="width:32px;height:32px;margin:0 auto 6px">${logoSVG(state.accent)}</div>
+    <div class="biz" style="font-family:${serif};font-size:16px">${t.biz}</div>
+    <div class="contact" style="margin-top:3px">(303) 555-0147 · quotes@aldercourt.co</div>
+    <div style="margin-top:10px;background:${state.accent};color:#fff;display:flex;justify-content:space-between;font-family:var(--mono);font-size:8px;letter-spacing:.14em;font-weight:600;padding:6px 10px"><span>${t.kind}</span><span>${t.no} · ${t.date}</span></div></div>`;
+  if(state.preset==="minimal") return `<div style="display:flex;align-items:center;gap:9px;padding-bottom:9px"><div style="width:20px;height:20px">${logoSVG(state.accent)}</div>
+    <div class="biz" style="font-family:${serif};font-size:13.5px;flex:1">${t.biz}</div>
+    <div class="dk" style="font-size:7.5px">${t.kind} · ${t.no}</div></div><div style="height:2px;background:${state.accent};margin-bottom:1px"></div>`;
+  return `<div style="margin:-19px -19px 0;background:linear-gradient(100deg,${state.accent},${shade(state.accent)});color:#fff;padding:15px 19px 13px;display:flex;align-items:center;gap:10px">
+    <div style="width:32px;height:32px;background:rgba(255,255,255,.16);border-radius:6px;display:flex;align-items:center;justify-content:center"><div style="width:22px;height:22px">${logoSVG('#fff')}</div></div>
+    <div style="flex:1"><div style="font-family:${serif};font-weight:700;font-size:15px">${t.biz}</div><div style="font-family:var(--mono);font-size:6.5px;letter-spacing:.08em;opacity:.85;margin-top:2px">YOUR UPLOADED LETTERHEAD · PDF</div></div>
+    <div style="text-align:right;font-family:var(--mono);font-size:7.5px;letter-spacing:.1em"><div>${t.kind}</div><div style="opacity:.85;margin-top:1px">${t.no}</div></div></div>
+    <div style="font-family:var(--mono);font-size:6px;letter-spacing:.14em;color:var(--ink-35);text-align:center;border:1px dashed var(--hair);margin:11px 0 2px;padding:4px">⌗ WALK DATA CONTENT AREA</div>`;
+}
+function render(){
+  const t=TRADES[state.trade];
+  document.documentElement.style.setProperty('--accent',state.accent);
+  document.getElementById('d-kindlabel').textContent=t.plan;
+  let body = `<div style="margin-top:7px">`;
+  if(state.sections.scope) body += `<div class="dsec" style="color:${state.accent}">SCOPE OF WORK</div>`;
+  body += t.rows.map(r=>`<div class="drow"><div class="tx"><div class="t">${r[0]}</div><div class="s">${r[1]}</div></div><div class="a">${r[2]}</div></div>`).join("");
+  body += `</div><div class="dtot"><span class="k">${t.totalK}</span><span class="v">${t.totalV}</span></div>`;
+  if(state.sections.materials) body += `<div class="dsec" style="color:${state.accent}">MATERIALS</div><div class="dextra">Mulch (dark hardwood) · boxwood ties · zone-2 irrigation head · edging steel.</div>`;
+  if(state.sections.terms) body += `<div class="dsec" style="color:${state.accent}">TERMS & DEPOSIT</div><div class="dextra">${t.terms}</div>`;
+  if(state.sections.signature) body += `<div class="dsign"><div class="sig">CLIENT SIGNATURE</div><div class="sig">DATE</div></div>`;
+  const wm = state.watermark ? `<div class="wm">PREPARED WITH JEFE</div>` : `<div class="wm" style="color:transparent">·</div>`;
+  document.getElementById('doc').innerHTML = letterhead(t)+body+wm;
+  document.getElementById('ed-logo').innerHTML = logoSVG(state.accent);
+}
+function renderSections(){
+  document.getElementById('ed-sections').innerHTML = SECTIONS.map(s=>{
+    const on = state.sections[s.key];
+    const tag = s.lock ? `<span class="lock">CORE</span>` : (s.custom?`<span class="custom-tag">CUSTOM</span>`:``);
+    return `<div class="srow"><span class="grip">⋮⋮</span><div class="nm"><div class="t">${s.t}</div><div class="s">${s.s}</div></div>${tag}
+      <div class="switch ${on?'':'off'}" data-sec="${s.key}" ${s.lock?'style="opacity:.5;pointer-events:none"':''}></div></div>`;
+  }).join("");
+  document.querySelectorAll('#ed-sections .switch').forEach(sw=>sw.onclick=()=>{
+    const k=sw.dataset.sec; state.sections[k]=!state.sections[k];
+    sw.classList.toggle('off',!state.sections[k]); render(); });
+}
+function bindSwitcher(id,key,after){document.querySelectorAll(`#${id} button`).forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(`#${id} button`).forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  state[key]=b.dataset[key];if(after)after();render();});}
+bindSwitcher('trade-sw','trade');
+bindSwitcher('preset-sw','preset',syncPresetChips);
+function syncPresetChips(){document.querySelectorAll('#ed-presets .chip').forEach(c=>c.classList.toggle('on',c.dataset.preset===state.preset));}
+document.querySelectorAll('#ed-presets .chip').forEach(c=>c.onclick=()=>{state.preset=c.dataset.preset;
+  document.querySelectorAll('#preset-sw button').forEach(b=>b.classList.toggle('active',b.dataset.preset===state.preset));syncPresetChips();render();});
+document.querySelectorAll('#ed-accent .sw').forEach(s=>s.onclick=()=>{state.accent=s.dataset.accent;
+  document.querySelectorAll('#ed-accent .sw').forEach(x=>x.classList.remove('on'));s.classList.add('on');render();});
+document.querySelectorAll('#ed-font .chip').forEach(c=>c.onclick=()=>{state.font=c.dataset.font;
+  document.querySelectorAll('#ed-font .chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');render();});
+document.getElementById('ed-wm').onclick=e=>{state.watermark=!state.watermark;e.currentTarget.classList.toggle('off',!state.watermark);render();};
+renderSections(); render();
+</script>
+</body>
+</html>
