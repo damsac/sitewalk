@@ -435,6 +435,10 @@ final class AppModel {
     /// when idle. `isBuildingDocument` stays as the any-build flag.
     var buildingKind: String?
 
+    /// The kind whose document is on the review screen — labels the review
+    /// header ("ESTIMATE" / "INVOICE" …) so the back arrow reads clearly.
+    var reviewKind: String?
+
     /// Build the finished document for an explicit `kind` (Plan 13 Stage-1 FFI
     /// `build_document`) and route to the existing ReviewView. Engine-keyed
     /// via `currentSessionId` (snapshotted at walk start, kept through review —
@@ -451,8 +455,13 @@ final class AppModel {
             do {
                 let doc = try await engine.buildDocument(sessionId: sessionId, kind: kind)
                 self.document = doc
+                self.reviewKind = kind
                 self.phase = .review
-                self.path = [.review]
+                // Push review ONTO the notes screen (not replace) so it has a
+                // real back to notes — the operator can pick a different document
+                // or re-read. Was `[.review]`, which dropped notes and left
+                // Send/Discard as the only exits (the reported dead-end).
+                self.path = [.notes, .review]
             } catch {
                 Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "document")
                     .error("buildDocument(\(kind, privacy: .public)) failed: \(error, privacy: .public)")
@@ -462,6 +471,16 @@ final class AppModel {
     }
 
     func buildPrimaryDocument() { buildDocument(kind: DocKinds.primaryKind(for: trade.key)) }
+
+    /// Review → back to notes (the review screen's back arrow). Keeps the
+    /// session and the built notes intact so the operator can build a different
+    /// document or re-read; the last document stays in memory until the next
+    /// build overwrites it. Pops just the review frame (board → notes).
+    func backToNotes() {
+        documentBuildError = nil
+        phase = .notes
+        path = [.notes]
+    }
 
     // MARK: Vocabulary (Plan 10) — the write half of the vocabulary → STT
     // biasing loop. Defensive: a thrown FFI error becomes a logged breadcrumb +
