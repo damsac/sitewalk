@@ -167,6 +167,49 @@ struct RevNote: View {
     }
 }
 
+// MARK: - Document structure basics (DocumentLayout — app-side, Terms + Signature)
+
+/// Operator-authored terms / payment boilerplate, rendered as a labelled block.
+struct TermsBlock: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("TERMS")
+                .font(Theme.F.mono(7.5, .semibold)).tracking(1.8)
+                .foregroundStyle(Theme.C.ink60)
+            Text(text)
+                .font(Theme.F.mono(8.5))
+                .tracking(0.2)
+                .foregroundStyle(Theme.C.ink)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 12)
+    }
+}
+
+/// Client acceptance — a signature line + a narrower date line.
+struct SignatureRow: View {
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 28) {
+            sigLine("CLIENT SIGNATURE")
+            sigLine("DATE").frame(width: 110)
+        }
+        .padding(.top, 20)
+    }
+
+    private func sigLine(_ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Theme.C.ink.frame(height: 1.5).padding(.top, 16)
+            Text(label)
+                .font(Theme.F.mono(7, .semibold)).tracking(1.0)
+                .foregroundStyle(Theme.C.ink60)
+        }
+    }
+}
+
 // MARK: - The full sheet
 
 struct DocumentSheet: View {

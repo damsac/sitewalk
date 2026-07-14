@@ -14,7 +14,7 @@ enum DocumentPDF {
     static func render(
         trade: TradeFixture, document: DocumentModel,
         biz: String? = nil, bizSub: String? = nil, docDate: String? = nil,
-        branding: Branding = .default
+        branding: Branding = .default, layout: DocumentLayout = .default
     ) -> URL? {
         let pageSize = CGSize(width: 612, height: 792) // US Letter @ 72 dpi
 
@@ -23,7 +23,7 @@ enum DocumentPDF {
             biz: biz ?? trade.biz,
             bizSub: bizSub ?? trade.bizSub,
             docDate: docDate ?? trade.docDate,
-            branding: branding
+            branding: branding, layout: layout
         )
         .frame(width: pageSize.width, height: pageSize.height)
 
@@ -54,6 +54,7 @@ private struct PDFPageView: View {
     let bizSub: String
     let docDate: String
     var branding: Branding = .default
+    var layout: DocumentLayout = .default
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -70,6 +71,13 @@ private struct PDFPageView: View {
             }
             TotalRow(key: document.totalKey, value: document.totalValue, gaps: document.gapCount)
                 .padding(.top, 2)
+            // Structure basics (DocumentLayout): operator terms + signature line.
+            if !layout.termsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                TermsBlock(text: layout.termsText)
+            }
+            if layout.showSignature {
+                SignatureRow()
+            }
             Spacer(minLength: 0)
             // Free-tier footer ("PREPARED WITH JEFE"); nil once removed (Pro).
             if let footer = branding.footerText {

@@ -61,6 +61,16 @@ struct ReviewView: View {
                         RevNote(text: doc.note)
                             .padding(.top, 10)
 
+                        // Document structure basics (DocumentLayout): operator
+                        // terms + a client signature line, set in the PAPER tab.
+                        if !model.documentLayout.termsText
+                            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            TermsBlock(text: model.documentLayout.termsText)
+                        }
+                        if model.documentLayout.showSignature {
+                            SignatureRow()
+                        }
+
                         // sac: functional-plain gallery + capture entry — yours to restyle.
                         photoGallery
                             .padding(.top, 14)

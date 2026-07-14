@@ -59,17 +59,26 @@ struct AppRoot: View {
         }
         // QA hooks for the Letterhead Studio (parallel to autoprofile): stamp a
         // sample branding so headless screenshots exercise a customized letterhead.
-        if args.contains("resetbrand=1") { Branding.save(.default) }
+        if args.contains("resetbrand=1") { Branding.save(.default); DocumentLayout.save(.default) }
         if args.contains("autobrand=1") {
             Branding.save(Branding(
                 presetKey: "field", accentHex: 0x3E6B35, fontKey: "sans",
                 phone: "(303) 555-0147", email: "quotes@aldercourt.co",
                 website: "aldercourt.co", showWatermark: true
             ))
+            DocumentLayout.save(DocumentLayout(
+                termsText: "50% deposit due to schedule · balance on completion · quote valid 30 days.",
+                showSignature: true
+            ))
         }
         // autoflow (screenshot/CI automation) must never be trapped behind
         // onboarding — dam review #190: fresh sim + autoflow=1 has to reach
         // the scripted walk, not stall on OnboardingFlow with no taps available.
+        // Same rule for Plan 15's vocab-seed card: it pops on the first notes
+        // screen and needs a SKIP/DONE tap, so mark it shown for autoflow runs.
+        if autoflowRounds > 0 {
+            UserDefaults.standard.set(true, forKey: NotesView.vocabCardShownKey)
+        }
         _needsOnboarding = State(initialValue: BusinessProfile.current == nil && autoflowRounds == 0)
         // Mode is a USER choice (persisted, board chip) unless a launch arg
         // forces it: wavwalk/live=1 → voice; demo=1/live=0 → demo; autoflow

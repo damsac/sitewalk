@@ -17,10 +17,12 @@ struct LetterheadStudioView: View {
     /// A freshly picked logo, held in memory until Save — bytes only hit disk
     /// on commit, so pick-then-cancel leaves no orphan file behind.
     @State private var pickedLogoData: Data?
+    @State private var draftLayout: DocumentLayout
 
     init(model: AppModel) {
         self.model = model
         _draft = State(initialValue: model.branding)
+        _draftLayout = State(initialValue: model.documentLayout)
         // The letterhead's business identity (name / city / license) is set at
         // onboarding but belongs here too — this is the one place to edit
         // everything ON the letterhead. Seed from the profile, or a blank one on
@@ -55,6 +57,7 @@ struct LetterheadStudioView: View {
                     accentSection
                     fontSection
                     contactSection
+                    documentSection
                     watermarkToggle
                 }
                 .padding(.bottom, 22)
@@ -126,6 +129,7 @@ struct LetterheadStudioView: View {
         let picked = pickedLogoData
         let previous = model.branding.logoFilename
         let profile = draftProfile
+        let layout = draftLayout
         Task {
             if let picked, let name = await Branding.saveLogo(picked) {
                 branding.logoFilename = name
@@ -139,6 +143,7 @@ struct LetterheadStudioView: View {
             if !profile.businessName.trimmingCharacters(in: .whitespaces).isEmpty {
                 model.saveProfile(profile)
             }
+            model.saveDocumentLayout(layout)
             dismiss()
         }
     }
@@ -159,6 +164,12 @@ struct LetterheadStudioView: View {
             ForEach(previewTrade.rows.prefix(2)) { DocRowView(row: $0) }
             TotalRow(key: previewTrade.totalKey, value: previewTrade.totalValue, gaps: 0)
                 .padding(.top, 2)
+            if !draftLayout.termsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                TermsBlock(text: draftLayout.termsText)
+            }
+            if draftLayout.showSignature {
+                SignatureRow()
+            }
             if let footer = draft.footerText {
                 Text(footer)
                     .font(Theme.F.mono(7)).tracking(1.6)
@@ -342,6 +353,41 @@ struct LetterheadStudioView: View {
         }
         .padding(.horizontal, 11).padding(.vertical, 10)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+    }
+
+    // Document structure basics (app-side): operator terms + a signature line.
+    // Richer, LLM-filled structure is dam's core DocumentSchema seam (§7.2, v2).
+    private var documentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionLabel("DOCUMENT")
+            VStack(alignment: .leading, spacing: 5) {
+                Text("TERMS / PAYMENT")
+                    .font(Theme.F.mono(7.5, .semibold)).tracking(1.0)
+                    .foregroundStyle(Theme.C.ink35)
+                TextField("50% deposit to schedule · balance on completion · quote valid 30 days",
+                          text: $draftLayout.termsText, axis: .vertical)
+                    .font(Theme.F.cond(13, .medium))
+                    .lineLimit(3...6)
+                    .textInputAutocapitalization(.sentences)
+                    .padding(.horizontal, 11).padding(.vertical, 10)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+            }
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Client signature line")
+                        .font(Theme.F.cond(13, .semibold))
+                    Text("A SIGN + DATE LINE AT THE FOOT OF THE DOCUMENT")
+                        .font(Theme.F.mono(7.5)).tracking(0.4)
+                        .foregroundStyle(Theme.C.ink60)
+                }
+                Spacer()
+                Toggle("", isOn: $draftLayout.showSignature).labelsHidden().tint(Theme.C.orange)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .background(Theme.C.sheet)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.C.hairline, lineWidth: 1.5))
+        }
+        .padding(.horizontal, Theme.S.screenPad).padding(.top, 18)
     }
 
     private var watermarkToggle: some View {

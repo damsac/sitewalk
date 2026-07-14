@@ -41,6 +41,12 @@ final class AppModel {
     /// STYLE half). `.current` reads the stored record or falls back to stock.
     var branding: Branding = .current
 
+    /// App-side document STRUCTURE basics (terms / signature) — the "B-basics"
+    /// (design doc §8) rendered on every document ahead of dam's core schema
+    /// seam (§7.2). Edited in the Letterhead Studio, committed via
+    /// `saveDocumentLayout`. Separate from `branding` (style) on purpose.
+    var documentLayout: DocumentLayout = .current
+
     /// One board row per walk finished THIS SESSION (profile mode replaces
     /// the fixture jobs list with this honest log). In-memory on purpose —
     /// walk history is a core concern; this is the interim surface.
@@ -647,7 +653,7 @@ final class AppModel {
         shareURL = DocumentPDF.render(
             trade: trade, document: doc,
             biz: letterheadBiz, bizSub: letterheadSub, docDate: letterheadDate,
-            branding: branding
+            branding: branding, layout: documentLayout
         )
     }
 
@@ -664,6 +670,13 @@ final class AppModel {
     func saveProfile(_ updated: BusinessProfile) {
         BusinessProfile.save(updated)
         reloadProfile()
+    }
+
+    /// Persist the document structure basics (terms / signature) edited in the
+    /// Letterhead Studio; the review sheet + every future PDF read them.
+    func saveDocumentLayout(_ updated: DocumentLayout) {
+        documentLayout = updated
+        DocumentLayout.save(updated)
     }
 
     func completeSend() {
