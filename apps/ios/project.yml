@@ -39,7 +39,6 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: "Sitewalk records your walk-and-talk so it can turn it into paperwork."
-        NSSpeechRecognitionUsageDescription: "Sitewalk transcribes your walk on-device to build your document."
         NSCameraUsageDescription: "Photos you take during a walk pin to the item you're describing and land in the finished document."
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

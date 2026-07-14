@@ -419,7 +419,7 @@ final class AppModel {
         Task {
             // Flush before finish (issue #155 / CANON: flush over speed —
             // the last words of a walk are often the price). `stop()` lets a
-            // final speech result land (grace-bounded in SpeechSource); the
+            // final speech result land (grace-bounded by the source); the
             // pump ends when the source's stream finishes, so awaiting it
             // guarantees every flushed chunk reached engine.append first.
             _ = await pumpTask?.value

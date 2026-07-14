@@ -16,8 +16,8 @@ protocol PCMAudioSource: AnyObject {
 }
 
 // Live mic capture for the STT-in-Rust path (Plan 08 D1). The audio session,
-// permissions, and interruption handling stay in Swift (exactly as SpeechSource
-// does today); an AVAudioEngine tap + AVAudioConverter down-mix/resample to
+// permissions, and interruption handling stay in Swift (exactly as the old
+// SpeechSource fallback did); an AVAudioEngine tap + AVAudioConverter down-mix/resample to
 // 16 kHz mono f32 (what whisper wants — SttConfig.sample_rate), and the PCM is
 // pushed across FFI OFF the render thread. Rust never touches the mic.
 //
@@ -92,8 +92,8 @@ final class AudioCaptureSource: PCMAudioSource {
         let hwFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else { return }
 
-        // Capture only Sendable locals in the render-thread closure (mirrors
-        // SpeechSource) so nothing hops the @MainActor boundary on the hot path.
+        // Capture only Sendable locals in the render-thread closure so nothing
+        // hops the @MainActor boundary on the hot path.
         let target = targetFormat
         let deliver = deliveryQueue
         let push = pushSamples
