@@ -527,6 +527,43 @@ final class AppModel {
         }
     }
 
+    /// Plan 15: apply the vocab card's DONE — the confirmed chips go through
+    /// `seedVocabulary` (one batch, idempotent per pack), then each free-form
+    /// term through the existing `addVocabularyTerm` CRUD. The CRUD THROWS at
+    /// Full/Empty/TooLong, so a naive loop would abort the whole batch on the
+    /// first bad term — instead it is per-term catch-and-continue with a
+    /// surfaced skipped count. Returns a confirmation line for the card
+    /// ("Added N" / "Added N, skipped M"). // sac: confirmation copy is yours.
+    func applyVocabSeed(pack: VocabPack, confirmedChips: [String], freeform: [String]) -> String {
+        var addedCount = 0
+        var skippedCount = 0
+        do {
+            let report = try engine.seedVocabulary(
+                trade: pack.trade, version: pack.version, terms: confirmedChips
+            )
+            vocabulary = report.terms
+            addedCount += Int(report.added)
+            skippedCount += Int(report.skippedOverBudget + report.skippedFull)
+        } catch {
+            vocabularyLogger.error("seedVocabulary failed: \(error, privacy: .public)")
+            skippedCount += confirmedChips.count
+        }
+        for term in freeform {
+            do {
+                vocabulary = try engine.addVocabularyTerm(term)
+                addedCount += 1
+            } catch {
+                // Per-term catch-and-continue (Plan 15 Task 4): one over-cap or
+                // bad term must not abort the rest of the batch.
+                vocabularyLogger.error("seed free-form add failed: \(error, privacy: .public)")
+                skippedCount += 1
+            }
+        }
+        return skippedCount == 0
+            ? "Added \(addedCount) terms"
+            : "Added \(addedCount), skipped \(skippedCount)"
+    }
+
     var elapsedLabel: String {
         let seconds = Int(Date().timeIntervalSince(walkStart))
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)

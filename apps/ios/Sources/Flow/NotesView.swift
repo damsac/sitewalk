@@ -16,6 +16,17 @@ struct NotesView: View {
     @State private var showTranscript = false
     @State private var exportURL: URL?
 
+    // Plan 15 D9-15: the vocab seed card shows ONCE, on the FIRST notes-screen
+    // appearance — i.e. right after the user's first real walk, when they have
+    // concrete context for "what did the mic get wrong?" (the CANON "walk
+    // before the vocab card" intent; no onboarding demo-walk step exists).
+    // The UserDefaults flag is a UX mirror only — CORE stays authoritative for
+    // idempotency (a shown-but-skipped card leaves core cold; a re-seed of an
+    // applied pack no-ops on the `_seeds` marker). // sac: exact placement in
+    // the flow + presentation style (sheet vs inline card) are yours.
+    @State private var vocabPack: VocabPack?
+    static let vocabCardShownKey = "onboardingVocabCardShown"
+
     private var emptyNotes: NotesModel { NotesModel(summary: "", items: [], docKind: "report", queued: false) }
     private var notes: NotesModel { model.notes ?? emptyNotes }
     private var kinds: [String] { DocKinds.legalKinds(for: model.trade.key) }
@@ -71,6 +82,17 @@ struct NotesView: View {
         .navigationBarBackButtonHidden(true)
         .sheet(isPresented: Binding(get: { exportURL != nil }, set: { if !$0 { exportURL = nil } })) {
             if let url = exportURL { ShareSheet(url: url) { _ in exportURL = nil } }
+        }
+        .onAppear {
+            guard !UserDefaults.standard.bool(forKey: Self.vocabCardShownKey),
+                  let pack = VocabPack.bundled(for: model.trade.key) else { return }
+            UserDefaults.standard.set(true, forKey: Self.vocabCardShownKey) // show once, ever
+            vocabPack = pack
+        }
+        .sheet(isPresented: Binding(get: { vocabPack != nil }, set: { if !$0 { vocabPack = nil } })) {
+            if let pack = vocabPack {
+                VocabSeedCard(model: model, pack: pack) { vocabPack = nil }
+            }
         }
     }
 

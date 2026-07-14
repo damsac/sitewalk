@@ -102,6 +102,43 @@ final class DemoWalkEngine: WalkEngine {
         return vocabulary
     }
 
+    /// Applied seed-pack markers, keyed "trade:version" — the demo mirror of
+    /// the Rust `_seeds` memory section (Plan 15 D4-15).
+    private var seededPacks: Set<String> = []
+    /// Per-pass seed budget. // keep in sync with ffi SEED_MAX (60)
+    private static let seedMax = 60
+
+    /// In-memory mirror of the Rust `seed_vocabulary` semantics (Plan 15) —
+    /// normalize + case-insensitive dedup + a 60-term per-pass budget + the
+    /// 100-cap backstop + a "trade:version" idempotency marker — enough to
+    /// drive the vocab card with no backend. The REAL semantics (and the
+    /// WE-A..WE-E worked examples) live in crates/ffi/src/vocabulary.rs.
+    func seedVocabulary(trade: String, version: UInt32, terms: [String]) -> SeedReport {
+        let key = "\(trade):\(version)"
+        guard !seededPacks.contains(key) else {
+            return SeedReport(added: 0, duplicates: 0, skippedOverBudget: 0,
+                              skippedFull: 0, alreadySeeded: true, terms: vocabulary)
+        }
+        var added: UInt32 = 0, duplicates: UInt32 = 0
+        var skippedOverBudget: UInt32 = 0, skippedFull: UInt32 = 0
+        for raw in terms {
+            if added == UInt32(Self.seedMax) { skippedOverBudget += 1; continue }
+            let normalized = normalize(raw)
+            guard !normalized.isEmpty else { continue } // pre-gated by VocabPackTests
+            if vocabulary.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+                duplicates += 1
+                continue
+            }
+            if vocabulary.count >= Self.maxVocabularyTerms { skippedFull += 1; continue }
+            vocabulary.append(normalized)
+            added += 1
+        }
+        seededPacks.insert(key) // applied even when partial (D4-15)
+        return SeedReport(added: added, duplicates: duplicates,
+                          skippedOverBudget: skippedOverBudget, skippedFull: skippedFull,
+                          alreadySeeded: false, terms: vocabulary)
+    }
+
     // MARK: Photos (Plan 11) — in-memory demo conformance.
 
     func attachPhoto(sessionId: String, itemId: String?, filename: String, capturedAt: UInt64?) -> PhotoModel {

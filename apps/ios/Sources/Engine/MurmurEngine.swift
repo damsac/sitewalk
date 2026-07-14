@@ -233,6 +233,21 @@ final class MurmurEngine: WalkEngine {
         try engine.removeVocabularyTerm(term: term)
     }
 
+    // Plan 15: forward the confirmed pack to the Rust seeding funnel and map
+    // the uniffi record into the app-side mirror (the unqualified `SeedReport`
+    // resolves to THIS module's struct — same-module types shadow imports).
+    func seedVocabulary(trade: String, version: UInt32, terms: [String]) throws -> SeedReport {
+        let report = try engine.seedVocabulary(trade: trade, version: version, terms: terms)
+        return SeedReport(
+            added: report.added,
+            duplicates: report.duplicates,
+            skippedOverBudget: report.skippedOverBudget,
+            skippedFull: report.skippedFull,
+            alreadySeeded: report.alreadySeeded,
+            terms: report.terms
+        )
+    }
+
     // MARK: - Photos (Plan 11): engine-keyed CRUD (not WalkSession-scoped —
     // photos are attachable during the walk AND at review time, when there is
     // no live WalkSession). `session` gives the active walk's id via the

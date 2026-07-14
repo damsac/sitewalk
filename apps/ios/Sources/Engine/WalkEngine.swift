@@ -111,6 +111,20 @@ struct NotesModel {
     var notes: [NotesEntryFixture] = []
 }
 
+/// App-facing mirror of the uniffi `SeedReport` record (Plan 15): the exact
+/// outcome of one `seedVocabulary` pass. Declared app-side so the DEMO build
+/// compiles without MurmurCoreFFI (`#if canImport` seam); `MurmurEngine` maps
+/// the FFI record into this 1:1. // sac: the card UI reads `terms` (the
+/// RESULTING vocabulary, insertion order) to refresh in one round-trip.
+struct SeedReport: Equatable {
+    var added: UInt32
+    var duplicates: UInt32
+    var skippedOverBudget: UInt32
+    var skippedFull: UInt32
+    var alreadySeeded: Bool
+    var terms: [String]
+}
+
 @MainActor
 protocol WalkEngine: AnyObject {
     /// Start a session for a trade and return THAT SESSION's event stream.
@@ -169,6 +183,15 @@ protocol WalkEngine: AnyObject {
     func listVocabulary() throws -> [String]
     func addVocabularyTerm(_ term: String) throws -> [String]
     func removeVocabularyTerm(_ term: String) throws -> [String]
+
+    /// Seed the vocabulary from a user-confirmed trade pack (Plan 15). A batch
+    /// write over the SAME funnel as `addVocabularyTerm`, idempotent per
+    /// `"trade:version"` — a repeat call is a no-op with `alreadySeeded`, so a
+    /// term the user deleted is never resurrected by re-seeding. Throwing: the
+    /// real FFI call is fallible (poisoned lock, persistence); a FULL
+    /// vocabulary is NOT an error — it is tallied in `skippedFull` (R7).
+    /// `DemoWalkEngine` conforms with an in-memory mirror of the semantics.
+    func seedVocabulary(trade: String, version: UInt32, terms: [String]) throws -> SeedReport
 
     // Photo attachments (Plan 11). Bytes are the SHELL's responsibility: write
     // the file into <Documents>/photos/ FIRST, then call attachPhoto(...) with

@@ -270,7 +270,10 @@ struct OnboardingFlow: View {
 
             Spacer()
 
-            // TODO(#181): the vocabulary-seeding step slots in here once that design lands.
+            // Vocabulary seeding deliberately does NOT live here (Plan 15
+            // D9-15): the vocab card shows on the FIRST notes-screen
+            // appearance — after the user's first real walk — see
+            // NotesView.vocabCardShownKey / VocabSeedCard.swift.
 
             // Only the DENIED case still needs a bar — it's a real problem the
             // operator has to act on. Grant is confirmed inline above.
