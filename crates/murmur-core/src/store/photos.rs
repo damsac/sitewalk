@@ -194,7 +194,7 @@ mod tests {
     fn migrates_to_v5() {
         let s = Store::open_in_memory("device-a").unwrap();
         let v: i64 = s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 5, "photos migration bumps user_version to 5");
+        assert!(v >= 5, "photos migration bumps user_version to at least 5 (v6 added items.right_text, Plan 16)");
     }
 
     #[test]

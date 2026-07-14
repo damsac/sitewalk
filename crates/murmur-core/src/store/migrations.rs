@@ -140,6 +140,15 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     CREATE UNIQUE INDEX idx_photos_filename_live ON photos(filename) WHERE deleted_at IS NULL;
     CREATE INDEX idx_photos_session ON photos(session_id) WHERE deleted_at IS NULL;
     "#,
+    // v6: items.right_text (Plan 16) — the quantity/unit string ("3 CU YD",
+    // "× 4"). Named right_text, NOT right: RIGHT is a SQL keyword (SQLite
+    // ≥3.39 RIGHT JOIN), a reserved-word footgun in a bare SELECT column
+    // list; the domain field stays `right` (matches BoardItem.right).
+    // Quantity, never price — pricing stays document-only (keeper D-#2).
+    // ADD COLUMN with NOT NULL requires the DEFAULT (the v2 precedent).
+    r#"
+    ALTER TABLE items ADD COLUMN right_text TEXT NOT NULL DEFAULT '';
+    "#,
 ];
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), CoreError> {

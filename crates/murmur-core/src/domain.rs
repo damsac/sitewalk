@@ -157,6 +157,12 @@ pub struct CapturedItem {
     pub session_id: String,
     pub kind: String,
     pub text: String,
+    /// Quantity/unit display string ("3 CU YD", "× 4") — NOT price (pricing
+    /// stays a document-build concern, keeper D-#2). Free-form by design
+    /// (R6: coercing it would fabricate). Defaults `""` = "no quantity".
+    /// Backed by the `items.right_text` column (Plan 16; `RIGHT` is a SQL
+    /// keyword, hence the column rename — the field matches `BoardItem.right`).
+    pub right: String,
     pub source: ItemSource,
     pub done: bool,
     pub created_at: u64,
