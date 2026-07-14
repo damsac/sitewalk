@@ -612,6 +612,18 @@ public protocol MurmurEngineProtocol : AnyObject {
     func retryFailedSessions() async throws  -> UInt32
     
     /**
+     * Seed the vocabulary from a user-confirmed trade pack (Plan 15). A thin
+     * batch orchestrator over the EXISTING `add_vocabulary_term(_, _, Stated)`
+     * funnel (D1-15 — no new write path: normalize/dedup/word-guard/100-cap
+     * all inherited). Idempotent per `"{trade}:{version}"` via the `_seeds`
+     * marker (D4-15): a repeat call short-circuits with `already_seeded` and
+     * does NOT save, so a user-deleted seed is never resurrected. Bounded by
+     * `SEED_MAX` per pass (D2-15); a `Full` funnel refusal is tallied, never
+     * thrown (R7). Trade change is a union — nothing is removed (D6-15).
+     */
+    func seedVocabulary(trade: String, version: UInt32, terms: [String]) throws  -> SeedReport
+    
+    /**
      * App-open zombie sweep (carry-note, Plan 04): a `Recording` session left
      * behind by a crash or force-quit mid-walk can never resume — there is no
      * live `WalkSession`/STT pump for it after relaunch, `MurmurEngine::new`
@@ -855,6 +867,26 @@ open func retryFailedSessions()async throws  -> UInt32 {
             liftFunc: FfiConverterUInt32.lift,
             errorHandler: FfiConverterTypeEngineError.lift
         )
+}
+    
+    /**
+     * Seed the vocabulary from a user-confirmed trade pack (Plan 15). A thin
+     * batch orchestrator over the EXISTING `add_vocabulary_term(_, _, Stated)`
+     * funnel (D1-15 — no new write path: normalize/dedup/word-guard/100-cap
+     * all inherited). Idempotent per `"{trade}:{version}"` via the `_seeds`
+     * marker (D4-15): a repeat call short-circuits with `already_seeded` and
+     * does NOT save, so a user-deleted seed is never resurrected. Bounded by
+     * `SEED_MAX` per pass (D2-15); a `Full` funnel refusal is tallied, never
+     * thrown (R7). Trade change is a union — nothing is removed (D6-15).
+     */
+open func seedVocabulary(trade: String, version: UInt32, terms: [String])throws  -> SeedReport {
+    return try  FfiConverterTypeSeedReport.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_seed_vocabulary(self.uniffiClonePointer(),
+        FfiConverterString.lower(trade),
+        FfiConverterUInt32.lower(version),
+        FfiConverterSequenceString.lower(terms),$0
+    )
+})
 }
     
     /**
@@ -2305,6 +2337,109 @@ public func FfiConverterTypePhotoRef_lower(_ value: PhotoRef) -> RustBuffer {
 
 
 /**
+ * The exact outcome of one [`MurmurEngine::seed_vocabulary`] pass (Plan 15).
+ * `terms` is the RESULTING vocabulary (insertion order) so the onboarding
+ * card updates in one round-trip, mirroring the CRUD methods.
+ */
+public struct SeedReport {
+    public var added: UInt32
+    public var duplicates: UInt32
+    public var skippedOverBudget: UInt32
+    public var skippedFull: UInt32
+    public var alreadySeeded: Bool
+    public var terms: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(added: UInt32, duplicates: UInt32, skippedOverBudget: UInt32, skippedFull: UInt32, alreadySeeded: Bool, terms: [String]) {
+        self.added = added
+        self.duplicates = duplicates
+        self.skippedOverBudget = skippedOverBudget
+        self.skippedFull = skippedFull
+        self.alreadySeeded = alreadySeeded
+        self.terms = terms
+    }
+}
+
+
+
+extension SeedReport: Equatable, Hashable {
+    public static func ==(lhs: SeedReport, rhs: SeedReport) -> Bool {
+        if lhs.added != rhs.added {
+            return false
+        }
+        if lhs.duplicates != rhs.duplicates {
+            return false
+        }
+        if lhs.skippedOverBudget != rhs.skippedOverBudget {
+            return false
+        }
+        if lhs.skippedFull != rhs.skippedFull {
+            return false
+        }
+        if lhs.alreadySeeded != rhs.alreadySeeded {
+            return false
+        }
+        if lhs.terms != rhs.terms {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(added)
+        hasher.combine(duplicates)
+        hasher.combine(skippedOverBudget)
+        hasher.combine(skippedFull)
+        hasher.combine(alreadySeeded)
+        hasher.combine(terms)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSeedReport: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SeedReport {
+        return
+            try SeedReport(
+                added: FfiConverterUInt32.read(from: &buf), 
+                duplicates: FfiConverterUInt32.read(from: &buf), 
+                skippedOverBudget: FfiConverterUInt32.read(from: &buf), 
+                skippedFull: FfiConverterUInt32.read(from: &buf), 
+                alreadySeeded: FfiConverterBool.read(from: &buf), 
+                terms: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SeedReport, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.added, into: &buf)
+        FfiConverterUInt32.write(value.duplicates, into: &buf)
+        FfiConverterUInt32.write(value.skippedOverBudget, into: &buf)
+        FfiConverterUInt32.write(value.skippedFull, into: &buf)
+        FfiConverterBool.write(value.alreadySeeded, into: &buf)
+        FfiConverterSequenceString.write(value.terms, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSeedReport_lift(_ buf: RustBuffer) throws -> SeedReport {
+    return try FfiConverterTypeSeedReport.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSeedReport_lower(_ value: SeedReport) -> RustBuffer {
+    return FfiConverterTypeSeedReport.lower(value)
+}
+
+
+/**
  * Fallible-path errors that cross the FFI boundary as a thrown error rather
  * than a panic (Plan 07 CANON: no panics across FFI). `flat_error` means the
  * Swift side receives the variant plus its `Display` message — no api key is
@@ -2927,6 +3062,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_retry_failed_sessions() != 46346) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_seed_vocabulary() != 18954) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_sweep_zombie_sessions() != 29924) {
