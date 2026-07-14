@@ -10,6 +10,7 @@ pub mod document;
 pub mod document_build;
 pub mod engine;
 pub mod events;
+pub mod items;
 pub mod notes;
 pub mod photos;
 pub mod session;

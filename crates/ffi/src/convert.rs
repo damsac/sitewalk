@@ -9,8 +9,9 @@ use crate::document::{DocLine, DocumentPayload};
 use crate::events::BoardItem;
 use crate::notes::{NotesBucket, NotesEntry};
 
-/// `CapturedItem` -> `BoardItem`. `right` has no core equivalent yet (board
-/// chrome text the Swift layer owns) and stays empty. `photo_count` is looked
+/// `CapturedItem` -> `BoardItem`. `right` projects the core quantity/unit
+/// string (`items.right_text`, Plan 16 D2-16) — `""` for un-edited items,
+/// exactly the pre-Plan-16 stub behavior. `photo_count` is looked
 /// up from a batched per-session map (`Store::count_live_photos_by_item_for_session`,
 /// the photo_count fast-follow) — a missing key (no live photos attached to
 /// this item) defaults to `0`. Callers load the map ONCE per snapshot, never
@@ -20,7 +21,7 @@ pub fn board_item(item: &CapturedItem, photo_counts: &HashMap<String, u32>) -> B
         id: item.id.clone(),
         kind: item.kind.clone(),
         text: item.text.clone(),
-        right: String::new(),
+        right: item.right.clone(),
         photo_count: photo_counts.get(&item.id).copied().unwrap_or(0),
     }
 }
@@ -100,7 +101,13 @@ mod tests {
         assert_eq!(board.id, item.id);
         assert_eq!(board.kind, "todo");
         assert_eq!(board.text, "order lumber");
+        assert_eq!(board.right, "", "an un-edited item projects the empty core right");
         assert_eq!(board.photo_count, 0, "no entry in the counts map defaults to 0");
+
+        // Plan 16 D2-16: `right` now projects the core quantity string.
+        store.update_item(&item.id, None, None, Some("3 CU YD")).unwrap();
+        let item = store.get_item(&item.id).unwrap();
+        assert_eq!(board_item(&item, &HashMap::new()).right, "3 CU YD");
     }
 
     #[test]

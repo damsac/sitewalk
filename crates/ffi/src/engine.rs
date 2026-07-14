@@ -50,6 +50,13 @@ pub enum EngineError {
     /// unpriced document instead (R7); this variant is validation/store only.
     #[error("document build error: {0}")]
     Document(String),
+    /// An item CRUD call (`update_item`/`add_item`/`remove_item`, Plan 16)
+    /// failed: a missing/tombstoned item, an unknown `kind`, empty text, a
+    /// non-`Processed` session (D3-16 — edits are review-surface only), a
+    /// poisoned lock, or a store error. Recoverable — surface, don't crash.
+    /// Contains store/validation strings only (never an api key).
+    #[error("item error: {0}")]
+    Item(String),
 }
 
 /// Config crossing the FFI boundary. `api_key` is an opaque `String` from the
