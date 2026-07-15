@@ -10,26 +10,41 @@ Updated when priorities shift. Either person can propose changes via PR.
 
 | Work | Owner | Status |
 |------|-------|--------|
-| Review queue: sac's 4 open PRs — #204 (bucket rendering), #207 (paperwork-customization design), #208 (back-arrow), #209 (Letterhead Studio) | dam | open, next up |
-| Real-mic device voice walk (`live=1`) + on-device tuning: voiceproc A/B, vad_rms ~0.01, quiet-flush validation (final-review notes A/B) | dam | Plan 08 FULLY merged — device session is the gate, still pending |
+| **Tap-to-fix edit UI** on the notes screen — Plan 16's item CRUD seam is live (`updateItem`/`addItem`/`removeItem`, contract in WalkEngine.swift) | sac | unblocked 2026-07-14, next up |
+| **Vocab pack curation** — Plan 15's bundled JSONs are placeholders (landscape/property/inspection); `VocabPackTests` schema-gates | sac | unblocked |
+| **Field-feedback issues #220–#228** (dam's build-44 beta feedback, triaged + ground-truthed) — #220 dark-mode text / #221 row labels / #224 gallery UX marked sac; #222 demo work_order, #223 walk-reopen seam, #228 whisper warm-up marked dam/core | both | filed 2026-07-15, sequencing open |
+| Real-mic device tuning session: voiceproc A/B, vad_rms, small.en RTF, Plan 09 Task 7 SNR rerun | dam | still pending a dedicated device session |
 | Issue #155 — PR #1 review follow-ups (4 state bugs + seam hygiene) | sac | open (several now also guarded core-side by 07-carry) |
 
 ## Up Next (sequenced)
 
-1. sac's PR queue — thinking-first review, in order: #204 (completes the Plan 14 loop), #207 (design, no build yet), #208, #209.
-2. Vocabulary seeding implementation (D9, joint round closed 2026-07-10 — hybrid trigger, bundled JSON packs, type-only interview, SEED_MAX≈60) — queued after Plan 13/14, now unblocked.
-3. Cleanup sweep: `partial_document` dead code (superseded by notes-first's on-demand `build_document`), `NSSpeechRecognition` Info.plist key (stale from the pre-whisper era), the Era-I hook, `AppModel` split (grown large across photos/vocab/notes surfaces).
-4. Recover-walk UI (future) — todo-leak named deliberately in #185; crash-orphaned sessions resolve to `Failed`, then retry on next app-open per #206, but there's still no UI surfacing an in-progress recovery.
-5. ASC listing rename to **Jefe** (dam/sac shared App Store Connect access) — supersedes the earlier Sitewalk rename item.
-6. PPQ-vs-Anthropic-direct billing decision — TestFlight now bills Anthropic directly since #205's key/host fix; is that the intended long-term path or does it re-route to PPQ.
-7. **Accuracy hardening** (Plan 09): thread 1 (word-level timestamps) **landed** — `token_timestamps` → per-word timing → word-anchored coarse-seam drop, degrading to segment-coarse when absent/mismatched; thread 2 (live-prompt pins) **landed as scaffolding** — golden assembled-prompt snapshot + grader-over-live-board, hermetic. The real-API live-grading extension (non-circular F0.5 movement) is **flagged/deferred** to the optimization loop (item 8). The SNR sweep rerun (`--token-timestamps`, WER/RTF delta + the `word_timestamps: true` default verdict) is **device-gated for dam** (Task 7).
-8. **Prompt-optimization loop** on the 05b eval suite (rank on F0.5, gate on recall).
+1. **Plan 17 — corrections that teach**: item-edit diff → vocabulary *suggestion* (never auto-add) + `record_correction`'s first production activation, landing TOGETHER so the signal carries its content (the Plan 16 adversarial review showed a bare counter could reinforce the misheard term). **Deliberately sequenced AFTER sac's edit UI ships** — real field corrections inform the suggest-card UX (dam confirmed 2026-07-14).
+2. **Walk-reopen read seam** (#223): `listSessions`/`loadNotes` over FFI + board affordance — notes are durable (Plan 13), the data is all there; also subsumes the old recover-walk UI item.
+3. **Whisper warm-up** (#228): stop constructing a fresh WhisperContext per walk; app-open or first-idle warm.
+4. **Photos epic** (#224, layered): post-walk visibility → select-into-paperwork → markup editor → gallery. Persistence (Plan 11 D4) already works.
+5. Paperwork Structure v2 (sac's #207 design + dam's §7 answers): core-owned `DocumentSchema` + doc-number minting for custom types; LLM-filled custom fields. Gated on sac folding the answers into a build plan.
+6. Small hardening pile: cross-session gate assert on item mutations, exact `user_version == 6` pin, logo replace-failed-write edge, `phase`/`path` consolidation, `AppModel` split.
+7. **Prompt-optimization loop** on the 05b eval suite (rank on F0.5, gate on recall) + the real-API live-grading extension (Plan 09 deferred thread).
 
 ### Vocabulary → STT biasing loop (Plan 10)
 
 **Write half LANDED** — the differentiator's data path is now closable end-to-end. A vocabulary management surface on `harness::Memory` (`VOCABULARY_SECTION`/`MAX_VOCABULARY_TERMS`(100)/`MAX_VOCABULARY_TERM_WORDS`(6) constants, `VocabAdd`, symmetric-normalized case-insensitive dedup, write-time reject-when-full cap, a `Stated` provenance floor so user terms outlive `Inferred` ones under cap pressure); FFI CRUD on `MurmurEngine` (`list`/`add`/`remove_vocabulary_term`, throwing/panic-free, lock-then-save, `EngineError::Memory`); a functional-plain iOS editor wired through `WalkEngine` (**visuals are sac's** — `// sac:` handoff markers throughout); and a hermetic e2e proving add-via-FFI → `collect_bias_terms` → `build_bias_prompt`. Reflection carries one preserve-vocabulary prompt sentence (no new machinery). Real recall-lift on device is spike-harness-measured, **flagged for dam** (not CI). Plan: `docs/plans/2026-07-05-rust-core-10-vocabulary-loop.md`.
 
 **Still open:** the **onboarding interview** that SEEDS vocabulary (D9, joint dam+sac) — the `add_vocabulary_term` path is ready to receive its output; **auto-harvest** of proper nouns from live extraction (D9 seam — the `source` param takes `Inferred`, detection not built); a **protected-vocabulary tier** (D3, dam) — v1 ships the `Stated` floor + reflection prompt line and measures on device before escalating (`Corrected` overload vs. a new `Pinned` rank vs. vocabulary-aware `prune_stale`).
+
+## Done 2026-07-13/15 (the clearing)
+
+**sac rounds 1+2 merged (6 PRs)** — #207 paperwork design (+dam §7 answers on the PR), #204 bucket rendering (Plan 14 loop closed), #208 back-arrow, #209 Letterhead Studio, #214 document basics (TERMS + signature, `DocumentLayout`), #215 editable-notes design (+dam §4 answers; became Plan 16). Builds 36–40.
+
+**Plan 15 — vocabulary seeding (#212/#213, build 39)** — per-trade packs → vocab store → both STT bias and LLM context; deletion-durable pack markers that survive reflection (the adversarial review's blocker catch: reflection would have erased the marker and resurrected deleted seeds — fixed with a fifth internal-section exclusion site pre-code).
+
+**Plan 16 — editable items (#216/#217, build 41)** — the item CRUD seam from #215: update/add/remove in core so corrections reach every rebuilt document; migration v6 `right_text` (quantity); Processed-only gating; `record_correction` deferred whole to Plan 17 (review-driven product change, dam-confirmed). sac's tap-to-fix unblocked.
+
+**Cleanups** — #211 sweep (logo leak, dup ForEach ids, dead BuildView, dead partial_document fn), #218 SpeechSource + plist key deleted (dam's ruling; whisper is the only STT). Builds 38, 42.
+
+**Cert-cap incident + fleet fix (#219, build 44)** — the shared Apple team hit the dev-cert cap (automatic archive signing mints a cert per CI run × three damsac apps). Jefe's archive flipped to manual signing (dry-run-gated before merge); fleet rule recorded: *the archive step mints nothing*, two blessed implementations (see `~/athanor/forge/factory-apps/release-pipeline.md` gotcha e).
+
+**Field-feedback loop live** — dam's 9 beta submissions (build 44) pulled via the ASC API, ground-truthed against code, filed as #220–#228 with screenshots on the `feedback-assets` orphan branch. dam's standing-items list cleared to empty (ASC rename done; Anthropic-direct billing confirmed; factory secrets seeded).
 
 ## Done 2026-07-12/13
 
