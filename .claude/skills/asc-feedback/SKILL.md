@@ -11,14 +11,19 @@ business.
 
 ## Prerequisites
 
-A team ASC API key (App Manager role suffices) seeded at `~/secrets/apple/`:
+An App Store Connect API key for the team (App Manager role suffices). To create
+one: App Store Connect → Users and Access → Integrations → App Store Connect API
+→ Team Keys → Generate API Key. Download the `.p8` (one-time download) and note
+the Key ID and the Issuer ID shown on that page.
 
-- `asc_key_id` — the key id (10 chars)
-- `asc_issuer_id` — the issuer UUID
-- `AuthKey.p8` — the private key
+Seed three files at `~/secrets/apple/`:
 
-dam's machine has these; sac: ask dam for the trio once, seed the dir, never
-commit them. The script reads them itself and never prints key material.
+- `asc_key_id` — the Key ID (10 chars)
+- `asc_issuer_id` — the Issuer ID (UUID)
+- `AuthKey.p8` — the downloaded private key
+
+Never commit these anywhere. The script reads them itself and never prints key
+material.
 
 Python needs the `cryptography` package (`pip3 install cryptography` if missing).
 
@@ -71,7 +76,7 @@ python3 asc-feedback.py "/v1/builds/<BUILD_ID>" | jq -r '.data.attributes.versio
 ## Notes
 
 - Screenshot URLs expire — download promptly.
-- Works for any app on the team key (Athanor `com.damsac.athanor`, Weave
-  `com.damsac.weave`) — just swap the bundle id.
-- Precedent: dam's 9-submission build-44 batch became issues #220–#228 via this
-  flow; screenshots for issues live on the `feedback-assets` orphan branch.
+- Works for any app on the team key — just swap the bundle id.
+- Convention: screenshots referenced from filed issues live on the
+  `feedback-assets` orphan branch (raw.githubusercontent URLs), keeping main's
+  history clean.
