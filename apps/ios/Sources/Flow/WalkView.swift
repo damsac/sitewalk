@@ -27,8 +27,9 @@ struct WalkView: View {
                 left: model.trade.site,
                 right: model.micStarting
                     ? "MIC STARTING…"
+                    : model.isPracticeWalk ? "PRACTICE — SCRIPTED, NOT SAVED"
                     : (model.walkMode == .demo ? "DEMO WALK — SCRIPTED" : "REC — ON-DEVICE STT"),
-                warn: model.walkMode == .demo
+                warn: model.isPracticeWalk || model.walkMode == .demo
             )
 
             ScrollView {

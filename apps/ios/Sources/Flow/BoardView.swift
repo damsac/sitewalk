@@ -23,6 +23,20 @@ struct BoardView: View {
                         .tracking(2.0)
                         .foregroundStyle(Theme.C.orangeDeep)
                     Spacer()
+                    // Practice-run marker: the armed dry run is visible on the
+                    // board (the old mode chip carried this; the chip is gone —
+                    // per Isaac, input mode is voice-only for users — so the
+                    // marker survives as a non-interactive stamp).
+                    if model.isPracticeWalk {
+                        Text("PRACTICE")
+                            .font(Theme.F.mono(8, .semibold))
+                            .tracking(1.0)
+                            .foregroundStyle(Theme.C.yellowTag)
+                            .padding(.horizontal, 6)
+                            .padding(.top, 3)
+                            .padding(.bottom, 2)
+                            .background(Theme.C.yellowTint)
+                    }
                     // Input mode is voice-only for users; the DEMO toggle was a
                     // dev affordance (still reachable via the `demo=1` launch arg
                     // for QA/screenshots) — removed from the board per Isaac.
@@ -170,8 +184,10 @@ struct BoardView: View {
             // First-run coach mark: point a brand-new operator at the one thing
             // to do. Only on a fresh board (profile set, no walks yet); the
             // START button below stays fully tappable (non-blocking hint).
-            if !coachStartShown && model.profile != nil && model.sessionWalks.isEmpty {
-                CoachCallout(text: "Ready? Tap START WALK and just talk — walk the job like you're telling a helper.") {
+            if (!coachStartShown || model.isPracticeWalk) && model.profile != nil && model.sessionWalks.isEmpty {
+                CoachCallout(text: model.isPracticeWalk
+                    ? "This is a practice run — nothing gets saved. Tap START WALK and try talking through a job."
+                    : "Ready? Tap START WALK and just talk — walk the job like you're telling a helper.") {
                     coachStartShown = true
                 }
                 .padding(.horizontal, Theme.S.screenPad)
