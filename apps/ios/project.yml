@@ -33,6 +33,10 @@ targets:
         # the key; empty => provider default (api.anthropic.com).
         ANTHROPIC_BASE_URL: "$(ANTHROPIC_BASE_URL)"
         CFBundleDisplayName: Sitewalk
+        # Fixed paper-and-ink theme: lock light appearance so system dark mode
+        # never falls un-styled Text back to the white system label color on the
+        # always-light paper (issue #220 — invisible board title / vocab / rows).
+        UIUserInterfaceStyle: Light
         # App uses only exempt (HTTPS/TLS) encryption — no custom crypto. Without
         # this, every TestFlight build sits on a manual "Missing Compliance"
         # answer in ASC before testers can install it.
