@@ -43,8 +43,18 @@ sacmeng Actions gate, item 4).
 **THE ASK — cut a `v*`-tagged EXTERNAL build once the stack is merged.** We're
 opening the public TestFlight link, so Isaac needs an *external candidate* to
 submit for Beta App Review — that's the `v*` tag lane (`release.yml`), not the
-plain-main-merge internal build. Sequence: merge stack → push `vX.Y.Z` →
-external build lands in ASC → Isaac attaches it + submits for review.
+plain-main-merge internal build. **Suggested version: `v1.1.0`** (last external
+tag is `v1.0.1`; this build adds onboarding + practice walk + rename, so a minor
+bump — use `v1.0.2` instead if you'd rather reserve minor for later). Exact steps
+after the stack is on main:
+
+```
+git checkout main && git pull
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+→ external candidate builds + lands in ASC → Isaac attaches it + submits for
+Beta App Review.
 
 **Status / heads-up for the merge:**
 - **F3 release-spec fix is in** — #239 now sets Jefe in BOTH `project.yml` AND
