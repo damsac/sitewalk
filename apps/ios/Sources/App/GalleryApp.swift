@@ -49,6 +49,11 @@ struct AppRoot: View {
         // screenshots — no taps available in simctl).
         let args = ProcessInfo.processInfo.arguments
         if args.contains("resetprofile=1") { BusinessProfile.clear() }
+        // resetcoach=1 re-arms the first-run coach marks (parallel to
+        // resetprofile) so they can be captured/verified on a warm sim.
+        if args.contains("resetcoach=1") {
+            for key in CoachMarks.allKeys { UserDefaults.standard.removeObject(forKey: key) }
+        }
         if args.contains("autoprofile=1") {
             BusinessProfile.save(BusinessProfile(
                 businessName: "Testflight Lawn Co",
@@ -78,6 +83,9 @@ struct AppRoot: View {
         // screen and needs a SKIP/DONE tap, so mark it shown for autoflow runs.
         if autoflowRounds > 0 {
             UserDefaults.standard.set(true, forKey: NotesView.vocabCardShownKey)
+            // Coach marks are non-blocking, but keep the scripted screenshots
+            // clean by marking them shown for autoflow runs.
+            for key in CoachMarks.allKeys { UserDefaults.standard.set(true, forKey: key) }
         }
         _needsOnboarding = State(initialValue: BusinessProfile.current == nil && autoflowRounds == 0)
         // Mode is a USER choice (persisted, board chip) unless a launch arg
