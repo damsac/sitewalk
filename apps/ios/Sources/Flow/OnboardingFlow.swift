@@ -12,10 +12,14 @@ import UIKit
 struct OnboardingFlow: View {
     /// Called after FINISH on the mic step — the profile is already persisted
     /// (SAVE on step 2); the caller reloads it and shows the board.
-    var onComplete: () -> Void
+    /// Finishes onboarding. `startPractice` is true when the operator chose the
+    /// optional practice walk (a scripted, unsaved dry run) instead of diving in.
+    var onComplete: (_ startPractice: Bool) -> Void
 
-    private enum Step: Int { case welcome = 1, business, mic }
+    // welcome + 3 "how it works" beats (learn by seeing) → setup (business, mic).
+    private enum Step: Int, CaseIterable { case welcome = 1, seeWalk, seeFix, seeDoc, business, mic }
     @State private var step: Step = .welcome
+    private var isIntro: Bool { step.rawValue < Step.business.rawValue }
 
     // YOUR BUSINESS fields
     @State private var bizName = ""
@@ -34,6 +38,9 @@ struct OnboardingFlow: View {
             topBar
             switch step {
             case .welcome: welcome
+            case .seeWalk: seeWalk
+            case .seeFix: seeFix
+            case .seeDoc: seeDoc
             case .business: business
             case .mic: mic
             }
@@ -48,15 +55,26 @@ struct OnboardingFlow: View {
         HStack {
             HStack(spacing: 10) {
                 Rectangle().fill(Theme.C.orangeDeep).frame(width: 13, height: 13)
-                Text("SITEWALK")
+                Text("JEFE")
                     .font(Theme.F.ui(20, .extraBold))
                     .tracking(3.0)
             }
             Spacer()
-            Text(String(format: "%02d / 03", step.rawValue))
-                .font(Theme.F.mono(9, .semibold))
-                .tracking(1.5)
-                .foregroundStyle(Theme.C.ink60)
+            if isIntro {
+                // The intro teaches; a returning or impatient user skips it.
+                Button { step = .business } label: {
+                    Text("SKIP")
+                        .font(Theme.F.mono(9, .semibold))
+                        .tracking(1.5)
+                        .foregroundStyle(Theme.C.ink35)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(String(format: "%02d / 02", step.rawValue - Step.business.rawValue + 1))
+                    .font(Theme.F.mono(9, .semibold))
+                    .tracking(1.5)
+                    .foregroundStyle(Theme.C.ink60)
+            }
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 16)
@@ -83,45 +101,163 @@ struct OnboardingFlow: View {
         .buttonStyle(.plain)
     }
 
-    /// Mono ledger row — index stamp left, statement right, hairline under.
-    private func ledgerRow(_ index: String, _ label: String) -> some View {
-        HStack(spacing: 14) {
-            Text(index)
-                .font(Theme.F.mono(10, .semibold))
-                .foregroundStyle(Theme.C.orangeDeep)
-            Text(label)
-                .font(Theme.F.mono(11, .semibold))
-                .tracking(1.6)
-                .foregroundStyle(Theme.C.ink)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 13)
-        .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
-    }
-
-    // MARK: - Step 1 · WELCOME
+    // MARK: - Step 1 · WELCOME (payoff first — show the finished paperwork)
 
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
-            SectionLabel("VOICE → PAPERWORK", color: Theme.C.orangeDeep)
-            Text("Talk the walk.\nSend the paperwork.")
-                .font(Theme.F.ui(31, .bold))
+            SectionLabel("TALK YOUR WALK", color: Theme.C.orangeDeep)
+            Text("Say it out loud.\nGet the paperwork.")
+                .font(Theme.F.ui(30, .bold))
                 .lineSpacing(2)
                 .padding(.top, 8)
-            VStack(spacing: 0) {
-                ledgerRow("01", "TALK YOUR WALK")
-                ledgerRow("02", "ITEMS LAND LIVE")
-                ledgerRow("03", "PAPERWORK, READY TO SEND")
-            }
-            .padding(.top, 22)
-            .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1) }
+            Text("Walk the job and talk — like you’d tell a helper. Jefe turns it into a finished estimate you can send.")
+                .font(Theme.F.serif(15))
+                .foregroundStyle(Theme.C.ink60)
+                .lineSpacing(3)
+                .padding(.top, 14)
+            miniEstimate
+                .padding(.top, 20)
             Spacer()
-            Spacer()
-            blockButton("SET UP") { step = .business }
+            blockButton("GET STARTED") { step = .seeWalk }
                 .padding(.bottom, 10)
         }
         .padding(.horizontal, Theme.S.screenPad)
+    }
+
+    // MARK: - Steps 2–4 · HOW IT WORKS (show, don't tell — plain words, a phone
+    // doing the thing on every screen, and the trust beat up front)
+
+    private var seeWalk: some View {
+        beat(kick: "STEP 1 OF 3", title: "Walk & talk",
+             lede: "Tap once, then just talk. Jefe listens the whole time and writes down what matters.",
+             next: { step = .seeFix }) { walkPreview }
+    }
+    private var seeFix: some View {
+        beat(kick: "STEP 2 OF 3", title: "Fix anything",
+             lede: "It’s a first draft. Tap any line to fix a word or add a price. You’re always in control.",
+             next: { step = .seeDoc }) { fixPreview }
+    }
+    private var seeDoc: some View {
+        beat(kick: "STEP 3 OF 3", title: "One tap → paperwork",
+             lede: "Turn your walk into an estimate, invoice, or report — with your logo on it. Then text or email it.",
+             next: { step = .business }, cta: "SET UP MY BUSINESS") { docPreview }
+    }
+
+    private func beat<Preview: View>(
+        kick: String, title: String, lede: String,
+        next: @escaping () -> Void, cta: String = "NEXT",
+        @ViewBuilder preview: () -> Preview
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(kick, color: Theme.C.orangeDeep).padding(.top, 20)
+            Text(title).font(Theme.F.ui(28, .bold)).padding(.top, 6)
+            Text(lede)
+                .font(Theme.F.serif(15)).foregroundStyle(Theme.C.ink60)
+                .lineSpacing(3).padding(.top, 12)
+            preview().padding(.top, 18)
+            Spacer()
+            dots(step.rawValue - Step.seeWalk.rawValue, of: 3)
+            blockButton(cta, action: next).padding(.bottom, 10)
+        }
+        .padding(.horizontal, Theme.S.screenPad)
+    }
+
+    private func dots(_ current: Int, of total: Int) -> some View {
+        HStack(spacing: 5) {
+            ForEach(0..<total, id: \.self) { i in
+                Capsule()
+                    .fill(i == current ? Theme.C.ink : Theme.C.hairline)
+                    .frame(width: i == current ? 16 : 6, height: 6)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: Mini previews — the "show" in show-don't-tell
+
+    private var miniEstimate: some View {
+        previewCard {
+            HStack {
+                Text("Alder Court Lawn").font(Theme.F.serif(13, .bold))
+                Spacer()
+                Text("ESTIMATE").font(Theme.F.mono(7, .semibold)).tracking(1.4)
+                    .foregroundStyle(Theme.C.orangeDeep)
+            }
+            miniRow("Bark mulch — front beds", right: "$285")
+            sendStamp
+        }
+    }
+    private var walkPreview: some View {
+        previewCard {
+            HStack(spacing: 7) {
+                Circle().fill(Theme.C.orangeDeep).frame(width: 7, height: 7)
+                Text("LISTENING · 0:14").font(Theme.F.mono(8.5, .semibold)).tracking(1.2)
+                    .foregroundStyle(Theme.C.orangeDeep)
+            }
+            miniRow("Mulch — front beds", sub: "JUST HEARD")
+            miniRow("Trim the boxwoods", sub: "JUST HEARD")
+        }
+    }
+    private var fixPreview: some View {
+        previewCard {
+            miniRow("Mower — front lawn  ✎", sub: "TAP TO EDIT", highlight: true)
+            miniRow("Haul & disposal", right: "add $")
+            miniRow("Bed edging — front", sub: "~60 LF")
+        }
+    }
+    private var docPreview: some View {
+        previewCard {
+            HStack {
+                Text("Alder Court Lawn").font(Theme.F.serif(13, .bold))
+                Spacer()
+                Text("EST-0047").font(Theme.F.mono(7, .semibold)).tracking(1.0)
+                    .foregroundStyle(Theme.C.orangeDeep)
+            }
+            miniRow("Bark mulch — front beds", right: "$285")
+            miniRow("TOTAL", right: "$680")
+            sendStamp
+        }
+    }
+
+    private var sendStamp: some View {
+        Text("SEND ESTIMATE")
+            .font(Theme.F.ui(10, .bold)).tracking(0.8)
+            .foregroundStyle(Theme.C.onOrange)
+            .frame(maxWidth: .infinity).padding(.vertical, 7)
+            .background(Theme.C.orange)
+    }
+
+    private func previewCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 9) { content() }
+            .padding(13)
+            .background(Theme.C.paperDeep)
+            .overlay(Rectangle().stroke(Theme.C.hairline, lineWidth: 1.5))
+    }
+
+    private func miniRow(_ text: String, sub: String? = nil, right: String? = nil,
+                         highlight: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text).font(Theme.F.cond(13, .semibold)).foregroundStyle(Theme.C.ink)
+                if let sub {
+                    Text(sub).font(Theme.F.mono(7, .semibold)).tracking(0.6)
+                        .foregroundStyle(Theme.C.ink60)
+                }
+            }
+            Spacer(minLength: 6)
+            if let right {
+                Text(right).font(Theme.F.mono(11, .semibold)).foregroundStyle(Theme.C.orangeDeep)
+            }
+        }
+        .padding(9)
+        .background(Theme.C.sheet)
+        .overlay {
+            if highlight {
+                RoundedRectangle(cornerRadius: 2).stroke(Theme.C.orange, lineWidth: 2)
+            }
+        }
     }
 
     // MARK: - Step 2 · YOUR BUSINESS
@@ -249,7 +385,7 @@ struct OnboardingFlow: View {
             SectionLabel("MIC CHECK", color: Theme.C.orangeDeep)
                 .padding(.top, 18)
             // The heading itself confirms the grant — no jarring banner.
-            Text(micState == .granted ? "You’re ready to walk." : "Sitewalk hears your walk.")
+            Text(micState == .granted ? "You’re ready to walk." : "Let Jefe hear your walk.")
                 .font(Theme.F.ui(23, .bold))
                 .padding(.top, 6)
             Text("EVERYTHING TRANSCRIBES ON YOUR PHONE")
@@ -293,11 +429,26 @@ struct OnboardingFlow: View {
                 }
                 .padding(.bottom, 10)
             case .granted:
-                blockButton("START WALKING") { onComplete() }
+                blockButton("START MY FIRST WALK") { onComplete(false) }
                     .padding(.bottom, 10)
             case .denied:
-                blockButton("CONTINUE") { onComplete() }
+                blockButton("CONTINUE") { onComplete(false) }
                     .padding(.bottom, 10)
+            }
+
+            // Optional dry run: scripted content so a first-timer doesn't need
+            // to know what to say, coach marks guide the taps, and it never
+            // lands on their real board. Offered once the mic decision is made.
+            if micState != .idle {
+                Button { onComplete(true) } label: {
+                    Text("New to this?  Try a practice walk first ›")
+                        .font(Theme.F.cond(14, .semibold))
+                        .foregroundStyle(Theme.C.orangeDeep)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, Theme.S.screenPad)

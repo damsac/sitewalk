@@ -9,6 +9,8 @@ struct WalkView: View {
     @State private var showCamera = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var showDiscardConfirm = false
+    // First-run DONE hint, one-shot (survives relaunch). Cleared by resetcoach=1.
+    @AppStorage(CoachMarks.doneKey) private var coachDoneShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,8 +20,9 @@ struct WalkView: View {
 
             MetaStrip(
                 left: model.trade.site,
-                right: model.walkMode == .demo ? "DEMO WALK — SCRIPTED" : "REC — ON-DEVICE STT",
-                warn: model.walkMode == .demo
+                right: model.isPracticeWalk ? "PRACTICE — SCRIPTED, NOT SAVED"
+                     : model.walkMode == .demo ? "DEMO WALK — SCRIPTED" : "REC — ON-DEVICE STT",
+                warn: model.isPracticeWalk || model.walkMode == .demo
             )
 
             ScrollView {
@@ -47,6 +50,17 @@ struct WalkView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
+            }
+
+            // First-run DONE hint: appears once anything is captured (so it
+            // shows exactly when DONE becomes tappable), pointing at DONE.
+            if !coachDoneShown && !(model.transcript.isEmpty && model.items.isEmpty) {
+                CoachCallout(text: "All done talking? Tap DONE — Jefe writes up your notes and paperwork.", pointer: .trailing) {
+                    coachDoneShown = true
+                }
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.bottom, 2)
+                .transition(.opacity)
             }
 
             VStack(spacing: 12) {
@@ -106,7 +120,7 @@ struct WalkView: View {
                     // gating on items alone stranded the user on a stuck screen
                     // whenever items hadn't landed yet. Transcript-or-items.
                     let nothingCaptured = model.transcript.isEmpty && model.items.isEmpty
-                    Button { model.finishWalk() } label: { DoneButton() }
+                    Button { coachDoneShown = true; model.finishWalk() } label: { DoneButton() }
                         .buttonStyle(.plain)
                         .frame(maxWidth: .infinity)
                         .disabled(nothingCaptured)
@@ -118,6 +132,7 @@ struct WalkView: View {
             .padding(.bottom, 10)
             .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1) }
         }
+        .animation(.easeOut(duration: 0.25), value: coachDoneShown)
         .background(Theme.C.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)

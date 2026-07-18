@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JEFE — Onboarding Study (non-technical field crews)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,600;0,8..60,700;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAFAF7; --paper-deep:#F1F0EA; --sheet:#FFFFFE;
+    --ink:#141412; --ink-60:#5E5C54; --ink-35:#A7A49A;
+    --hair:rgba(20,20,18,.16); --hair-soft:rgba(20,20,18,.09);
+    --amber:#FFBB26; --amber-deep:#9A6A00; --amber-tint:#FAF1D9; --on-amber:#141412;
+    --red:#A63A2E; --red-tint:#F7E8E5; --green:#3E6B35; --green-tint:#E9F0E4;
+    --ui:'Barlow',sans-serif; --cond:'Barlow Semi Condensed',sans-serif;
+    --mono:'IBM Plex Mono',monospace; --serif:'Source Serif 4',serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--paper)}
+  body{font-family:var(--ui);color:var(--ink);
+    background:repeating-linear-gradient(0deg,transparent 0 31px,var(--hair-soft) 31px 32px),
+      repeating-linear-gradient(90deg,transparent 0 31px,var(--hair-soft) 31px 32px),var(--paper);
+    padding:0 clamp(20px,4vw,64px) 64px;min-height:100vh}
+  body::after{content:'';position:fixed;inset:0;pointer-events:none;opacity:.05;z-index:60;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+  header{padding:34px 0 18px;border-bottom:2px solid var(--ink);max-width:1180px;margin:0 auto}
+  .wordmark{display:flex;align-items:center;gap:14px}
+  .wordmark .mark{width:34px;height:34px;background:var(--ink);border-radius:6px;position:relative;flex:none}
+  .wordmark .mark::before{content:'';position:absolute;left:7px;right:7px;top:6px;height:11px;background:var(--amber);border-radius:6px 6px 0 0}
+  .wordmark .mark::after{content:'';position:absolute;left:11px;right:11px;top:17px;bottom:6px;background:var(--paper);border-radius:0 0 5px 5px}
+  .wordmark h1{font-weight:800;font-size:30px;letter-spacing:.14em}
+  .wordmark .sub{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--amber-deep);border:1.5px solid var(--amber-deep);padding:4px 8px 3px}
+  .tagline{font-family:var(--serif);font-style:italic;font-size:18px;color:var(--ink-60);margin-top:8px;max-width:620px}
+
+  .band-h{max-width:1180px;margin:30px auto 0;display:flex;align-items:baseline;gap:12px}
+  .band-h .n{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.1em;color:var(--paper);background:var(--ink);padding:5px 9px}
+  .band-h .t{font-weight:800;font-size:16px;letter-spacing:.02em}
+  .band-h .d{font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--ink-60)}
+
+  .frames{display:flex;flex-wrap:wrap;gap:clamp(22px,3vw,44px);justify-content:center;align-items:flex-start;padding:22px 0 4px}
+  .unit{width:300px;flex:none}
+  .cap{margin:14px 2px 0;font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink-60);line-height:1.6}
+  .cap b{color:var(--ink);text-transform:uppercase;letter-spacing:.1em}
+
+  .phone{width:300px;height:640px;background:#1B1B19;border-radius:46px;padding:8px;position:relative;
+    box-shadow:0 2px 3px rgba(20,20,18,.18),0 16px 40px -14px rgba(20,20,18,.38),inset 0 0 0 1.5px #3A3A36}
+  .screen{width:100%;height:100%;background:var(--paper);border-radius:39px;overflow:hidden;position:relative;display:flex;flex-direction:column}
+  .island{position:absolute;top:16px;left:50%;transform:translateX(-50%);width:84px;height:24px;background:#100F0E;border-radius:18px;z-index:12}
+  .sbar{height:48px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 5px;font-weight:600;font-size:12px}
+  .body{flex:1;display:flex;flex-direction:column;padding:22px 22px 20px;position:relative;overflow:hidden}
+
+  /* onboarding chrome */
+  .obar{display:flex;align-items:center;gap:9px;margin-bottom:auto}
+  .obar .m{width:12px;height:12px;background:var(--amber);flex:none}
+  .obar .w{font-family:var(--ui);font-weight:800;font-size:15px;letter-spacing:.18em}
+  .obar .skip{margin-left:auto;font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink-35)}
+  .dots{display:flex;gap:5px;margin-top:12px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--hair)}
+  .dots i.on{background:var(--ink);width:16px;border-radius:3px}
+
+  .kick{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;font-weight:600;color:var(--amber-deep)}
+  .huge{font-weight:800;font-size:30px;line-height:1.06;letter-spacing:-.01em;margin-top:8px}
+  .lede{font-family:var(--serif);font-size:15px;line-height:1.5;color:var(--ink-60);margin-top:12px}
+  .spacer{flex:1}
+  .primary{cursor:pointer;border:0;background:var(--amber);color:var(--on-amber);font-family:var(--ui);font-weight:700;
+    font-size:16px;letter-spacing:.04em;padding:16px;box-shadow:0 4px 0 var(--amber-deep);width:100%;text-align:center;border-radius:2px}
+  .ghost{cursor:pointer;background:transparent;border:1.5px solid var(--hair);font-family:var(--mono);font-size:10px;font-weight:600;
+    letter-spacing:.08em;color:var(--ink-60);padding:12px;width:100%;text-align:center;margin-top:10px}
+
+  /* mini device inside a screen (the "show, don't tell" preview) */
+  .mini{background:var(--paper-deep);border:1.5px solid var(--hair);padding:12px;margin-top:16px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:9px;overflow:hidden}
+  .mini .rec{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--amber-deep);font-weight:600}
+  .mini .rec .dot{width:8px;height:8px;border-radius:50%;background:var(--amber-deep)}
+  .mini .wave{display:flex;align-items:flex-end;gap:2px;height:22px}
+  .mini .wave i{width:3px;background:var(--amber);border-radius:1px}
+  .mini .line{background:#fff;border:1px solid var(--hair);padding:8px 9px}
+  .mini .line .t{font-family:var(--cond);font-weight:600;font-size:12px}
+  .mini .line .s{font-family:var(--mono);font-size:7px;letter-spacing:.05em;color:var(--ink-60);margin-top:2px}
+  .mini .tap{border-color:var(--amber);box-shadow:0 0 0 2px var(--amber-tint)}
+  .mini .amt{font-family:var(--mono);font-size:11px;font-weight:600;float:right;color:var(--amber-deep)}
+  .mini .doc-h{font-family:var(--serif);font-weight:700;font-size:12px}
+  .mini .doc-k{font-family:var(--mono);font-size:7px;letter-spacing:.14em;color:var(--amber-deep);font-weight:600;float:right}
+  .mini .send{background:var(--amber);color:var(--on-amber);text-align:center;font-family:var(--ui);font-weight:700;font-size:10px;letter-spacing:.06em;padding:7px}
+
+  /* setup form */
+  .field{margin-top:12px}
+  .field .l{font-family:var(--mono);font-size:8px;letter-spacing:.14em;color:var(--ink-35);font-weight:600}
+  .field .v{font-family:var(--cond);font-weight:600;font-size:15px;padding:8px 0 6px;border-bottom:2px solid var(--amber);color:var(--ink)}
+  .field .ph{color:var(--ink-35)}
+  .trade-row{display:flex;gap:7px;margin-top:8px}
+  .trade{flex:1;font-family:var(--mono);font-size:8.5px;font-weight:600;letter-spacing:.04em;padding:9px 4px;text-align:center;border:1.5px solid var(--hair);color:var(--ink-60)}
+  .trade.on{border-color:var(--ink);color:var(--ink);background:var(--paper)}
+
+  /* mic + coach marks */
+  .mic-ring{width:96px;height:96px;border-radius:50%;border:3px solid var(--amber);display:flex;align-items:center;justify-content:center;margin:6px auto 0;background:var(--amber-tint)}
+  .mic-ring .g{font-size:38px}
+  .coach{position:absolute;background:var(--ink);color:var(--paper);font-family:var(--cond);font-weight:600;font-size:12px;padding:9px 11px;border-radius:4px;max-width:150px;line-height:1.3;z-index:20}
+  .coach::after{content:'';position:absolute;border:7px solid transparent}
+  .coach.c1{bottom:78px;left:50%;transform:translateX(-50%)}
+  .coach.c1::after{top:100%;left:50%;transform:translateX(-50%);border-top-color:var(--ink)}
+  .coach small{display:block;font-family:var(--mono);font-size:8px;letter-spacing:.06em;color:var(--amber);margin-top:3px;font-weight:600}
+  .board-dim{position:absolute;inset:0;background:rgba(20,20,18,.45);z-index:15}
+
+  .legend{max-width:1180px;margin:26px auto 0;font-family:var(--mono);font-size:11px;line-height:1.75;color:var(--ink-60);border:1.5px solid var(--hair);padding:16px 18px;background:var(--paper)}
+  .legend b{color:var(--ink)}.legend .a{color:var(--amber-deep);font-weight:600}
+  .legend h4{font-family:var(--ui);font-weight:800;font-size:13px;letter-spacing:.03em;color:var(--ink);margin-bottom:6px}
+</style>
+</head>
+<body>
+  <header>
+    <div class="wordmark"><div class="mark"></div><h1>JEFE</h1><span class="sub">ONBOARDING STUDY · DS-08</span></div>
+    <p class="tagline">First-run for a crew that has never used an app like this. Plain words, big buttons, the payoff shown early — and it teaches by <em>showing</em>, not reading.</p>
+  </header>
+
+  <!-- BAND 1: LEARN (show the value + the loop) -->
+  <div class="band-h"><span class="n">①</span><span class="t">SEE WHAT IT DOES</span><span class="d">3 quick screens — no jargon, the finished paperwork shown up front</span></div>
+  <div class="frames">
+
+    <!-- welcome -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body">
+        <div class="obar"><div class="m"></div><div class="w">JEFE</div></div>
+        <div class="spacer"></div>
+        <div class="kick">TALK YOUR WALK</div>
+        <div class="huge">Say it out loud.<br>Get the paperwork.</div>
+        <div class="lede">Walk the job and talk — like you'd tell a helper. Jefe turns it into a finished estimate you can send.</div>
+        <div class="mini" style="flex:none;margin-top:16px;padding:10px">
+          <div><span class="doc-k">ESTIMATE</span><span class="doc-h">Alder Court Lawn</span></div>
+          <div class="line" style="padding:6px 8px"><span class="amt">$285</span><div class="t" style="font-size:11px">Bark mulch — front beds</div></div>
+          <div class="send">SEND ESTIMATE</div>
+        </div>
+        <div class="spacer"></div>
+        <button class="primary">GET STARTED</button>
+        <div class="dots"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div></div><div class="cap"><b>01 · Welcome</b> — the payoff first. A real (tiny) estimate, so in 3 seconds they know exactly what they're getting. One button.</div></div>
+
+    <!-- how 1 -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body">
+        <div class="obar"><div class="m"></div><div class="w">JEFE</div><span class="skip">SKIP</span></div>
+        <div class="spacer"></div>
+        <div class="kick">STEP 1 OF 3</div>
+        <div class="huge">Walk & talk</div>
+        <div class="lede">Tap once, then just talk. Jefe listens the whole time and writes down what matters.</div>
+        <div class="mini">
+          <div class="rec"><span class="dot"></span>LISTENING · 0:14</div>
+          <div class="wave"><i style="height:6px"></i><i style="height:14px"></i><i style="height:20px"></i><i style="height:11px"></i><i style="height:18px"></i><i style="height:8px"></i><i style="height:16px"></i><i style="height:22px"></i><i style="height:9px"></i><i style="height:13px"></i><i style="height:19px"></i><i style="height:7px"></i></div>
+          <div class="line"><div class="t">Mulch — front beds</div><div class="s">JUST HEARD</div></div>
+          <div class="line"><div class="t">Trim the boxwoods</div><div class="s">JUST HEARD</div></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="primary">NEXT</button>
+        <div class="dots"><i></i><i class="on"></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div></div><div class="cap"><b>02 · Walk & talk</b> — "like you'd tell a helper." Shows lines appearing as you speak, so recording feels understood, not mysterious.</div></div>
+
+    <!-- how 2 -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body">
+        <div class="obar"><div class="m"></div><div class="w">JEFE</div><span class="skip">SKIP</span></div>
+        <div class="spacer"></div>
+        <div class="kick">STEP 2 OF 3</div>
+        <div class="huge">Fix anything</div>
+        <div class="lede">It's a first draft. Tap any line to fix a word or add a price. You're always in control.</div>
+        <div class="mini">
+          <div class="line tap"><div class="t">Mower — front lawn ✎</div><div class="s">TAP TO EDIT</div></div>
+          <div class="line"><span class="amt">add $</span><div class="t">Haul & disposal</div></div>
+          <div class="line"><div class="t">Bed edging — front</div><div class="s">~60 LF</div></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="primary">NEXT</button>
+        <div class="dots"><i></i><i></i><i class="on"></i><i></i><i></i><i></i></div>
+      </div>
+    </div></div><div class="cap"><b>03 · Fix anything</b> — the trust beat. "First draft, you're in control" directly answers a non-technical user's #1 fear: *what if it gets it wrong?*</div></div>
+
+    <!-- how 3 -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body">
+        <div class="obar"><div class="m"></div><div class="w">JEFE</div><span class="skip">SKIP</span></div>
+        <div class="spacer"></div>
+        <div class="kick">STEP 3 OF 3</div>
+        <div class="huge">One tap → paperwork</div>
+        <div class="lede">Turn your walk into an estimate, invoice, or report — with your logo on it. Then text or email it.</div>
+        <div class="mini">
+          <div><span class="doc-k">ESTIMATE · EST-0047</span><span class="doc-h">Alder Court Lawn</span></div>
+          <div class="line" style="padding:6px 8px"><span class="amt">$285</span><div class="t" style="font-size:11px">Bark mulch — front beds</div></div>
+          <div class="line" style="padding:6px 8px"><span class="amt">$680</span><div class="t" style="font-size:11px">TOTAL</div></div>
+          <div class="send">SEND ESTIMATE</div>
+        </div>
+        <div class="spacer"></div>
+        <button class="primary">SET UP MY BUSINESS →</button>
+        <div class="dots"><i></i><i></i><i></i><i class="on"></i><i></i><i></i></div>
+      </div>
+    </div></div><div class="cap"><b>04 · The payoff</b> — the finished branded document + Send. Ends the "learn" band by handing off into setup ("so it carries your name").</div></div>
+  </div>
+
+  <!-- BAND 2: SET UP -->
+  <div class="band-h"><span class="n">②</span><span class="t">SET UP (30 seconds)</span><span class="d">only what the paperwork needs — name, trade, mic. Everything else is editable later in PAPER.</span></div>
+  <div class="frames">
+
+    <!-- business -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body">
+        <div class="obar"><div class="m"></div><div class="w">JEFE</div></div>
+        <div class="kick" style="margin-top:20px">YOUR BUSINESS</div>
+        <div class="huge" style="font-size:24px">What goes on<br>your paperwork?</div>
+        <div class="field"><div class="l">BUSINESS NAME</div><div class="v">Alder Court Landscaping</div></div>
+        <div class="field"><div class="l">CITY / STATE</div><div class="v">Denver CO</div></div>
+        <div class="field"><div class="l">WHAT YOU DO</div>
+          <div class="trade-row"><div class="trade on">LANDSCAPE</div><div class="trade">PROPERTY</div><div class="trade">INSPECTION</div></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="primary">CONTINUE</button>
+        <div class="dots"><i></i><i></i><i></i><i></i><i class="on"></i><i></i></div>
+      </div>
+    </div></div><div class="cap"><b>05 · Your business</b> — the existing form, reframed: "what goes on your paperwork?" not "profile." Logo/colors/contact come later in the PAPER tab — don't front-load them.</div></div>
+
+    <!-- mic -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body">
+        <div class="obar"><div class="m"></div><div class="w">JEFE</div></div>
+        <div class="spacer"></div>
+        <div class="mic-ring"><span class="g">🎙️</span></div>
+        <div class="huge" style="text-align:center;font-size:24px;margin-top:18px">Let Jefe hear<br>your walk</div>
+        <div class="lede" style="text-align:center">Your voice is turned into paperwork <b style="color:var(--green)">right on your phone</b> — nothing is sent anywhere.</div>
+        <div class="spacer"></div>
+        <button class="primary">TURN ON MIC</button>
+        <div class="dots"><i></i><i></i><i></i><i></i><i></i><i class="on"></i></div>
+      </div>
+    </div></div><div class="cap"><b>06 · Mic</b> — the permission, but sold: <span class="a">"on your phone, nothing sent anywhere"</span> is a real trust + privacy win (and true). Big glove-sized button.</div></div>
+
+    <!-- ready + coach marks -->
+    <div class="unit"><div class="phone"><div class="screen"><div class="island"></div>
+      <div class="sbar"><span>9:41</span><span>▮▮▮</span></div>
+      <div class="body" style="padding:0">
+        <div class="board-dim"></div>
+        <div class="coach c1">Tap here when you're at the job. Then just talk.<small>▲ THIS IS THE ONLY BUTTON YOU NEED</small></div>
+        <div style="padding:22px 22px 0"><div class="kick">TODAY</div>
+          <div class="huge" style="font-size:22px">Ready to walk</div>
+          <div style="font-family:var(--mono);font-size:8px;letter-spacing:.1em;color:var(--ink-35);margin-top:14px;border:1px dashed var(--hair);padding:16px;text-align:center">NO WALKS YET — TAP START WALK</div>
+        </div>
+        <div class="spacer"></div>
+        <div style="padding:0 18px 18px"><button class="primary" style="box-shadow:0 4px 0 var(--amber-deep)">● START WALK</button></div>
+      </div>
+    </div></div><div class="cap"><b>07 · First board = one coach mark</b> — drops them on the real board with a single tooltip on START WALK. No tour to sit through; they learn the rest by doing (and the intro already showed them).</div></div>
+  </div>
+
+  <div class="legend">
+    <h4>THE APPROACH — built for a crew that has never used an app like this</h4>
+    <b>SHOW, DON'T TELL.</b> The payoff (a real estimate) appears on screen 1; the three "how it works" beats each show a phone doing the thing, not a paragraph explaining it. &nbsp;•&nbsp; <b>PLAIN WORDS.</b> No "AI", "transcript", "extraction", "record". Just: <span class="a">talk · notes · fix · paperwork · send</span>. &nbsp;•&nbsp; <b>ANSWER THE FEAR.</b> Screen 3 ("first draft — you're in control") tackles the non-technical user's real worry — *what if it's wrong?* — head-on. &nbsp;•&nbsp; <b>SET UP THE MINIMUM.</b> Only name/trade/mic; branding, contact, terms all come later in the PAPER tab, so setup is 30 seconds. &nbsp;•&nbsp; <b>LEARN BY DOING.</b> It ends on the real board with <b>one</b> coach mark on START WALK — no multi-step tour. &nbsp;•&nbsp; <b>SKIPPABLE.</b> A returning user or someone impatient taps SKIP straight to setup.
+    <br><br><b>OPEN QUESTIONS FOR ISAAC:</b> (a) intro = 3 beats (shown) or fewer? (b) add an optional <b>guided practice walk</b> (run the demo with narration) for the truly hesitant, or is the coach mark enough? (c) should coach marks also tag DONE + "tap to fix" on the first real walk, or just START?
+  </div>
+</body>
+</html>

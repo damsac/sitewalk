@@ -10,6 +10,8 @@ struct BoardView: View {
     // call; a gear → .sheet is a functional default, not a design decision.
     @State private var showVocabulary = false
     @State private var showLetterhead = false
+    // First-run coach mark, one-shot (survives relaunch). Cleared by resetcoach=1.
+    @AppStorage(CoachMarks.startWalkKey) private var coachStartShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,21 +28,22 @@ struct BoardView: View {
                     // walk — graduates into onboarding). Tap to toggle;
                     // launch-arg-forced modes lock it.
                     Button { model.toggleMode() } label: {
-                        Text(model.walkMode == .voice ? "MIC · VOICE" : "DEMO WALK")
+                        Text(model.isPracticeWalk ? "PRACTICE" : (model.walkMode == .voice ? "MIC · VOICE" : "DEMO WALK"))
                             .font(Theme.F.mono(8, .semibold))
                             .tracking(1.0)
-                            .foregroundStyle(model.walkMode == .voice ? Theme.C.greenTag : Theme.C.yellowTag)
+                            .foregroundStyle(model.isPracticeWalk || model.walkMode == .demo ? Theme.C.yellowTag : Theme.C.greenTag)
                             .padding(.horizontal, 6)
                             .padding(.top, 3)
                             .padding(.bottom, 2)
-                            .background(model.walkMode == .voice ? Theme.C.greenTint : Theme.C.yellowTint)
+                            .background(model.isPracticeWalk || model.walkMode == .demo ? Theme.C.yellowTint : Theme.C.greenTint)
                             .padding(6)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .padding(-6)
+                    // Practice run locks the chip too — mode is fixed for the dry run.
                     .opacity(model.modeLocked ? 0.5 : 1)
-                    .disabled(model.modeLocked)
+                    .disabled(model.modeLocked || model.isPracticeWalk)
                     // Vocabulary entry: a stamped chip in the tag grammar —
                     // this is a field tool, not settings, so no gear. Padding
                     // widens the tap target without growing the stamp.
@@ -183,7 +186,22 @@ struct BoardView: View {
 
             Spacer(minLength: 0)
 
+            // First-run coach mark: point a brand-new operator at the one thing
+            // to do. Only on a fresh board (profile set, no walks yet); the
+            // START button below stays fully tappable (non-blocking hint).
+            if (!coachStartShown || model.isPracticeWalk) && model.profile != nil && model.sessionWalks.isEmpty {
+                CoachCallout(text: model.isPracticeWalk
+                    ? "This is a practice run — nothing gets saved. Tap START WALK and try talking through a job."
+                    : "Ready? Tap START WALK and just talk — walk the job like you're telling a helper.") {
+                    coachStartShown = true
+                }
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.bottom, 4)
+                .transition(.opacity)
+            }
+
             Button {
+                coachStartShown = true
                 model.startWalk()
             } label: {
                 WalkButton()
@@ -192,6 +210,7 @@ struct BoardView: View {
             .padding(.horizontal, Theme.S.screenPad)
             .padding(.bottom, 10)
         }
+        .animation(.easeOut(duration: 0.25), value: coachStartShown)
         .background(Theme.C.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showVocabulary) {
@@ -205,6 +224,60 @@ struct BoardView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.C.paper)
+        }
+    }
+}
+
+// MARK: - Coach marks (first-run hints)
+
+/// Persisted one-shot flags for the first-run coach marks. Centralized so the
+/// GalleryApp QA hooks (resetcoach / autoflow) and the call sites agree.
+enum CoachMarks {
+    static let startWalkKey = "coach.startWalk.shown"
+    static let doneKey = "coach.done.shown"
+    static let allKeys = [startWalkKey, doneKey]
+}
+
+/// A soft amber callout that points at the button directly beneath it. Chosen
+/// over a dark spotlight overlay on purpose: it stays in the field-instrument
+/// grammar (paper + amber, not a flashy tour) and it's non-blocking — the
+/// target button underneath stays tappable, so it never traps the flow. One-
+/// shot gating lives at the call site (an @AppStorage flag).
+struct CoachCallout: View {
+    let text: String
+    /// Where the downward caret sits, so it aims at the real target (a full-
+    /// width button → .center; DONE in a control row → .trailing).
+    var pointer: Alignment = .center
+    var dismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(text)
+                    .font(Theme.F.cond(13.5, .semibold))
+                    .foregroundStyle(Theme.C.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button(action: dismiss) {
+                    Text("GOT IT")
+                        .font(Theme.F.mono(9, .semibold))
+                        .tracking(1.0)
+                        .foregroundStyle(Theme.C.orangeDeep)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .background(Theme.C.orangeTint)
+            .overlay(Rectangle().stroke(Theme.C.orange, lineWidth: 1.5))
+
+            Text("▾")
+                .font(Theme.F.ui(15, .bold))
+                .foregroundStyle(Theme.C.orange)
+                .frame(maxWidth: .infinity, alignment: pointer)
+                .padding(.horizontal, 34)
+                .offset(y: -2)
         }
     }
 }
