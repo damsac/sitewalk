@@ -41,7 +41,11 @@ targets:
     info:
       path: Sources/App/Info.plist
       properties:
-        CFBundleDisplayName: Sitewalk
+        # Jefe rename (#239 review fix): this spec deep-merges OVER project.yml,
+        # so the name must be set here too or the TestFlight build ships 'Sitewalk'
+        # while the mic dialog says 'Jefe'.
+        CFBundleDisplayName: Jefe
+        CFBundleName: Jefe
         # Belt-and-suspenders (see TARGETED_DEVICE_FAMILY comment below): app
         # uses only exempt (HTTPS/TLS) encryption — no custom crypto. Explicit
         # here too so a future project.yml edit can't silently drop it and
