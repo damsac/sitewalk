@@ -18,7 +18,10 @@ This is the critical path to putting Jefe in front of real testers. All are
   plain words (no "AI/transcript/extraction" anywhere):
   - **#236 intro** — payoff-first welcome ("Say it out loud. Get the paperwork.")
     + 3 "how it works" beats (Walk & talk / Fix anything / One tap → paperwork),
-    each with a mini phone visual.
+    each with a mini phone visual. Also carries a **privacy-copy accuracy fix**:
+    mic sub-header "EVERYTHING TRANSCRIBES ON YOUR PHONE" → "YOUR AUDIO STAYS ON
+    YOUR PHONE" — the transcript text DOES go to the LLM, so this now matches the
+    website Privacy Policy (audio local; text → AI to build the paperwork).
   - **#237 coach marks** — one-shot amber callouts on START WALK (board) + DONE
     (walk); non-blocking (target stays tappable), `@AppStorage`-gated
     (`resetcoach=1` re-arms; autoflow marks them shown).
@@ -35,9 +38,27 @@ This is the critical path to putting Jefe in front of real testers. All are
   light appearance (`UIUserInterfaceStyle: Light`).
 
 **None of these reach TestFlight until you merge + the release lane fires** (the
-sacmeng Actions gate, item 4). We're opening external/public TestFlight, so a
-fresh build carrying the rename + onboarding is exactly what needs to go out.
-(ASC-side: the App Store Connect **listing name** → Jefe is Isaac's to change.)
+sacmeng Actions gate, item 4).
+
+**THE ASK — cut a `v*`-tagged EXTERNAL build once the stack is merged.** We're
+opening the public TestFlight link, so Isaac needs an *external candidate* to
+submit for Beta App Review — that's the `v*` tag lane (`release.yml`), not the
+plain-main-merge internal build. Sequence: merge stack → push `vX.Y.Z` →
+external build lands in ASC → Isaac attaches it + submits for review.
+
+**Status / heads-up for the merge:**
+- **F3 release-spec fix is in** — #239 now sets Jefe in BOTH `project.yml` AND
+  `project-release.yml`, so the archive actually ships as Jefe (nice catch — the
+  release spec's own `CFBundleDisplayName` override would've shipped "Sitewalk").
+- **Known cross-PR conflicts to expect** (overlapping edits, not logic): #235 ↔
+  #239 on `project.yml` (same props block — trivial keep-both; you'd already
+  rebased #239, so it's yours now); #238 ↔ main on `AppModel`/`BoardView`
+  (onboarding vs the #232/#241 notes edits). Both resolve by keeping both sides.
+  I've stayed out of the branches so I don't collide with your rebases.
+- **Isaac's ASC side is ready to submit the moment a build exists:** Privacy
+  Policy URL is LIVE at https://getjefe.netlify.app/privacy (+ /terms), the
+  "What to Test" + review notes are written, and he'll set the ASC listing name
+  → Jefe. (Privacy policy is a URL in ASC, not baked into the build.)
 
 ### 2. React to the V2 paperwork STRUCTURE plan (#234)
 
