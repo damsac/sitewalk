@@ -45,6 +45,19 @@ pub fn is_pricing_kind(kind: &str) -> bool {
     matches!(kind, "estimate" | "invoice")
 }
 
+/// Total-shape per BUILT-IN `doc_kind` (Plan 13; lifted here from
+/// `pipeline/document.rs` by Plan 19): an inspection has no summable dollar
+/// total; everything else sums its lines. Since Plan 19 the build path reads
+/// the resolved schema row instead of calling this — it stays as the
+/// hardcoded parity reference the seeded built-ins are pinned against
+/// (`builtin_schemas_reproduce_todays_pricing_and_total_shape`).
+pub fn total_shape(doc_kind: &str) -> (&'static str, &'static str) {
+    match doc_kind {
+        "inspection" => ("static", "findings"),
+        _ => ("sum", "total"),
+    }
+}
+
 /// Maps a session's template key (D4: `landscape`|`property`|`inspection`) to
 /// its DEFAULT `doc_kind` — carried as the advisory `NotesPayload.doc_kind`
 /// hint and used by the FFI offline fallback (`ffi/src/session.rs::partial_notes`).

@@ -10,6 +10,7 @@ mod documents;
 mod items;
 mod jobs;
 mod photos;
+pub(crate) mod schemas;
 mod sessions;
 mod usage;
 
@@ -47,6 +48,12 @@ impl Store {
     fn from_connection(conn: Connection, device_id: impl Into<String>) -> Result<Self, CoreError> {
         conn.pragma_update(None, "foreign_keys", true)?;
         migrations::migrate(&conn)?;
+        // Plan 19: seed the built-in document schemas on EVERY open (not once
+        // per user_version) — the seed uses pinned literals (fixed timestamps,
+        // sentinel device_id), so its position ahead of the `with_clock`
+        // override is irrelevant, and the `WHERE NOT EXISTS(id)` guard (which
+        // sees tombstoned rows) keeps a deleted built-in deleted forever.
+        schemas::seed_builtin_schemas(&conn)?;
         Ok(Store { conn, device_id: device_id.into(), clock: Arc::new(system_clock) })
     }
 

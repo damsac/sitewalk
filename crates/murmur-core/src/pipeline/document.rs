@@ -12,7 +12,7 @@ use harness::{
     ToolSpec, Usage,
 };
 
-use crate::domain::{Artifact, CapturedItem, SessionStatus};
+use crate::domain::{Artifact, CapturedItem, DocumentSchema, SchemaField, SessionStatus};
 use crate::error::CoreError;
 use crate::pipeline::{doc_kinds_for_template, is_pricing_kind};
 use crate::store::Store;
@@ -57,17 +57,34 @@ pub(crate) enum GapPolicy {
 /// documented contract (pinned by the cross-check test below), not by
 /// sharing code across the crate boundary — `ffi` depends on `murmur-core`,
 /// never the reverse, so this function can't call (or be called by) it.
+// Since Plan 19 the production build path renders through `render_lines`
+// with the resolved schema's `priced` flag; this kind-keyed wrapper stays as
+// the pinned N2/GapPolicy parity surface (its tests below are part of the
+// launch-safety Δ=0 net), hence the explicit allow rather than deleting it.
+#[allow(dead_code)]
 pub(crate) fn render_structure_document(
     doc_kind: &str,
     items: &[CapturedItem],
     gap: GapPolicy,
+) -> Vec<serde_json::Value> {
+    render_lines(items, gap, is_pricing_kind(doc_kind))
+}
+
+/// The schema-driven render (Plan 19 §4 step 3): identical line shape, with
+/// `is_gap` driven by the resolved schema's `line_items.priced` instead of
+/// `is_pricing_kind(doc_kind)` — for every built-in the two agree exactly
+/// (pinned by `builtin_schemas_reproduce_todays_pricing_and_total_shape`).
+pub(crate) fn render_lines(
+    items: &[CapturedItem],
+    gap: GapPolicy,
+    priced: bool,
 ) -> Vec<serde_json::Value> {
     items
         .iter()
         .map(|item| {
             let is_gap = match gap {
                 GapPolicy::AllGap => true,
-                GapPolicy::PerPricingKind => is_pricing_kind(doc_kind),
+                GapPolicy::PerPricingKind => priced,
             };
             serde_json::json!({
                 "id": crate::ids::new_id(),
@@ -207,6 +224,153 @@ pub(crate) async fn price_items(
     Ok(map)
 }
 
+const FILL_FIELDS: &str = "fill_fields";
+
+fn fill_fields_tool_spec() -> ToolSpec {
+    ToolSpec {
+        name: FILL_FIELDS.into(),
+        description: "Fill named document fields from the session. Put a value only on a field \
+                       whose answer was clearly stated — omit any field you are unsure about. \
+                       You may fill only fields from the given list, by their exact key."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": { "type": "string" },
+                            "value": { "type": "string" }
+                        },
+                        "required": ["key", "value"]
+                    }
+                }
+            },
+            "required": ["fields"]
+        }),
+    }
+}
+
+/// Plan 19 Stage 5: the one focused fill pass — `price_items`' exact twin,
+/// including its degrade contract. Input is the items + session summary ONLY
+/// (never the transcript, R6); the items block reuses `format_pricing_items`
+/// (ONE item-formatting helper, no divergent shape). Echo-and-validate
+/// against the offered field keys, first-wins dedup, drop unknown keys.
+/// Usage is accumulated as soon as a response arrives (R9: an unparseable
+/// response still cost tokens) — BEFORE success/failure is decided. A
+/// provider `Err` carries no usage; a completed response whose tool block is
+/// missing/unparseable is `Err(HarnessError::Provider(..))` after
+/// `usage.add`, exactly like `price_items`. A tool block that IS present but
+/// simply omits a field is NOT an error — that field is a truthful gap.
+pub(crate) async fn fill_fields(
+    provider: &Arc<dyn LlmProvider>,
+    fields: &[SchemaField],
+    items: &[CapturedItem],
+    summary: &str,
+    max_tokens: u32,
+    usage: &mut Usage,
+) -> Result<HashMap<String, String>, HarnessError> {
+    let system = "You fill named fields of a field-work document for a tradesperson. Put a \
+                  value only on a field whose answer was clearly stated in the session — never \
+                  guess. You may fill only fields from the given list, by their exact key.";
+    let fields_block = fields
+        .iter()
+        .map(|f| format!("- [{}] {}", f.key, f.label))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let items_block = format_pricing_items(items);
+    // The exact WE-B user message (§6) — the items block is
+    // `format_pricing_items` verbatim; only the Fields/summary framing is
+    // the fill prompt's own.
+    let user_message = format!(
+        "Fill these document fields from the session. Put a value only on a field whose\n\
+         answer was clearly stated — omit any field you are unsure about; a blank field\n\
+         is cheaper than a wrong one.\n\
+         \n\
+         Fields:\n{fields_block}\n\
+         \n\
+         Session items:\n{items_block}\n\
+         \n\
+         Session summary:\n{summary}"
+    );
+
+    let response = provider
+        .complete(CompletionRequest {
+            system: system.to_string(),
+            messages: vec![Message::user_text(user_message)],
+            tools: vec![fill_fields_tool_spec()],
+            max_tokens,
+            tool_choice: Some(FILL_FIELDS.to_string()),
+        })
+        .await?;
+    usage.add(&response.usage);
+
+    let input = response.content.iter().find_map(|b| match b {
+        ContentBlock::ToolUse { name, input, .. } if name == FILL_FIELDS => Some(input.clone()),
+        _ => None,
+    });
+    let input = input.ok_or_else(|| {
+        HarnessError::Provider("fill_fields response missing fill_fields call".into())
+    })?;
+
+    let valid_keys: HashSet<&str> = fields.iter().map(|f| f.key.as_str()).collect();
+    let mut map: HashMap<String, String> = HashMap::new();
+    if let Some(entries) = input.get("fields").and_then(|v| v.as_array()) {
+        for e in entries {
+            let (Some(key), Some(value)) =
+                (e.get("key").and_then(|v| v.as_str()), e.get("value").and_then(|v| v.as_str()))
+            else {
+                continue;
+            };
+            // First-wins dedup; unknown/hallucinated keys are dropped — never
+            // fail the whole pass over one bad row.
+            if valid_keys.contains(key) && !map.contains_key(key) {
+                map.insert(key.to_string(), value.to_string());
+            }
+        }
+    }
+    Ok(map)
+}
+
+/// Assembles the payload `fields[]` (Plan 19 Stage 5): one entry per
+/// authored `filled`/`static`-section field, in schema order. `static` fill →
+/// its authored value (is_gap false); `walk`/`manual` → the fill value if
+/// present, else a truthful gap (`value: null, is_gap: true`). `manual`
+/// fields are always gaps in v1 (operator completes at review — no LLM).
+fn assemble_fields(
+    schema: &DocumentSchema,
+    values: &HashMap<String, String>,
+) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    for section in &schema.sections {
+        if section.kind == "line_items" {
+            continue;
+        }
+        for f in &section.fields {
+            let (value, is_gap) = if f.fill == "static" {
+                (f.static_value.clone(), false)
+            } else {
+                match values.get(&f.key) {
+                    Some(v) => (Some(v.clone()), false),
+                    None => (None, true),
+                }
+            };
+            out.push(serde_json::json!({
+                "section_key": section.key,
+                "key": f.key,
+                "label": f.label,
+                "kind": f.kind,
+                "fill": f.fill,
+                "value": value,
+                "is_gap": is_gap,
+            }));
+        }
+    }
+    out
+}
+
 /// Applies validated prices onto rendered lines: a line whose `item_id` is a
 /// key in `map` gets `amount_cents` set and flips `is_gap: false`. `map` is
 /// already deduped by `price_items`; `claimed` is belt-and-suspenders against
@@ -226,15 +390,6 @@ fn apply_prices(map: &HashMap<String, i64>, lines: &mut [serde_json::Value]) {
             line["is_gap"] = serde_json::json!(false);
             claimed.insert(item_id);
         }
-    }
-}
-
-/// Total-shape per `doc_kind`: an inspection has no summable dollar total;
-/// everything else sums its lines.
-fn total_shape(doc_kind: &str) -> (&'static str, &'static str) {
-    match doc_kind {
-        "inspection" => ("static", "findings"),
-        _ => ("sum", "total"),
     }
 }
 
@@ -290,7 +445,7 @@ impl DocumentBuilder {
         session_id: &str,
         doc_kind: &str,
     ) -> Result<BuildDocumentOutcome, CoreError> {
-        let (session, items) = {
+        let (session, items, schema) = {
             let store = self.locked()?;
             let session = store.get_session(session_id)?;
             if session.status != SessionStatus::Processed {
@@ -299,22 +454,45 @@ impl DocumentBuilder {
                     session.status.as_str()
                 )));
             }
-            let legal = doc_kinds_for_template(session.template.as_deref());
-            if !legal.contains(&doc_kind) {
+            // Plan 19 §4 step 1 — the legality UNION: the built-in vocabulary
+            // (unchanged for built-ins, so every existing "illegal kind" test
+            // is preserved verbatim) OR a custom trade-matched schema.
+            let template = session.template.as_deref();
+            let legal = doc_kinds_for_template(template).contains(&doc_kind)
+                || store.has_active_schema(doc_kind, template)?;
+            if !legal {
                 return Err(CoreError::InvalidState(format!(
                     "'{doc_kind}' is not a legal document kind for template {:?}",
                     session.template
                 )));
             }
+            // §4 step 2 — resolve the active schema. A legal kind with no
+            // resolvable schema (an operator tombstoned a built-in) fails
+            // truthfully (R7) — NEVER a silent hardcoded fallback, which
+            // would resurrect a deleted built-in.
+            let schema = store.resolve_active_schema(doc_kind, template)?.ok_or_else(|| {
+                CoreError::InvalidState(format!(
+                    "no active schema for '{doc_kind}' (template {:?}) — it was removed",
+                    session.template
+                ))
+            })?;
             let items = store.list_items_for_session(session_id)?;
-            (session, items)
+            (session, items, schema)
         };
 
-        let mut lines = render_structure_document(doc_kind, &items, GapPolicy::PerPricingKind);
+        // §4 step 3 — deterministic render from the schema's line_items
+        // section (save-time validation guarantees exactly one; a corrupt row
+        // degrades to unpriced rather than panicking across the boundary).
+        let priced = schema
+            .sections
+            .iter()
+            .find(|s| s.kind == "line_items")
+            .is_some_and(|s| s.priced);
+        let mut lines = render_lines(&items, GapPolicy::PerPricingKind, priced);
         let mut usage = Usage::default();
         let mut queued = false;
 
-        if is_pricing_kind(doc_kind) && !items.is_empty() {
+        if priced && !items.is_empty() {
             let hint = self.session_spoken_total(session_id)?;
             let memory_prompt = self
                 .memory
@@ -338,15 +516,54 @@ impl DocumentBuilder {
             }
         }
 
-        let (total_kind, total_label_key) = total_shape(doc_kind);
+        // §4 step 5 — the fill pass: ONE focused call iff the schema has ≥1
+        // LLM-fillable (`fill: "walk"`) field. Built-ins have none → zero
+        // calls → byte-identical (the launch-safety spine). `manual` fields
+        // are never offered to the model — they are always gaps in v1.
+        let walk_fields: Vec<SchemaField> = schema
+            .sections
+            .iter()
+            .filter(|s| s.kind == "filled")
+            .flat_map(|s| s.fields.iter().filter(|f| f.fill == "walk").cloned())
+            .collect();
+        let mut fill_values: HashMap<String, String> = HashMap::new();
+        if !walk_fields.is_empty() {
+            match fill_fields(
+                &self.provider,
+                &walk_fields,
+                &items,
+                session.summary.as_deref().unwrap_or(""),
+                self.max_tokens,
+                &mut usage,
+            )
+            .await
+            {
+                Ok(map) => fill_values = map,
+                // Mirrors the pricing degrade exactly (R7): a model call this
+                // build needed didn't complete — regenerate to retry. Every
+                // walk field then falls to a truthful gap below.
+                Err(_) => queued = true,
+            }
+        }
+        let fields = assemble_fields(&schema, &fill_values);
+
+        // §4 step 6 — the total shape comes from the schema envelope (for
+        // every built-in this equals the old total_shape(doc_kind) exactly).
         let payload = serde_json::json!({
             "doc_kind": doc_kind,
             "job_date_unix": session.started_at,
-            "total_kind": total_kind,
-            "total_label_key": total_label_key,
+            "total_kind": schema.total_kind,
+            "total_label_key": schema.total_label_key,
             "static_total_cents": serde_json::Value::Null,
             "lines": lines,
             "queued": queued,
+            // Plan 19 Stage 5 — ADDITIVE body keys (the Plan 12 item_id
+            // precedent): the schema row's numbering prefix (§4 step 7) and
+            // the authored fields. Built-ins emit `fields: []` and today's
+            // prefix, so the Stage 4 byte-identical net holds on the shared
+            // fields.
+            "number_prefix": schema.number_prefix,
+            "fields": fields,
         });
 
         // D7: always mint a fresh number and write a new snapshot artifact —
@@ -737,5 +954,553 @@ mod tests {
             panic!("expected text content");
         };
         assert!(!text2.contains("stated target total"), "no hint line without a meta artifact: {text2}");
+    }
+
+    // ---- Plan 19 Stage 4: schema-driven build (launch-safety) -----------
+
+    /// Template-generic sibling of `processed_session_with_items` (which
+    /// stays untouched — Δ=0 discipline): `None` template supported.
+    fn processed_session_with_template(
+        template: Option<&str>,
+        texts: &[(&str, &str)],
+    ) -> (Store, String) {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = match template {
+            Some(t) => store.start_session_with_template(None, t).unwrap(),
+            None => store.start_session(None).unwrap(),
+        };
+        let mut run_item_ids = Vec::new();
+        for (kind, text) in texts {
+            let item = store
+                .add_item_with_source(&session.id, kind, text, ItemSource::Authoritative)
+                .unwrap();
+            run_item_ids.push(item.id);
+        }
+        store.append_transcript(&session.id, "site walk").unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        store
+            .finish_session_processed(&session.id, "Walked the site.", &Usage::default(), &run_item_ids)
+            .unwrap();
+        (store, session.id)
+    }
+
+    #[tokio::test]
+    async fn build_resolves_the_seeded_schema_for_every_trade_kind() {
+        let cases: &[(Option<&str>, &[&str])] = &[
+            (Some("landscape"), &["estimate", "invoice", "work_order"]),
+            (Some("property"), &["condition", "move_out"]),
+            (Some("inspection"), &["inspection"]),
+            (None, &["report"]),
+        ];
+        for (template, kinds) in cases {
+            for kind in *kinds {
+                let (store, sid) =
+                    processed_session_with_template(*template, &[("todo", "order lumber")]);
+                let store = Arc::new(Mutex::new(store));
+                // Empty mock: pricing kinds degrade to queued (a document
+                // still lands), non-pricing kinds make zero calls.
+                let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![]));
+                let b = builder(store.clone(), provider);
+                let outcome = b.build(&sid, kind).await.unwrap_or_else(|e| {
+                    panic!("{kind} must build for template {template:?}: {e}")
+                });
+                let store = store.lock().unwrap();
+                let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
+                let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
+                assert_eq!(v["doc_kind"], *kind, "the seeded schema resolved and built");
+                assert_eq!(v["doc_number"], 1);
+            }
+        }
+    }
+
+    /// The Stage 4 golden: for each of the 7 built-ins, the decoded payload's
+    /// today-existing fields equal the pre-refactor values (computed here
+    /// from the OLD hardcoded functions `is_pricing_kind`/`total_shape`,
+    /// which stay in `pipeline/mod.rs` as the parity reference). `id`/
+    /// `doc_number` excluded — non-deterministic pre-refactor too.
+    #[tokio::test]
+    async fn builtin_output_is_byte_identical_per_trade_kind() {
+        use crate::pipeline::total_shape;
+        let builtins: &[(Option<&str>, &str)] = &[
+            (Some("landscape"), "estimate"),
+            (Some("landscape"), "invoice"),
+            (Some("landscape"), "work_order"),
+            (Some("property"), "condition"),
+            (Some("property"), "move_out"),
+            (Some("inspection"), "inspection"),
+            (None, "report"),
+        ];
+        for (template, kind) in builtins {
+            let (store, sid) = processed_session_with_template(
+                *template,
+                &[("todo", "order lumber"), ("part", "bark mulch")],
+            );
+            let ids: Vec<String> = store
+                .list_items_for_session(&sid)
+                .unwrap()
+                .into_iter()
+                .map(|i| i.id)
+                .collect();
+            let store = Arc::new(Mutex::new(store));
+            let pricing = is_pricing_kind(kind);
+            // Pricing kinds get a scripted price on item 1 (both pre- and
+            // post-refactor paths make exactly one pricing call).
+            let responses = if pricing {
+                vec![tool_use(
+                    "price_items",
+                    serde_json::json!({"prices": [{"item_id": ids[0], "amount_cents": 28500}]}),
+                )]
+            } else {
+                vec![]
+            };
+            let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(responses));
+            let b = builder(store.clone(), provider);
+            let outcome = b.build(&sid, kind).await.unwrap();
+
+            let store = store.lock().unwrap();
+            let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
+            let (total_kind, total_label_key) = total_shape(kind);
+            assert_eq!(v["doc_kind"], *kind);
+            assert_eq!(v["total_kind"], total_kind, "{kind}: total_kind is today's");
+            assert_eq!(v["total_label_key"], total_label_key, "{kind}: label key is today's");
+            assert_eq!(v["static_total_cents"], serde_json::Value::Null);
+            assert_eq!(v["queued"], false, "{kind}: no degrade in the golden path");
+            let lines = v["lines"].as_array().unwrap();
+            assert_eq!(lines.len(), 2);
+            let expected: Vec<(&str, &str, Option<i64>, bool)> = if pricing {
+                vec![
+                    ("order lumber", "", Some(28500), false),
+                    ("bark mulch", "", None, true),
+                ]
+            } else {
+                vec![("order lumber", "", None, false), ("bark mulch", "", None, false)]
+            };
+            for ((line, item_id), (title, qty, amount, is_gap)) in
+                lines.iter().zip(&ids).zip(expected)
+            {
+                assert_eq!(line["title"], title, "{kind}");
+                assert_eq!(line["detail"], "", "{kind}");
+                assert_eq!(line["qty"], qty, "{kind}");
+                assert_eq!(
+                    line["amount_cents"],
+                    amount.map_or(serde_json::Value::Null, |a| serde_json::json!(a)),
+                    "{kind}"
+                );
+                assert_eq!(line["section"], serde_json::Value::Null, "{kind}: section stays null");
+                assert_eq!(line["is_gap"], is_gap, "{kind}");
+                assert_eq!(line["item_id"], *item_id, "{kind}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn build_errors_when_the_builtin_schema_was_tombstoned() {
+        let (store, sid) = processed_session_with_items(&[("todo", "mulch")]);
+        store
+            .remove_document_schema(crate::domain::BUILTIN_SCHEMA_ID_ESTIMATE)
+            .unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider);
+        let err = b.build(&sid, "estimate").await.unwrap_err();
+        assert!(
+            matches!(err, CoreError::InvalidState(_)),
+            "truthful failure, never a hardcoded fallback (that would resurrect): {err}"
+        );
+        let store = store.lock().unwrap();
+        assert!(
+            store
+                .list_artifacts_for_session(&sid)
+                .unwrap()
+                .iter()
+                .all(|a| a.kind != "document"),
+            "no document landed"
+        );
+    }
+
+    // ---- Plan 19 Stage 5: fill_fields + number_prefix + fields[] ---------
+
+    use crate::domain::{SchemaSection};
+
+    fn walk_field(key: &str, label: &str) -> SchemaField {
+        SchemaField {
+            key: key.into(),
+            kind: "text".into(),
+            label: label.into(),
+            fill: "walk".into(),
+            static_value: None,
+        }
+    }
+
+    /// The WE-B custom schema (§6): hoa_addendum / landscape / HOA;
+    /// S1 line_items (priced=false), S2 filled "Approvals" (hoa_no,
+    /// reviewed_by — both walk), S3 static "Terms" (terms_body).
+    fn hoa_schema() -> DocumentSchema {
+        DocumentSchema {
+            id: "custom-hoa".into(),
+            kind: "hoa_addendum".into(),
+            label: "HOA Addendum".into(),
+            number_prefix: "HOA".into(),
+            trade_key: Some("landscape".into()),
+            total_kind: "sum".into(),
+            total_label_key: "total".into(),
+            sections: vec![
+                SchemaSection {
+                    key: "line_items".into(),
+                    kind: "line_items".into(),
+                    label: "Items".into(),
+                    priced: false,
+                    fields: vec![],
+                },
+                SchemaSection {
+                    key: "approvals".into(),
+                    kind: "filled".into(),
+                    label: "Approvals".into(),
+                    priced: false,
+                    fields: vec![
+                        walk_field("hoa_no", "HOA approval #"),
+                        walk_field("reviewed_by", "Reviewed by"),
+                    ],
+                },
+                SchemaSection {
+                    key: "terms".into(),
+                    kind: "static".into(),
+                    label: "Terms".into(),
+                    priced: false,
+                    fields: vec![SchemaField {
+                        key: "terms_body".into(),
+                        kind: "static".into(),
+                        label: "Terms".into(),
+                        fill: "static".into(),
+                        static_value: Some("Valid for 30 days.".into()),
+                    }],
+                },
+            ],
+            schema_version: 1,
+            created_at: 0,
+            updated_at: 0,
+            device_id: String::new(),
+        }
+    }
+
+    /// The WE-B pinned session: landscape, I1 todo "Install boxwood hedge",
+    /// I2 part "bark mulch" (right "3 CU YD"), summary as pinned. Returns
+    /// (store, session_id, [id_a, id_b]).
+    fn we_b_session() -> (Store, String, Vec<String>) {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session_with_template(None, "landscape").unwrap();
+        let a = store
+            .add_item_with_source(&session.id, "todo", "Install boxwood hedge", ItemSource::Authoritative)
+            .unwrap();
+        let b = store
+            .add_item_with_source(&session.id, "part", "bark mulch", ItemSource::Authoritative)
+            .unwrap();
+        store.update_item(&b.id, None, None, Some("3 CU YD")).unwrap();
+        store.append_transcript(&session.id, "front yard walk").unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        store
+            .finish_session_processed(
+                &session.id,
+                "Walked the front yard; HOA approval 41827 on file.",
+                &Usage::default(),
+                &[a.id.clone(), b.id.clone()],
+            )
+            .unwrap();
+        store.save_document_schema(&hoa_schema()).unwrap();
+        (store, session.id, vec![a.id, b.id])
+    }
+
+    fn fill_response(fields: serde_json::Value) -> harness::CompletionResponse {
+        tool_use("fill_fields", serde_json::json!({ "fields": fields }))
+    }
+
+    fn decoded_document(
+        store: &Arc<Mutex<Store>>,
+        artifact_id: &str,
+    ) -> serde_json::Value {
+        let store = store.lock().unwrap();
+        let art = store.get_artifact(artifact_id).unwrap();
+        serde_json::from_str(&art.body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn fill_fields_echoes_and_validates_and_drops_unknown_keys() {
+        let fields = vec![walk_field("hoa_no", "HOA approval #"), walk_field("reviewed_by", "Reviewed by")];
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![fill_response(
+            serde_json::json!([
+                {"key": "hoa_no", "value": "41827"},
+                {"key": "gate_code", "value": "9999"},
+                {"key": "hoa_no", "value": "override-attempt"},
+                {"key": "reviewed_by", "value": "Dana"}
+            ]),
+        )]));
+        let mut usage = Usage::default();
+        let map = fill_fields(&provider, &fields, &[], "summary", 512, &mut usage).await.unwrap();
+        assert_eq!(map.get("hoa_no").map(String::as_str), Some("41827"), "first-wins dedup");
+        assert_eq!(map.get("reviewed_by").map(String::as_str), Some("Dana"));
+        assert_eq!(map.get("gate_code"), None, "hallucinated key dropped");
+        assert_eq!(map.len(), 2);
+        assert_eq!(usage, Usage { input_tokens: 80, output_tokens: 15 }, "R9: usage accumulated");
+    }
+
+    /// R6 + the WE-B exact prompt: items (via `format_pricing_items`
+    /// verbatim — no `right_text`) + summary reach the request; the
+    /// transcript never does.
+    #[tokio::test]
+    async fn fill_fields_fed_items_and_summary_never_the_transcript() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        // Literal WE-B item ids, hand-built (not store-minted) so the pinned
+        // message can be compared EXACTLY.
+        let mk = |id: &str, kind: &str, text: &str, right: &str| CapturedItem {
+            id: id.into(),
+            session_id: session.id.clone(),
+            kind: kind.into(),
+            text: text.into(),
+            right: right.into(),
+            source: ItemSource::Authoritative,
+            done: false,
+            created_at: 0,
+            updated_at: 0,
+            device_id: "device-a".into(),
+        };
+        let items =
+            vec![mk("item-A", "todo", "Install boxwood hedge", ""), mk("item-B", "part", "bark mulch", "3 CU YD")];
+        let fields = vec![walk_field("hoa_no", "HOA approval #"), walk_field("reviewed_by", "Reviewed by")];
+        let provider = Arc::new(MockProvider::new(vec![fill_response(serde_json::json!([
+            {"key": "hoa_no", "value": "41827"}
+        ]))]));
+        let dyn_provider: Arc<dyn LlmProvider> = provider.clone();
+        let mut usage = Usage::default();
+        fill_fields(
+            &dyn_provider,
+            &fields,
+            &items,
+            "Walked the front yard; HOA approval 41827 on file.",
+            512,
+            &mut usage,
+        )
+        .await
+        .unwrap();
+
+        let reqs = provider.requests();
+        let ContentBlock::Text { text } = &reqs[0].messages[0].content[0] else {
+            panic!("expected text content");
+        };
+        let expected = "Fill these document fields from the session. Put a value only on a field whose\n\
+                        answer was clearly stated — omit any field you are unsure about; a blank field\n\
+                        is cheaper than a wrong one.\n\
+                        \n\
+                        Fields:\n\
+                        - [hoa_no] HOA approval #\n\
+                        - [reviewed_by] Reviewed by\n\
+                        \n\
+                        Session items:\n\
+                        - [todo] Install boxwood hedge (item_id: item-A)\n\
+                        - [part] bark mulch (item_id: item-B)\n\
+                        \n\
+                        Session summary:\n\
+                        Walked the front yard; HOA approval 41827 on file.";
+        assert_eq!(text, expected, "the exact WE-B user message — note right_text is absent \
+                    (format_pricing_items omits it; the fill pass does not re-add it)");
+        assert!(!text.to_lowercase().contains("transcript"), "never the transcript (R6)");
+    }
+
+    /// WE-B end-to-end (§6): lines + fields + static, exact.
+    #[tokio::test]
+    async fn custom_schema_full_render() {
+        let (store, sid, ids) = we_b_session();
+        let store = Arc::new(Mutex::new(store));
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![fill_response(
+            serde_json::json!([{"key": "hoa_no", "value": "41827"}]),
+        )]));
+        let b = builder(store.clone(), provider);
+        let outcome = b.build(&sid, "hoa_addendum").await.unwrap();
+        assert!(!outcome.queued);
+
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        // line_items (priced=false → is_gap false, today's non-pricing posture)
+        let lines = v["lines"].as_array().unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["title"], "Install boxwood hedge");
+        assert_eq!(lines[0]["detail"], "");
+        assert_eq!(lines[0]["qty"], "");
+        assert_eq!(lines[0]["amount_cents"], serde_json::Value::Null);
+        assert_eq!(lines[0]["section"], serde_json::Value::Null);
+        assert_eq!(lines[0]["is_gap"], false);
+        assert_eq!(lines[0]["item_id"], ids[0]);
+        assert_eq!(lines[1]["title"], "bark mulch");
+        assert_eq!(lines[1]["qty"], "3 CU YD");
+        assert_eq!(lines[1]["is_gap"], false);
+        assert_eq!(lines[1]["item_id"], ids[1]);
+        // fields[] in schema order — the exact WE-B rows
+        assert_eq!(
+            v["fields"],
+            serde_json::json!([
+                {"section_key": "approvals", "key": "hoa_no", "label": "HOA approval #",
+                 "kind": "text", "fill": "walk", "value": "41827", "is_gap": false},
+                {"section_key": "approvals", "key": "reviewed_by", "label": "Reviewed by",
+                 "kind": "text", "fill": "walk", "value": null, "is_gap": true},
+                {"section_key": "terms", "key": "terms_body", "label": "Terms",
+                 "kind": "static", "fill": "static", "value": "Valid for 30 days.", "is_gap": false}
+            ])
+        );
+        assert_eq!(v["total_kind"], "sum");
+        assert_eq!(v["total_label_key"], "total");
+        assert_eq!(v["number_prefix"], "HOA");
+        assert_eq!(v["doc_number"], 1, "HOA-0001 once Swift consumes the prefix");
+        assert_eq!(v["queued"], false);
+    }
+
+    /// R6 (WE-B F2): a field the model omitted is a truthful gap row.
+    #[tokio::test]
+    async fn omitted_field_renders_as_a_gap_row() {
+        let (store, sid, _) = we_b_session();
+        let store = Arc::new(Mutex::new(store));
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![fill_response(
+            serde_json::json!([{"key": "hoa_no", "value": "41827"}]),
+        )]));
+        let b = builder(store.clone(), provider);
+        let outcome = b.build(&sid, "hoa_addendum").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        let reviewed = &v["fields"][1];
+        assert_eq!(reviewed["key"], "reviewed_by");
+        assert_eq!(reviewed["value"], serde_json::Value::Null);
+        assert_eq!(reviewed["is_gap"], true, "not stated → gap, never fabricated (R6)");
+    }
+
+    #[tokio::test]
+    async fn static_field_passes_through_its_value() {
+        let (store, sid, _) = we_b_session();
+        let store = Arc::new(Mutex::new(store));
+        let provider: Arc<dyn LlmProvider> =
+            Arc::new(MockProvider::new(vec![fill_response(serde_json::json!([]))]));
+        let b = builder(store.clone(), provider);
+        let outcome = b.build(&sid, "hoa_addendum").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        let terms = &v["fields"][2];
+        assert_eq!(terms["fill"], "static");
+        assert_eq!(terms["value"], "Valid for 30 days.");
+        assert_eq!(terms["is_gap"], false, "an authored constant is never a gap");
+    }
+
+    #[tokio::test]
+    async fn manual_field_is_always_a_gap_in_v1() {
+        let (store, sid, _) = we_b_session();
+        // A schema whose only filled field is manual: no LLM call at all.
+        let mut schema = hoa_schema();
+        schema.id = "custom-manual".into();
+        schema.kind = "site_signoff".into();
+        schema.number_prefix = "SIGN".into();
+        schema.sections[1].fields = vec![SchemaField {
+            key: "signed_by".into(),
+            kind: "text".into(),
+            label: "Signed by".into(),
+            fill: "manual".into(),
+            static_value: None,
+        }];
+        store.save_document_schema(&schema).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider.clone());
+        let outcome = b.build(&sid, "site_signoff").await.unwrap();
+        assert!(!outcome.queued);
+        assert!(provider.requests().is_empty(), "manual fields are never offered to the model");
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["fields"][0]["key"], "signed_by");
+        assert_eq!(v["fields"][0]["value"], serde_json::Value::Null);
+        assert_eq!(v["fields"][0]["is_gap"], true, "operator completes at review — gap in v1");
+    }
+
+    /// R7: a fill provider `Err` degrades exactly like the pricing degrade
+    /// (`document.rs` pricing match): `queued = true`, fields fall to gaps,
+    /// never a hard build failure.
+    #[tokio::test]
+    async fn fill_call_failure_sets_queued_and_degrades_fields_to_gaps() {
+        let (store, sid, _) = we_b_session();
+        let store = Arc::new(Mutex::new(store));
+        // Empty response queue -> provider errors on the fill call.
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider);
+        let outcome = b.build(&sid, "hoa_addendum").await.unwrap();
+        assert!(outcome.queued, "a model call this build needed didn't complete");
+
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["queued"], true);
+        assert_eq!(v["fields"][0]["is_gap"], true, "hoa_no degraded to a gap");
+        assert_eq!(v["fields"][0]["value"], serde_json::Value::Null);
+        assert_eq!(v["fields"][1]["is_gap"], true, "reviewed_by degraded to a gap");
+        assert_eq!(v["fields"][2]["is_gap"], false, "the static field is untouched by the degrade");
+        assert_eq!(v["doc_number"], 1, "the document still mints and lands (R7)");
+    }
+
+    /// The contrast pin: the call SUCCEEDED but omitted a field — a truthful
+    /// gap WITHOUT `queued` (two distinct meanings, §4 step 5).
+    #[tokio::test]
+    async fn model_declined_field_is_a_gap_without_queued() {
+        let (store, sid, _) = we_b_session();
+        let store = Arc::new(Mutex::new(store));
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![fill_response(
+            serde_json::json!([{"key": "hoa_no", "value": "41827"}]),
+        )]));
+        let b = builder(store.clone(), provider);
+        let outcome = b.build(&sid, "hoa_addendum").await.unwrap();
+        assert!(!outcome.queued, "the call completed — nothing to retry");
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["fields"][1]["is_gap"], true, "the declined field is simply a gap");
+    }
+
+    /// WE-C (§6): per-kind independent counters via the existing
+    /// document_sequences mechanism; `number_prefix` from each resolved
+    /// schema row. The six interleaved builds, exact.
+    #[tokio::test]
+    async fn number_prefix_comes_from_the_schema_row_across_interleaved_builds() {
+        // Zero items: pricing (estimate) and fill (none authored) both skip —
+        // pure numbering.
+        let (store, sid) = processed_session_with_items(&[]);
+        let mut hoa = hoa_schema();
+        hoa.sections[1].fields.clear(); // no fill calls in the WE-C trace
+        store.save_document_schema(&hoa).unwrap();
+        let mut punch = hoa_schema();
+        punch.id = "custom-punch".into();
+        punch.kind = "punch_list".into();
+        punch.number_prefix = "PUN".into();
+        punch.sections[1].fields.clear();
+        store.save_document_schema(&punch).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider);
+
+        let expected: &[(&str, u64, &str)] = &[
+            ("estimate", 1, "EST"),
+            ("hoa_addendum", 1, "HOA"),
+            ("estimate", 2, "EST"),
+            ("punch_list", 1, "PUN"),
+            ("hoa_addendum", 2, "HOA"),
+            ("estimate", 3, "EST"),
+        ];
+        for (kind, number, prefix) in expected {
+            let outcome = b.build(&sid, kind).await.unwrap();
+            let v = decoded_document(&store, &outcome.document_artifact_id);
+            assert_eq!(v["doc_number"], *number, "{kind}: per-kind independent counter");
+            assert_eq!(v["number_prefix"], *prefix, "{kind}: prefix from the schema ROW");
+        }
+    }
+
+    /// The byte-identical guard on the additive keys: built-ins emit
+    /// `fields: []` and today's prefix.
+    #[tokio::test]
+    async fn builtins_emit_empty_fields_and_todays_prefix() {
+        let (store, sid) = processed_session_with_items(&[("todo", "mulch")]);
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider.clone());
+        let outcome = b.build(&sid, "work_order").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["fields"], serde_json::json!([]), "zero authored fields on a built-in");
+        assert_eq!(v["number_prefix"], "WO", "today's Swift-side prefix, now also in the body");
+        assert!(provider.requests().is_empty(), "zero fill calls (launch-safety)");
     }
 }

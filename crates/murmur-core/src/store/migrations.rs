@@ -149,6 +149,30 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE items ADD COLUMN right_text TEXT NOT NULL DEFAULT '';
     "#,
+    // v7: document_schemas (Plan 19) — document structure becomes data. The
+    // TABLE only: the built-ins are seeded by `schemas::seed_builtin_schemas`
+    // from `from_connection` AFTER migrate (this framework is pure SQL strings
+    // with no Rust hook, and it runs before device_id/clock exist), iterating
+    // the ONE source `domain::builtin_schemas()`. Row shape is sync-ready
+    // (§9); the structural part is a JSON envelope column (`sections`), the
+    // artifacts.body precedent — a future multi-section relaxation is a JSON
+    // change, not a migration.
+    r#"
+    CREATE TABLE document_schemas (
+        id             TEXT PRIMARY KEY,
+        kind           TEXT NOT NULL,
+        label          TEXT NOT NULL,
+        number_prefix  TEXT NOT NULL,
+        trade_key      TEXT,
+        sections       TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        created_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL,
+        device_id      TEXT NOT NULL,
+        deleted_at     INTEGER
+    );
+    CREATE INDEX idx_document_schemas_kind ON document_schemas(kind) WHERE deleted_at IS NULL;
+    "#,
 ];
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), CoreError> {

@@ -57,6 +57,15 @@ pub enum EngineError {
     /// Contains store/validation strings only (never an api key).
     #[error("item error: {0}")]
     Item(String),
+    /// A document-schema CRUD call (`list_document_schemas` /
+    /// `save_document_schema` / `remove_document_schema`, Plan 19) failed:
+    /// R6 save-time validation (unknown section/field/fill kind, ≠1
+    /// line_items section, empty kind/label/prefix — nothing persisted), a
+    /// missing/tombstoned id, a poisoned lock, or a store error.
+    /// Recoverable — surface, don't crash. Contains store/validation strings
+    /// only (never an api key).
+    #[error("schema error: {0}")]
+    Schema(String),
 }
 
 /// Config crossing the FFI boundary. `api_key` is an opaque `String` from the

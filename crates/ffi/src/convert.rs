@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use murmur_core::{Artifact, CapturedItem};
 
-use crate::document::{DocLine, DocumentPayload};
+use crate::document::{DocField, DocLine, DocumentPayload};
 use crate::events::BoardItem;
 use crate::notes::{NotesBucket, NotesEntry};
 
@@ -72,6 +72,26 @@ pub fn document_payload(artifact: &Artifact) -> Result<DocumentPayload, ConvertE
         })
         .unwrap_or_default();
 
+    // Plan 19 additive keys, decoded tolerantly like everything else: a
+    // pre-Plan-19 body has neither — `number_prefix: None`, `fields: []`.
+    let fields = v
+        .get("fields")
+        .and_then(|f| f.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|f| DocField {
+                    section_key: f.get("section_key").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    key: f.get("key").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    label: f.get("label").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    kind: f.get("kind").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    fill: f.get("fill").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+                    value: f.get("value").and_then(|x| x.as_str()).map(str::to_string),
+                    is_gap: f.get("is_gap").and_then(|x| x.as_bool()).unwrap_or(false),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     Ok(DocumentPayload {
         doc_kind: v.get("doc_kind").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
         doc_number: v.get("doc_number").and_then(|x| x.as_u64()).unwrap_or_default(),
@@ -81,6 +101,8 @@ pub fn document_payload(artifact: &Artifact) -> Result<DocumentPayload, ConvertE
         static_total_cents: v.get("static_total_cents").and_then(|x| x.as_i64()),
         lines,
         queued: v.get("queued").and_then(|x| x.as_bool()).unwrap_or(false),
+        number_prefix: v.get("number_prefix").and_then(|x| x.as_str()).map(str::to_string),
+        fields,
     })
 }
 
@@ -183,6 +205,51 @@ mod tests {
         });
         let art = store.add_artifact(&session.id, "document", "estimate #1", &body.to_string()).unwrap();
         assert_eq!(document_payload(&art).unwrap().lines[0].item_id, None);
+    }
+
+    #[test]
+    fn document_payload_decodes_number_prefix_and_fields() {
+        // Plan 19: the two additive body keys round-trip through the decoder.
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        let body = serde_json::json!({
+            "doc_kind":"hoa_addendum","doc_number":1,"job_date_unix":1000,
+            "total_kind":"sum","total_label_key":"total","static_total_cents":null,
+            "lines":[], "queued":false, "number_prefix":"HOA",
+            "fields":[
+                {"section_key":"approvals","key":"hoa_no","label":"HOA approval #",
+                 "kind":"text","fill":"walk","value":"41827","is_gap":false},
+                {"section_key":"approvals","key":"reviewed_by","label":"Reviewed by",
+                 "kind":"text","fill":"walk","value":null,"is_gap":true}
+            ]
+        });
+        let art = store.add_artifact(&session.id, "document", "hoa #1", &body.to_string()).unwrap();
+        let payload = document_payload(&art).unwrap();
+        assert_eq!(payload.number_prefix.as_deref(), Some("HOA"));
+        assert_eq!(payload.fields.len(), 2);
+        assert_eq!(payload.fields[0].value.as_deref(), Some("41827"));
+        assert!(!payload.fields[0].is_gap);
+        assert_eq!(payload.fields[1].value, None);
+        assert!(payload.fields[1].is_gap, "the gap row survives the decode");
+        assert_eq!(payload.fields[1].section_key, "approvals");
+        assert_eq!(payload.fields[1].fill, "walk");
+    }
+
+    #[test]
+    fn pre_plan19_body_defaults_number_prefix_none_and_fields_empty() {
+        // A body written before Plan 19 (no number_prefix/fields) renders
+        // unchanged — the additive-keys precedent (Plan 12 item_id).
+        let store = Store::open_in_memory("device-a").unwrap();
+        let session = store.start_session(None).unwrap();
+        let body = serde_json::json!({
+            "doc_kind":"estimate","doc_number":1,"job_date_unix":0,
+            "total_kind":"sum","total_label_key":"total","static_total_cents":null,
+            "lines":[], "queued":false
+        });
+        let art = store.add_artifact(&session.id, "document", "estimate #1", &body.to_string()).unwrap();
+        let payload = document_payload(&art).unwrap();
+        assert_eq!(payload.number_prefix, None);
+        assert!(payload.fields.is_empty());
     }
 
     #[test]

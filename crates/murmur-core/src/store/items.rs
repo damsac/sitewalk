@@ -334,13 +334,8 @@ mod tests {
 
     // ---- Plan 16: right_text column + update_item -----------------------
 
-    #[test]
-    fn fresh_store_is_at_schema_v6() {
-        let (s, _) = store_with_session();
-        let v: i64 =
-            s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 6, "v6 added items.right_text (Plan 16)");
-    }
+    // The fresh-store schema-version pin moved to `store/schemas.rs::
+    // fresh_store_is_at_schema_v7` (Plan 19 replaced the v6 pin).
 
     #[test]
     fn legacy_rows_without_right_text_read_back_empty_right() {

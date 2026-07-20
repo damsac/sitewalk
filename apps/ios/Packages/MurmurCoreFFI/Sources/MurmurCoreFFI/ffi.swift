@@ -571,6 +571,13 @@ public protocol MurmurEngineProtocol : AnyObject {
     func buildDocument(sessionId: String, kind: String) async throws  -> DocumentPayload
     
     /**
+     * Live schemas, id order (built-ins first). `Some(trade)` filters to
+     * that trade plus template-agnostic (NULL-trade) schemas; `None`
+     * returns everything live.
+     */
+    func listDocumentSchemas(tradeKey: String?) throws  -> [DocumentSchema]
+    
+    /**
      * Core's entire file contract (Plan 11 D4): every live photo filename,
      * across all sessions. The shell sweep deletes any file on disk not in
      * this set.
@@ -587,6 +594,13 @@ public protocol MurmurEngineProtocol : AnyObject {
      * across FFI beyond the clone.
      */
     func listVocabulary() throws  -> [String]
+    
+    /**
+     * Tombstone. A second remove of the same id errors (the store's
+     * tombstone `NotFound`). A removed BUILT-IN stays removed forever — the
+     * seed guard sees the tombstone on every launch (WE-A).
+     */
+    func removeDocumentSchema(id: String) throws 
     
     /**
      * Retraction, distinct from `done` (keeper D-#4): tombstones the item
@@ -628,6 +642,14 @@ public protocol MurmurEngineProtocol : AnyObject {
      * poisoned lock or a store fault surfaces as `EngineError::Session`.
      */
     func retryFailedSessions() async throws  -> UInt32
+    
+    /**
+     * Upsert by id (R6: save-time validation rejects unknown section/field/
+     * fill kinds and ≠1 line_items section BEFORE any write — nothing is
+     * persisted on rejection). Returns the saved schema (with its minted id
+     * and bumped timestamps) so the editor updates in one round-trip.
+     */
+    func saveDocumentSchema(schema: DocumentSchema) throws  -> DocumentSchema
     
     /**
      * Seed the vocabulary from a user-confirmed trade pack (Plan 15). A thin
@@ -826,6 +848,19 @@ open func buildDocument(sessionId: String, kind: String)async throws  -> Documen
 }
     
     /**
+     * Live schemas, id order (built-ins first). `Some(trade)` filters to
+     * that trade plus template-agnostic (NULL-trade) schemas; `None`
+     * returns everything live.
+     */
+open func listDocumentSchemas(tradeKey: String?)throws  -> [DocumentSchema] {
+    return try  FfiConverterSequenceTypeDocumentSchema.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_list_document_schemas(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(tradeKey),$0
+    )
+})
+}
+    
+    /**
      * Core's entire file contract (Plan 11 D4): every live photo filename,
      * across all sessions. The shell sweep deletes any file on disk not in
      * this set.
@@ -857,6 +892,18 @@ open func listVocabulary()throws  -> [String] {
     uniffi_ffi_fn_method_murmurengine_list_vocabulary(self.uniffiClonePointer(),$0
     )
 })
+}
+    
+    /**
+     * Tombstone. A second remove of the same id errors (the store's
+     * tombstone `NotFound`). A removed BUILT-IN stays removed forever — the
+     * seed guard sees the tombstone on every launch (WE-A).
+     */
+open func removeDocumentSchema(id: String)throws  {try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_remove_document_schema(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+}
 }
     
     /**
@@ -930,6 +977,20 @@ open func retryFailedSessions()async throws  -> UInt32 {
             liftFunc: FfiConverterUInt32.lift,
             errorHandler: FfiConverterTypeEngineError.lift
         )
+}
+    
+    /**
+     * Upsert by id (R6: save-time validation rejects unknown section/field/
+     * fill kinds and ≠1 line_items section BEFORE any write — nothing is
+     * persisted on rejection). Returns the saved schema (with its minted id
+     * and bumped timestamps) so the editor updates in one round-trip.
+     */
+open func saveDocumentSchema(schema: DocumentSchema)throws  -> DocumentSchema {
+    return try  FfiConverterTypeDocumentSchema.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_save_document_schema(self.uniffiClonePointer(),
+        FfiConverterTypeDocumentSchema.lower(schema),$0
+    )
+})
 }
     
     /**
@@ -1653,6 +1714,118 @@ public func FfiConverterTypeBoardItem_lower(_ value: BoardItem) -> RustBuffer {
 }
 
 
+/**
+ * One authored `filled`/`static` schema field of a built document (Plan 19
+ * Stage 5). `value: None, is_gap: true` is a truthful gap — either the
+ * model declined the field (R6) or it is `manual` (operator completes at
+ * review; always a gap in v1).
+ */
+public struct DocField {
+    public var sectionKey: String
+    public var key: String
+    public var label: String
+    public var kind: String
+    public var fill: String
+    public var value: String?
+    public var isGap: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(sectionKey: String, key: String, label: String, kind: String, fill: String, value: String?, isGap: Bool) {
+        self.sectionKey = sectionKey
+        self.key = key
+        self.label = label
+        self.kind = kind
+        self.fill = fill
+        self.value = value
+        self.isGap = isGap
+    }
+}
+
+
+
+extension DocField: Equatable, Hashable {
+    public static func ==(lhs: DocField, rhs: DocField) -> Bool {
+        if lhs.sectionKey != rhs.sectionKey {
+            return false
+        }
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.label != rhs.label {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.fill != rhs.fill {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        if lhs.isGap != rhs.isGap {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(sectionKey)
+        hasher.combine(key)
+        hasher.combine(label)
+        hasher.combine(kind)
+        hasher.combine(fill)
+        hasher.combine(value)
+        hasher.combine(isGap)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDocField: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DocField {
+        return
+            try DocField(
+                sectionKey: FfiConverterString.read(from: &buf), 
+                key: FfiConverterString.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterString.read(from: &buf), 
+                fill: FfiConverterString.read(from: &buf), 
+                value: FfiConverterOptionString.read(from: &buf), 
+                isGap: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DocField, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sectionKey, into: &buf)
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.fill, into: &buf)
+        FfiConverterOptionString.write(value.value, into: &buf)
+        FfiConverterBool.write(value.isGap, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDocField_lift(_ buf: RustBuffer) throws -> DocField {
+    return try FfiConverterTypeDocField.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDocField_lower(_ value: DocField) -> RustBuffer {
+    return FfiConverterTypeDocField.lower(value)
+}
+
+
 public struct DocLine {
     public var id: String
     public var title: String
@@ -1794,18 +1967,44 @@ public struct DocumentPayload {
     public var staticTotalCents: Int64?
     public var lines: [DocLine]
     /**
-     * True when `finish()` degraded offline (D9) — a partial document built
-     * from live items, all gaps, capture never lost.
+     * True when a model call this build needed didn't run to completion —
+     * originally the offline-degrade flag (D9), then the pricing degrade
+     * (Plan 13 D5), now also the fill-pass degrade (Plan 19). One meaning:
+     * regenerate to retry.
      */
     public var queued: Bool
+    /**
+     * The resolved schema row's numbering prefix ("EST", "HOA") — additive
+     * (Plan 19). `None` for a pre-Plan-19 document body. Swift's
+     * `docNumberLabel` still renders built-ins from its own switch today;
+     * consuming this field is sac's editor-milestone follow-up (WE-C).
+     */
+    public var numberPrefix: String?
+    /**
+     * Authored schema fields — additive (Plan 19). Empty for built-ins and
+     * pre-Plan-19 bodies.
+     */
+    public var fields: [DocField]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(docKind: String, docNumber: UInt64, jobDateUnix: UInt64, totalKind: String, totalLabelKey: String, staticTotalCents: Int64?, lines: [DocLine], 
         /**
-         * True when `finish()` degraded offline (D9) — a partial document built
-         * from live items, all gaps, capture never lost.
-         */queued: Bool) {
+         * True when a model call this build needed didn't run to completion —
+         * originally the offline-degrade flag (D9), then the pricing degrade
+         * (Plan 13 D5), now also the fill-pass degrade (Plan 19). One meaning:
+         * regenerate to retry.
+         */queued: Bool, 
+        /**
+         * The resolved schema row's numbering prefix ("EST", "HOA") — additive
+         * (Plan 19). `None` for a pre-Plan-19 document body. Swift's
+         * `docNumberLabel` still renders built-ins from its own switch today;
+         * consuming this field is sac's editor-milestone follow-up (WE-C).
+         */numberPrefix: String?, 
+        /**
+         * Authored schema fields — additive (Plan 19). Empty for built-ins and
+         * pre-Plan-19 bodies.
+         */fields: [DocField]) {
         self.docKind = docKind
         self.docNumber = docNumber
         self.jobDateUnix = jobDateUnix
@@ -1814,6 +2013,8 @@ public struct DocumentPayload {
         self.staticTotalCents = staticTotalCents
         self.lines = lines
         self.queued = queued
+        self.numberPrefix = numberPrefix
+        self.fields = fields
     }
 }
 
@@ -1845,6 +2046,12 @@ extension DocumentPayload: Equatable, Hashable {
         if lhs.queued != rhs.queued {
             return false
         }
+        if lhs.numberPrefix != rhs.numberPrefix {
+            return false
+        }
+        if lhs.fields != rhs.fields {
+            return false
+        }
         return true
     }
 
@@ -1857,6 +2064,8 @@ extension DocumentPayload: Equatable, Hashable {
         hasher.combine(staticTotalCents)
         hasher.combine(lines)
         hasher.combine(queued)
+        hasher.combine(numberPrefix)
+        hasher.combine(fields)
     }
 }
 
@@ -1875,7 +2084,9 @@ public struct FfiConverterTypeDocumentPayload: FfiConverterRustBuffer {
                 totalLabelKey: FfiConverterString.read(from: &buf), 
                 staticTotalCents: FfiConverterOptionInt64.read(from: &buf), 
                 lines: FfiConverterSequenceTypeDocLine.read(from: &buf), 
-                queued: FfiConverterBool.read(from: &buf)
+                queued: FfiConverterBool.read(from: &buf), 
+                numberPrefix: FfiConverterOptionString.read(from: &buf), 
+                fields: FfiConverterSequenceTypeDocField.read(from: &buf)
         )
     }
 
@@ -1888,6 +2099,8 @@ public struct FfiConverterTypeDocumentPayload: FfiConverterRustBuffer {
         FfiConverterOptionInt64.write(value.staticTotalCents, into: &buf)
         FfiConverterSequenceTypeDocLine.write(value.lines, into: &buf)
         FfiConverterBool.write(value.queued, into: &buf)
+        FfiConverterOptionString.write(value.numberPrefix, into: &buf)
+        FfiConverterSequenceTypeDocField.write(value.fields, into: &buf)
     }
 }
 
@@ -1904,6 +2117,163 @@ public func FfiConverterTypeDocumentPayload_lift(_ buf: RustBuffer) throws -> Do
 #endif
 public func FfiConverterTypeDocumentPayload_lower(_ value: DocumentPayload) -> RustBuffer {
     return FfiConverterTypeDocumentPayload.lower(value)
+}
+
+
+/**
+ * FFI mirror of `murmur_core::DocumentSchema`.
+ */
+public struct DocumentSchema {
+    /**
+     * Empty on save = "create" (core mints a UUIDv7); a built-in's fixed id
+     * or a prior save's id = upsert.
+     */
+    public var id: String
+    public var kind: String
+    public var label: String
+    public var numberPrefix: String
+    public var tradeKey: String?
+    public var totalKind: String
+    public var totalLabelKey: String
+    public var sections: [SchemaSection]
+    public var schemaVersion: UInt32
+    public var createdAt: UInt64
+    public var updatedAt: UInt64
+    public var deviceId: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Empty on save = "create" (core mints a UUIDv7); a built-in's fixed id
+         * or a prior save's id = upsert.
+         */id: String, kind: String, label: String, numberPrefix: String, tradeKey: String?, totalKind: String, totalLabelKey: String, sections: [SchemaSection], schemaVersion: UInt32, createdAt: UInt64, updatedAt: UInt64, deviceId: String) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+        self.numberPrefix = numberPrefix
+        self.tradeKey = tradeKey
+        self.totalKind = totalKind
+        self.totalLabelKey = totalLabelKey
+        self.sections = sections
+        self.schemaVersion = schemaVersion
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deviceId = deviceId
+    }
+}
+
+
+
+extension DocumentSchema: Equatable, Hashable {
+    public static func ==(lhs: DocumentSchema, rhs: DocumentSchema) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.label != rhs.label {
+            return false
+        }
+        if lhs.numberPrefix != rhs.numberPrefix {
+            return false
+        }
+        if lhs.tradeKey != rhs.tradeKey {
+            return false
+        }
+        if lhs.totalKind != rhs.totalKind {
+            return false
+        }
+        if lhs.totalLabelKey != rhs.totalLabelKey {
+            return false
+        }
+        if lhs.sections != rhs.sections {
+            return false
+        }
+        if lhs.schemaVersion != rhs.schemaVersion {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return false
+        }
+        if lhs.deviceId != rhs.deviceId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(kind)
+        hasher.combine(label)
+        hasher.combine(numberPrefix)
+        hasher.combine(tradeKey)
+        hasher.combine(totalKind)
+        hasher.combine(totalLabelKey)
+        hasher.combine(sections)
+        hasher.combine(schemaVersion)
+        hasher.combine(createdAt)
+        hasher.combine(updatedAt)
+        hasher.combine(deviceId)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDocumentSchema: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DocumentSchema {
+        return
+            try DocumentSchema(
+                id: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterString.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf), 
+                numberPrefix: FfiConverterString.read(from: &buf), 
+                tradeKey: FfiConverterOptionString.read(from: &buf), 
+                totalKind: FfiConverterString.read(from: &buf), 
+                totalLabelKey: FfiConverterString.read(from: &buf), 
+                sections: FfiConverterSequenceTypeSchemaSection.read(from: &buf), 
+                schemaVersion: FfiConverterUInt32.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                updatedAt: FfiConverterUInt64.read(from: &buf), 
+                deviceId: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DocumentSchema, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+        FfiConverterString.write(value.numberPrefix, into: &buf)
+        FfiConverterOptionString.write(value.tradeKey, into: &buf)
+        FfiConverterString.write(value.totalKind, into: &buf)
+        FfiConverterString.write(value.totalLabelKey, into: &buf)
+        FfiConverterSequenceTypeSchemaSection.write(value.sections, into: &buf)
+        FfiConverterUInt32.write(value.schemaVersion, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterUInt64.write(value.updatedAt, into: &buf)
+        FfiConverterString.write(value.deviceId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDocumentSchema_lift(_ buf: RustBuffer) throws -> DocumentSchema {
+    return try FfiConverterTypeDocumentSchema.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDocumentSchema_lower(_ value: DocumentSchema) -> RustBuffer {
+    return FfiConverterTypeDocumentSchema.lower(value)
 }
 
 
@@ -2422,6 +2792,194 @@ public func FfiConverterTypePhotoRef_lower(_ value: PhotoRef) -> RustBuffer {
 
 
 /**
+ * FFI mirror of `murmur_core::SchemaField` (murmur-core stays UniFFI-free —
+ * every record lives on this side of the boundary, the `NotesEntry`
+ * precedent).
+ */
+public struct SchemaField {
+    public var key: String
+    public var kind: String
+    public var label: String
+    public var fill: String
+    public var staticValue: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, kind: String, label: String, fill: String, staticValue: String?) {
+        self.key = key
+        self.kind = kind
+        self.label = label
+        self.fill = fill
+        self.staticValue = staticValue
+    }
+}
+
+
+
+extension SchemaField: Equatable, Hashable {
+    public static func ==(lhs: SchemaField, rhs: SchemaField) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.label != rhs.label {
+            return false
+        }
+        if lhs.fill != rhs.fill {
+            return false
+        }
+        if lhs.staticValue != rhs.staticValue {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(kind)
+        hasher.combine(label)
+        hasher.combine(fill)
+        hasher.combine(staticValue)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSchemaField: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SchemaField {
+        return
+            try SchemaField(
+                key: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterString.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf), 
+                fill: FfiConverterString.read(from: &buf), 
+                staticValue: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SchemaField, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+        FfiConverterString.write(value.fill, into: &buf)
+        FfiConverterOptionString.write(value.staticValue, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaField_lift(_ buf: RustBuffer) throws -> SchemaField {
+    return try FfiConverterTypeSchemaField.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaField_lower(_ value: SchemaField) -> RustBuffer {
+    return FfiConverterTypeSchemaField.lower(value)
+}
+
+
+/**
+ * FFI mirror of `murmur_core::SchemaSection`.
+ */
+public struct SchemaSection {
+    public var key: String
+    public var kind: String
+    public var label: String
+    public var priced: Bool
+    public var fields: [SchemaField]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, kind: String, label: String, priced: Bool, fields: [SchemaField]) {
+        self.key = key
+        self.kind = kind
+        self.label = label
+        self.priced = priced
+        self.fields = fields
+    }
+}
+
+
+
+extension SchemaSection: Equatable, Hashable {
+    public static func ==(lhs: SchemaSection, rhs: SchemaSection) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.label != rhs.label {
+            return false
+        }
+        if lhs.priced != rhs.priced {
+            return false
+        }
+        if lhs.fields != rhs.fields {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(kind)
+        hasher.combine(label)
+        hasher.combine(priced)
+        hasher.combine(fields)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSchemaSection: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SchemaSection {
+        return
+            try SchemaSection(
+                key: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterString.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf), 
+                priced: FfiConverterBool.read(from: &buf), 
+                fields: FfiConverterSequenceTypeSchemaField.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SchemaSection, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterString.write(value.kind, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+        FfiConverterBool.write(value.priced, into: &buf)
+        FfiConverterSequenceTypeSchemaField.write(value.fields, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaSection_lift(_ buf: RustBuffer) throws -> SchemaSection {
+    return try FfiConverterTypeSchemaSection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSchemaSection_lower(_ value: SchemaSection) -> RustBuffer {
+    return FfiConverterTypeSchemaSection.lower(value)
+}
+
+
+/**
  * The exact outcome of one [`MurmurEngine::seed_vocabulary`] pass (Plan 15).
  * `terms` is the RESULTING vocabulary (insertion order) so the onboarding
  * card updates in one round-trip, mirroring the CRUD methods.
@@ -2592,6 +3150,17 @@ public enum EngineError {
      */
     case Item(message: String)
     
+    /**
+     * A document-schema CRUD call (`list_document_schemas` /
+     * `save_document_schema` / `remove_document_schema`, Plan 19) failed:
+     * R6 save-time validation (unknown section/field/fill kind, ≠1
+     * line_items section, empty kind/label/prefix — nothing persisted), a
+     * missing/tombstoned id, a poisoned lock, or a store error.
+     * Recoverable — surface, don't crash. Contains store/validation strings
+     * only (never an api key).
+     */
+    case Schema(message: String)
+    
 }
 
 
@@ -2640,6 +3209,10 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 9: return .Schema(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2667,6 +3240,8 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         case .Item(_ /* message is ignored*/):
             writeInt(&buf, Int32(8))
+        case .Schema(_ /* message is ignored*/):
+            writeInt(&buf, Int32(9))
 
         
         }
@@ -3001,6 +3576,31 @@ fileprivate struct FfiConverterSequenceTypeBoardItem: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDocField: FfiConverterRustBuffer {
+    typealias SwiftType = [DocField]
+
+    public static func write(_ value: [DocField], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDocField.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DocField] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DocField]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDocField.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeDocLine: FfiConverterRustBuffer {
     typealias SwiftType = [DocLine]
 
@@ -3018,6 +3618,31 @@ fileprivate struct FfiConverterSequenceTypeDocLine: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeDocLine.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeDocumentSchema: FfiConverterRustBuffer {
+    typealias SwiftType = [DocumentSchema]
+
+    public static func write(_ value: [DocumentSchema], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDocumentSchema.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DocumentSchema] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DocumentSchema]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDocumentSchema.read(from: &buf))
         }
         return seq
     }
@@ -3068,6 +3693,56 @@ fileprivate struct FfiConverterSequenceTypePhotoRef: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypePhotoRef.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSchemaField: FfiConverterRustBuffer {
+    typealias SwiftType = [SchemaField]
+
+    public static func write(_ value: [SchemaField], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSchemaField.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SchemaField] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SchemaField]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSchemaField.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSchemaSection: FfiConverterRustBuffer {
+    typealias SwiftType = [SchemaSection]
+
+    public static func write(_ value: [SchemaSection], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSchemaSection.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SchemaSection] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SchemaSection]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSchemaSection.read(from: &buf))
         }
         return seq
     }
@@ -3149,6 +3824,9 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_murmurengine_build_document() != 48464) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ffi_checksum_method_murmurengine_list_document_schemas() != 57223) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_murmurengine_list_live_photo_filenames() != 39240) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3156,6 +3834,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_list_vocabulary() != 10809) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_remove_document_schema() != 20008) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_remove_item() != 65496) {
@@ -3168,6 +3849,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_retry_failed_sessions() != 46346) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_save_document_schema() != 48849) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_seed_vocabulary() != 18954) {
