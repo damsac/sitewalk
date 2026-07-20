@@ -228,6 +228,9 @@ final class DemoWalkEngine: WalkEngine {
     /// compile and behave in the demo (Plan 20 demo posture).
     private var lastNotes: NotesModel?
 
+    /// No model to warm in the scripted demo (Plan 20 D7) — a no-op.
+    func warmStt() {}
+
     /// The demo keeps its walk log in-memory (`AppModel.sessionWalks`) —
     /// `listSessions` stays a `[]` no-op stub. `hydrateWalkLog`'s F2 guard is
     /// what keeps this empty-success from clobbering the demo log.

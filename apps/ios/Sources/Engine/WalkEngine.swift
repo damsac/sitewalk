@@ -339,6 +339,16 @@ protocol WalkEngine: AnyObject {
     /// `AppModel.hydrateWalkLog`'s F2 guard).
     func listSessions() throws -> [WalkSummary]
 
+    /// Plan 20 D7: warm the on-device STT model (the expensive model read +
+    /// Metal init) so the first START WALK tap doesn't pay it. Fired
+    /// fire-and-forget from the TAIL of the app-open sweeps — AFTER the
+    /// synchronous sweeps, never before them (#185 invariant). Idempotent; a
+    /// failure is silent-degrade (log + swallow — the next begin cold-loads
+    /// exactly as before). `async` so the real engine can hop the blocking
+    /// model load off the main actor (the attachPhoto pattern).
+    /// `DemoWalkEngine` no-ops (no model to warm).
+    func warmStt() async throws
+
     /// Re-read a session's notes from the store (D1) — the SAME payload
     /// `finish()` returned for it, field by field (the Rust side reconstructs
     /// through one shared funnel). Used by the board's reopen tap AND as the

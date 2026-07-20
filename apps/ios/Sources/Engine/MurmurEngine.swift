@@ -312,6 +312,18 @@ final class MurmurEngine: WalkEngine {
         try engine.removeItem(sessionId: sessionId, itemId: itemId)
     }
 
+    // Plan 20 D7: forward to the Rust warm holder (idempotent; Ok on a
+    // text-only engine). The FFI call is a SYNC export that performs the whole
+    // model read + Metal init — run it on `Task.detached` (the attachPhoto
+    // pattern) so the main actor never pays it. The caller
+    // (`warmSttInBackground`) swallows a throw — silent-degrade to cold-load.
+    func warmStt() async throws {
+        let engine = self.engine
+        try await Task.detached(priority: .utility) {
+            try engine.warmStt()
+        }.value
+    }
+
     // MARK: - Walk-reopen read seam (Plan 20 Half A): pure reads, engine-keyed.
 
     func listSessions() throws -> [WalkSummary] {

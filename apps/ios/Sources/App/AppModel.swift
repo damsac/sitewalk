@@ -214,6 +214,10 @@ final class AppModel {
     /// Set when the user tries a voice walk with mic permission denied —
     /// BoardView surfaces it with an "open Settings" affordance.
     var micDenied = false
+    /// Plan 20 D9: true from the START WALK paint until `begin` + wiring
+    /// complete — WalkView shows "MIC STARTING…" while the (usually warm,
+    /// occasionally cold-load) engine bring-up runs behind the painted screen.
+    var micStarting = false
 
     /// When live, drive the STT path from a bundled fixture WAV instead of the
     /// mic (`wavwalk=1`, D7) — a mic-free way to exercise real whisper.
@@ -294,62 +298,87 @@ final class AppModel {
         }
     }
 
+    /// Plan 20 D9: paint the walk screen FIRST, then run the (warm ⇒ cheap)
+    /// `begin` + wiring on the next main-actor turn. The paint-first block
+    /// contains ONLY `phase`/`path`/`micStarting` — NOTHING session-dependent
+    /// moves into it (the D9 numbered invariant, F3): STT/audio must never
+    /// wire onto a session `begin` didn't successfully open (Plan 07
+    /// dead-walk — a dead session would pump and silently drop every append).
     private func beginWalk() {
         pumpTask?.cancel()
         eventTask?.cancel()
 
-        // begin() is throwing (review P1): the real engine's session start is
-        // fallible across FFI. If it fails, the user must NOT enter the
-        // walking flow — a dead session would run STT and silently drop every
-        // append (capture loss). Stay on the board; walk state untouched.
-        // sac: this deserves a visible error surface ("couldn't start the
-        // walk — try again"); no error chrome exists in the app yet, so the
-        // floor here is the log breadcrumb + not entering .walking. Yours to
-        // design.
-        let events: AsyncStream<WalkEvent>
-        do {
-            events = try engine.begin(trade: trade)
-        } catch {
-            Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
-                .error("startWalk: engine.begin failed, staying on board: \(error, privacy: .public)")
-            return
-        }
-
-        transcript = ""
-        previewTail = ""
-        items = []
-        isPaused = false
-        walkStart = Date()
-        // Snapshot the session id NOW, while the engine's live session still
-        // has one — see the doc comment on `currentSessionId` (Plan 11 D7).
-        currentSessionId = engine.currentSessionId
-        photos = []
-
-        eventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in events {
-                switch event {
-                case .boardUpdated(let items):
-                    withAnimation(.easeOut(duration: 0.25)) { self.items = items }
-                    // Track the newest by id, NOT array position (see
-                    // `lastCapturedID` doc comment).
-                    self.lastCapturedID = items.last?.id
-                case .transcriptCommitted(let text):
-                    // The audio path's transcript originates in Rust (whisper).
-                    self.transcript += text
-                    self.previewTail = ""
-                case .transcriptPreview(let text):
-                    self.previewTail = text
-                }
-            }
-        }
-
+        // Paint-first block (D9): screen appears immediately; WalkView shows
+        // "MIC STARTING…" until step 4 below clears it.
+        micStarting = true
         phase = .walking
         path = [.walking]
-        if walkMode == .demo {
-            startScriptedSource()
-        } else {
-            startAudioSource()
+
+        Task { [weak self] in
+            guard let self else { return }
+            // Yield so SwiftUI renders the painted walk screen before the
+            // begin work runs on this same main actor.
+            await Task.yield()
+
+            // (1) begin() is throwing (review P1): fallible across FFI. On a
+            // throw, do NOT run steps 2–4 — revert to the board with the log
+            // breadcrumb (the existing stay-on-board posture). F6 accepted
+            // cosmetic: the screen briefly painted .walking and flashes back;
+            // re-serializing the paint behind begin would forfeit the whole
+            // D9 perceived-latency win. sac: visible error chrome is yours.
+            let events: AsyncStream<WalkEvent>
+            do {
+                events = try self.engine.begin(trade: self.trade)
+            } catch {
+                Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
+                    .error("startWalk: engine.begin failed, back to board: \(error, privacy: .public)")
+                self.micStarting = false
+                self.phase = .board
+                self.path = []
+                return
+            }
+
+            // (2) Snapshot the session id STRICTLY AFTER begin returns Ok,
+            // while the engine's live session still has one (Plan 11 D7).
+            // Must not precede (1); must not sit in the paint-first block.
+            self.currentSessionId = self.engine.currentSessionId
+
+            // (3) Reset walk state + wire the event/audio tasks — all
+            // session-dependent, so all strictly after the begin gate.
+            self.transcript = ""
+            self.previewTail = ""
+            self.items = []
+            self.isPaused = false
+            self.walkStart = Date()
+            self.photos = []
+
+            self.eventTask = Task { [weak self] in
+                guard let self else { return }
+                for await event in events {
+                    switch event {
+                    case .boardUpdated(let items):
+                        withAnimation(.easeOut(duration: 0.25)) { self.items = items }
+                        // Track the newest by id, NOT array position (see
+                        // `lastCapturedID` doc comment).
+                        self.lastCapturedID = items.last?.id
+                    case .transcriptCommitted(let text):
+                        // The audio path's transcript originates in Rust (whisper).
+                        self.transcript += text
+                        self.previewTail = ""
+                    case .transcriptPreview(let text):
+                        self.previewTail = text
+                    }
+                }
+            }
+
+            if self.walkMode == .demo {
+                self.startScriptedSource()
+            } else {
+                self.startAudioSource()
+            }
+
+            // (4) live.
+            self.micStarting = false
         }
     }
 
