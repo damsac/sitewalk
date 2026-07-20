@@ -1,6 +1,6 @@
 use rusqlite::Row;
 
-use crate::domain::{Session, SessionStatus, SessionSummary};
+use crate::domain::{Session, SessionStatus, SessionSummary, WalkSummary};
 use crate::error::CoreError;
 use crate::ids::new_id;
 use crate::store::Store;
@@ -359,6 +359,49 @@ impl Store {
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
             out.push(summary_from_row(row)?);
+        }
+        Ok(out)
+    }
+
+    /// The board walk log (Plan 20 D2/D3): a lightweight, transcript-free
+    /// projection for the reopen-a-walk list. ONE SQL statement — a correlated
+    /// COUNT for live items and an EXISTS for a live `document` artifact.
+    /// Filters (D3, pinned): tombstoned rows are excluded (`deleted_at IS
+    /// NULL`) and `Recording` rows are excluded entirely — a Recording row is
+    /// either the live walk (reopening it is nonsense) or an un-swept crash
+    /// zombie the app-open sweep will flip to Failed. Reverse-chronological.
+    /// A SEPARATE method (not extra columns on `SessionSummary`) so the hot
+    /// processing-poll path never pays for the counts.
+    pub fn list_walk_summaries(&self) -> Result<Vec<WalkSummary>, CoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.job_id, s.template, s.status, s.summary, s.started_at, s.ended_at,
+                    (SELECT COUNT(*) FROM items i
+                      WHERE i.session_id = s.id AND i.deleted_at IS NULL) AS item_count,
+                    EXISTS(SELECT 1 FROM artifacts a
+                            WHERE a.session_id = s.id AND a.kind = 'document'
+                              AND a.deleted_at IS NULL) AS has_document
+             FROM sessions s
+             WHERE s.deleted_at IS NULL AND s.status != 'recording'
+             ORDER BY s.started_at DESC, s.id DESC",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let status_raw: String = row.get("status").map_err(CoreError::Sqlite)?;
+            out.push(WalkSummary {
+                id: row.get("id").map_err(CoreError::Sqlite)?,
+                job_id: row.get("job_id").map_err(CoreError::Sqlite)?,
+                template: row.get("template").map_err(CoreError::Sqlite)?,
+                status: SessionStatus::parse(&status_raw)?,
+                summary: row.get("summary").map_err(CoreError::Sqlite)?,
+                started_at: row.get::<_, i64>("started_at").map_err(CoreError::Sqlite)? as u64,
+                ended_at: row
+                    .get::<_, Option<i64>>("ended_at")
+                    .map_err(CoreError::Sqlite)?
+                    .map(|v| v as u64),
+                item_count: row.get::<_, i64>("item_count").map_err(CoreError::Sqlite)? as u64,
+                has_document: row.get::<_, bool>("has_document").map_err(CoreError::Sqlite)?,
+            });
         }
         Ok(out)
     }
@@ -994,6 +1037,111 @@ mod tests {
             s.clear_authoritative_outputs("nope"),
             Err(CoreError::NotFound { entity: "session", .. })
         ));
+    }
+
+    // --- Plan 20 Stage 1: list_walk_summaries (D2/D3) ----------------------
+
+    /// WE-C: seed P (Processed, 2 items, 1 document), F (Failed, 3 items),
+    /// R (Recording — live walk), D (Processed but tombstoned). Only [P, F]
+    /// are listed, in reverse-chronological order, with correct fields.
+    #[test]
+    fn list_walk_summaries_excludes_recording_and_deleted() {
+        let s = store();
+        // D: started_at = 100, Processed, then tombstoned.
+        let s = s.with_clock(Arc::new(|| 100));
+        let d = s.start_session_with_template(None, "landscape").unwrap();
+        s.end_session(&d.id).unwrap();
+        s.mark_session_processed(&d.id, "deleted walk").unwrap();
+        s.delete_session(&d.id).unwrap();
+        // F: started_at = 200, Failed, 3 items.
+        let s = s.with_clock(Arc::new(|| 200));
+        let f = s.start_session_with_template(None, "inspection").unwrap();
+        for t in ["a", "b", "c"] {
+            s.add_item(&f.id, "todo", t).unwrap();
+        }
+        s.end_session(&f.id).unwrap();
+        s.mark_session_failed(&f.id).unwrap();
+        // P: started_at = 300, Processed, 2 items, 1 live document artifact.
+        let s = s.with_clock(Arc::new(|| 300));
+        let p = s.start_session_with_template(None, "estimate").unwrap();
+        s.add_item(&p.id, "todo", "one").unwrap();
+        s.add_item(&p.id, "note", "two").unwrap();
+        s.end_session(&p.id).unwrap();
+        s.mark_session_processed(&p.id, "Estimate for the front yard.").unwrap();
+        s.add_artifact(&p.id, "document", "estimate", "{}").unwrap();
+        // R: started_at = 400, still Recording — the NEWEST row, never listed.
+        let s = s.with_clock(Arc::new(|| 400));
+        s.start_session_with_template(None, "landscape").unwrap();
+
+        let walks = s.list_walk_summaries().unwrap();
+        assert_eq!(
+            walks.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(),
+            vec![p.id.as_str(), f.id.as_str()],
+            "R (Recording) and D (tombstoned) are excluded; order is reverse-chron"
+        );
+        assert_eq!(walks[0].status, SessionStatus::Processed);
+        assert_eq!(walks[0].template.as_deref(), Some("estimate"));
+        assert_eq!(walks[0].summary.as_deref(), Some("Estimate for the front yard."));
+        assert_eq!(walks[0].started_at, 300);
+        assert_eq!(walks[0].item_count, 2);
+        assert!(walks[0].has_document);
+        assert_eq!(walks[1].status, SessionStatus::Failed);
+        assert_eq!(walks[1].template.as_deref(), Some("inspection"));
+        assert_eq!(walks[1].item_count, 3);
+        assert!(!walks[1].has_document);
+    }
+
+    #[test]
+    fn list_walk_summaries_counts_live_items_only() {
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        s.add_item(&session.id, "todo", "keep").unwrap();
+        let dead = s.add_item(&session.id, "todo", "tombstoned").unwrap();
+        s.delete_item(&dead.id).unwrap();
+        s.end_session(&session.id).unwrap();
+        let walks = s.list_walk_summaries().unwrap();
+        assert_eq!(walks.len(), 1);
+        assert_eq!(walks[0].item_count, 1, "only the live item counts");
+    }
+
+    #[test]
+    fn list_walk_summaries_flags_has_document() {
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        s.end_session(&session.id).unwrap();
+        assert!(!s.list_walk_summaries().unwrap()[0].has_document);
+        // A non-document artifact does not flip the flag.
+        s.add_artifact(&session.id, "notes", "walk", "{}").unwrap();
+        assert!(!s.list_walk_summaries().unwrap()[0].has_document);
+        let doc = s.add_artifact(&session.id, "document", "estimate", "{}").unwrap();
+        assert!(s.list_walk_summaries().unwrap()[0].has_document);
+        s.delete_artifact(&doc.id).unwrap();
+        assert!(
+            !s.list_walk_summaries().unwrap()[0].has_document,
+            "a tombstoned document artifact no longer counts"
+        );
+    }
+
+    /// Plan 04 lesson, compile-enforced: `WalkSummary` has no transcript field
+    /// — exhaustive destructuring fails to compile if one is ever added.
+    #[test]
+    fn walk_summary_projection_has_no_transcript_field() {
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        s.append_transcript(&session.id, &"x".repeat(50_000)).unwrap();
+        s.end_session(&session.id).unwrap();
+        let walks = s.list_walk_summaries().unwrap();
+        let crate::domain::WalkSummary {
+            id: _,
+            job_id: _,
+            template: _,
+            status: _,
+            summary: _,
+            started_at: _,
+            ended_at: _,
+            item_count: _,
+            has_document: _,
+        } = walks[0].clone();
     }
 
     #[test]

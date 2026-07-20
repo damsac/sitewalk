@@ -10,7 +10,7 @@ pub use coordinator::ReflectionCoordinator;
 pub use domain::{
     builtin_schemas, Artifact, CapturedItem, Contact, DocumentSchema, Job, JobStatus, ItemSource,
     LlmUsageRow, NewJob, Photo, SchemaField, SchemaSection, Session, SessionStatus,
-    SessionSummary, BUILTIN_SCHEMA_DEVICE_ID, BUILTIN_SCHEMA_ID_CONDITION,
+    SessionSummary, WalkSummary, BUILTIN_SCHEMA_DEVICE_ID, BUILTIN_SCHEMA_ID_CONDITION,
     BUILTIN_SCHEMA_ID_ESTIMATE, BUILTIN_SCHEMA_ID_INSPECTION, BUILTIN_SCHEMA_ID_INVOICE,
     BUILTIN_SCHEMA_ID_MOVE_OUT, BUILTIN_SCHEMA_ID_REPORT, BUILTIN_SCHEMA_ID_WORK_ORDER,
     VALID_FIELD_KINDS, VALID_FILL_KINDS, VALID_ITEM_KINDS, VALID_SECTION_KINDS,

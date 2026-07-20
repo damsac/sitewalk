@@ -392,6 +392,24 @@ pub struct SessionSummary {
     pub transcript_chars: u64,
 }
 
+/// Board walk-log projection (Plan 20 D2): a purpose-built sibling of
+/// `SessionSummary` for the reopen-a-walk board list. Adds `template`,
+/// `item_count` (live items only) and `has_document` (a live `document`
+/// artifact exists) — and carries NO transcript field: the projection is
+/// compile-enforced transcript-free (Plan 04 lesson).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WalkSummary {
+    pub id: String,
+    pub job_id: Option<String>,
+    pub template: Option<String>,
+    pub status: SessionStatus,
+    pub summary: Option<String>,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+    pub item_count: u64,
+    pub has_document: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

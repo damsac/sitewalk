@@ -15,6 +15,8 @@ pub use bias::build_bias_prompt;
 pub use decoder::{Decoder, RawSegment, ScriptedDecoder, WordTiming};
 #[cfg(feature = "whisper")]
 pub use whisper::WhisperDecoder;
+#[cfg(feature = "whisper")]
+pub use whisper::{load_warm_model, WarmModel};
 
 /// A finalized, never-to-be-revised transcript segment (append-only contract).
 /// Timestamps are ABSOLUTE audio milliseconds from stream start. The shell
@@ -159,6 +161,22 @@ impl SttStream {
         cfg.validate()?; // reject overlap ≥ chunk before opening the model
         let decoder = whisper::WhisperDecoder::open(model, &cfg.language, cfg.use_gpu, cfg.word_timestamps)?;
         Ok(Self::with_decoder(Box::new(decoder), cfg, vocab))
+    }
+
+    /// Plan 20 D6: build a stream over an already-warmed model — NO model
+    /// load. Internally `Arc::clone`s the `WarmModel`'s context into a
+    /// `WhisperDecoder`; the handle stays reusable for the next walk.
+    /// (`use_gpu` was fixed when the context was loaded; `cfg.use_gpu` is
+    /// ignored here.) `cfg` window math is guarded the same way
+    /// `with_decoder` guards it (saturating horizon).
+    #[cfg(feature = "whisper")]
+    pub fn with_warm(model: &WarmModel, cfg: SttConfig, vocab: &[String]) -> Self {
+        let decoder = whisper::WhisperDecoder::from_context(
+            model.ctx.clone(),
+            &cfg.language,
+            cfg.word_timestamps,
+        );
+        Self::with_decoder(Box::new(decoder), cfg, vocab)
     }
 
     /// Buffer PCM. Cheap: a short lock, no decode. Call OFF the real-time audio

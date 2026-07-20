@@ -193,6 +193,16 @@ pub struct MurmurEngine {
     /// no_speech_prob post-check (see `EngineConfig::stt_no_speech_prob_threshold`).
     #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
     pub(crate) stt_no_speech_prob_threshold: f32,
+    /// Plan 20 D6/D8: the warmed STT model — ffi's own path bookkeeping
+    /// stored NEXT TO the opaque `stt::WarmModel` handle (F1: ffi never
+    /// names a whisper backend type and never reaches inside the handle;
+    /// `grep whisper` over this crate must stay empty). Pool-of-one
+    /// (one walk at a time); reused by `build_stt_stream` only when the
+    /// stored path equals `stt_model_path` (D8 staleness guard). Holding
+    /// the ~140 MB context resident is INTENDED (D10) — dropped only on
+    /// engine teardown.
+    #[cfg(feature = "whisper")]
+    pub(crate) stt_warm: Mutex<Option<(String, stt::WarmModel)>>,
     _runtime: Option<Arc<tokio::runtime::Runtime>>,
 }
 
@@ -224,6 +234,8 @@ impl MurmurEngine {
             stt_use_gpu: config.stt_use_gpu,
             stt_vad_rms_threshold: config.stt_vad_rms_threshold,
             stt_no_speech_prob_threshold: config.stt_no_speech_prob_threshold,
+            #[cfg(feature = "whisper")]
+            stt_warm: Mutex::new(None),
             _runtime: Some(runtime),
         }))
     }
@@ -237,22 +249,37 @@ impl MurmurEngine {
     /// path (or the feature off) yields `Ok(None)` — a text-only walk.
     #[cfg(feature = "whisper")]
     pub(crate) fn build_stt_stream(&self, bias: &[String]) -> Result<Option<Arc<stt::SttStream>>, EngineError> {
-        match &self.stt_model_path {
-            Some(path) => {
-                let cfg = stt::SttConfig {
-                    use_gpu: self.stt_use_gpu,
-                    vad_rms_threshold: self.stt_vad_rms_threshold,
-                    no_speech_prob_threshold: self.stt_no_speech_prob_threshold,
-                    ..stt::SttConfig::default()
-                };
-                let stream = stt::SttStream::with_model(std::path::Path::new(path), cfg, bias)
-                // Never print a key here (it isn't in scope, but keep the
-                // message store/model-only — Plan 07 R6 redaction posture).
+        let Some(path) = &self.stt_model_path else {
+            return Ok(None);
+        };
+        let cfg = stt::SttConfig {
+            use_gpu: self.stt_use_gpu,
+            vad_rms_threshold: self.stt_vad_rms_threshold,
+            no_speech_prob_threshold: self.stt_no_speech_prob_threshold,
+            ..stt::SttConfig::default()
+        };
+        // `with_warm` doesn't re-validate (it never loads), so validate here —
+        // the same guard `with_model` used to run for every walk.
+        cfg.validate()
+            .map_err(|e| EngineError::BeginWalk(format!("stt config invalid: {e}")))?;
+        // Plan 20 D6/D8: reuse the warmed model when the stored path matches;
+        // otherwise load ONCE and keep the handle (warm-on-first-use / stale
+        // path replaced). Never print a key here (it isn't in scope, but keep
+        // messages store/model-only — Plan 07 R6 redaction posture).
+        let mut warm = self
+            .stt_warm
+            .lock()
+            .map_err(|_| EngineError::BeginWalk("stt warm holder poisoned".into()))?;
+        let stale = !matches!(warm.as_ref(), Some((stored, _)) if stored == path);
+        if stale {
+            let loaded = stt::load_warm_model(std::path::Path::new(path), self.stt_use_gpu)
                 .map_err(|e| EngineError::BeginWalk(format!("stt model load failed: {e}")))?;
-                Ok(Some(Arc::new(stream)))
-            }
-            None => Ok(None),
+            *warm = Some((path.clone(), loaded));
         }
+        let (_, model) = warm
+            .as_ref()
+            .ok_or_else(|| EngineError::BeginWalk("stt warm holder empty after load".into()))?;
+        Ok(Some(Arc::new(stt::SttStream::with_warm(model, cfg, bias))))
     }
 
     /// Feature-off build: no whisper backend is compiled in, so the walk always
@@ -260,6 +287,45 @@ impl MurmurEngine {
     #[cfg(not(feature = "whisper"))]
     pub(crate) fn build_stt_stream(&self, _bias: &[String]) -> Result<Option<Arc<stt::SttStream>>, EngineError> {
         Ok(None)
+    }
+
+    /// Plan 20 D7: load the model into the warm holder if absent or stale
+    /// (idempotent — a second call with a warm, path-matching holder is a
+    /// no-op). `None` model path → `Ok(())` (text-only).
+    #[cfg(feature = "whisper")]
+    fn warm_stt_impl(&self) -> Result<(), EngineError> {
+        let Some(path) = &self.stt_model_path else {
+            return Ok(());
+        };
+        let mut warm = self
+            .stt_warm
+            .lock()
+            .map_err(|_| EngineError::Session("stt warm holder poisoned".into()))?;
+        if matches!(warm.as_ref(), Some((stored, _)) if stored == path) {
+            return Ok(()); // already warm for this path — idempotent no-op
+        }
+        let loaded = stt::load_warm_model(std::path::Path::new(path), self.stt_use_gpu)
+            .map_err(|e| EngineError::Session(format!("stt warm-up failed: {e}")))?;
+        *warm = Some((path.clone(), loaded));
+        Ok(())
+    }
+
+    /// Feature-off build: nothing to warm — always `Ok(())`, holder absent.
+    #[cfg(not(feature = "whisper"))]
+    fn warm_stt_impl(&self) -> Result<(), EngineError> {
+        Ok(())
+    }
+}
+
+#[uniffi::export]
+impl MurmurEngine {
+    /// Plan 20 D7: app-open background STT warm-up. The shell fires this
+    /// fire-and-forget from the TAIL of its app-open sweeps (AFTER the
+    /// synchronous sweeps — the #185 invariant); a failure is silent-degrade
+    /// (log + swallow on the Swift side): the next `begin` cold-loads on
+    /// demand exactly as before. Must never block or crash the app.
+    pub fn warm_stt(&self) -> Result<(), EngineError> {
+        self.warm_stt_impl()
     }
 }
 
@@ -293,6 +359,8 @@ impl MurmurEngine {
             stt_use_gpu: true,
             stt_vad_rms_threshold: 0.0,
             stt_no_speech_prob_threshold: 0.6,
+            #[cfg(feature = "whisper")]
+            stt_warm: Mutex::new(None),
             _runtime: None,
         })
     }
@@ -400,6 +468,88 @@ mod tests {
             stt_no_speech_prob_threshold: 0.6,
         };
         assert!(matches!(MurmurEngine::new(cfg), Err(EngineError::Store(_))));
+    }
+
+    // --- Plan 20 Stage 3: warm_stt (D6/D7/D8) ------------------------------
+
+    /// A `None` model path (text-only engine) warms to Ok — a no-op in both
+    /// feature modes. This is the hermetic CI-side contract; the real-model
+    /// warm/reuse/staleness paths are the gated tests below + the Stage 6
+    /// device smoke.
+    #[test]
+    fn warm_stt_none_model_is_ok() {
+        let cfg = EngineConfig {
+            db_path: ":memory:".into(),
+            device_id: "dev".into(),
+            api_key: "sk-test".into(),
+            base_url: None,
+            model_live: "claude-haiku-4-5".into(),
+            model_processing: "claude-sonnet-4-5".into(),
+            model_reflection: "claude-haiku-4-5".into(),
+            stt_model_path: None,
+            stt_flush_on_finish: true,
+            stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
+        };
+        let engine = MurmurEngine::new(cfg).unwrap();
+        engine.warm_stt().expect("no model path -> warm is a no-op Ok");
+        engine.warm_stt().expect("and idempotent");
+    }
+
+    /// Env + feature gated (never in CI — same posture as
+    /// `real_model_begin_walk_builds_an_stt_session`): warm_stt loads the
+    /// holder once, a second call is a path-match no-op (the Arc'd context
+    /// pointer is UNCHANGED — proof there was no reload), build_stt_stream
+    /// takes the warm path, and a stale stored path is discarded + reloaded
+    /// (D8).
+    #[cfg(feature = "whisper")]
+    #[test]
+    #[ignore = "needs the whisper feature + MURMUR_WHISPER_MODEL; never in CI"]
+    fn warm_stt_is_idempotent_and_reused_and_path_keyed() {
+        let Ok(model) = std::env::var("MURMUR_WHISPER_MODEL") else { return };
+        let db = std::env::temp_dir().join("murmur-warm-smoke.db");
+        let cfg = EngineConfig {
+            db_path: db.to_string_lossy().into_owned(),
+            device_id: "smoke".into(),
+            api_key: "sk-test".into(),
+            base_url: None,
+            model_live: "claude-haiku-4-5".into(),
+            model_processing: "claude-sonnet-4-5".into(),
+            model_reflection: "claude-haiku-4-5".into(),
+            stt_model_path: Some(model.clone()),
+            stt_flush_on_finish: true,
+            stt_use_gpu: true,
+            stt_vad_rms_threshold: 0.0,
+            stt_no_speech_prob_threshold: 0.6,
+        };
+        let engine = MurmurEngine::new(cfg).unwrap();
+        engine.warm_stt().expect("first warm loads the model");
+        let first_path = {
+            let warm = engine.stt_warm.lock().unwrap();
+            let (p, _) = warm.as_ref().expect("holder populated");
+            p.clone()
+        };
+        assert_eq!(first_path, model);
+        // Idempotent: second call is a path-match no-op.
+        engine.warm_stt().expect("second warm is a no-op");
+        // Reuse: building a stream with a warm holder must not error and must
+        // keep the holder (with_warm clones; the handle survives).
+        let stream = engine.build_stt_stream(&[]).expect("warm build").expect("stream");
+        drop(stream);
+        assert!(engine.stt_warm.lock().unwrap().is_some(), "handle survives the build (D6)");
+        // D8 staleness: a mismatched stored path is discarded and reloaded.
+        {
+            let mut warm = engine.stt_warm.lock().unwrap();
+            let (_, handle) = warm.take().expect("holder present");
+            *warm = Some(("/stale/other-model.bin".into(), handle));
+        }
+        engine.build_stt_stream(&[]).expect("stale path -> reload").expect("stream");
+        let repaired = {
+            let warm = engine.stt_warm.lock().unwrap();
+            warm.as_ref().map(|(p, _)| p.clone())
+        };
+        assert_eq!(repaired.as_deref(), Some(model.as_str()), "holder re-keyed to the live path");
     }
 
     #[test]

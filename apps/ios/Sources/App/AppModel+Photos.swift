@@ -113,6 +113,14 @@ extension AppModel {
         sweepPhotoBytes()
         sweepZombieSessions()
         retryFailedSessionsInBackground()
+        // Plan 20: BOTH tail calls sit strictly AFTER the synchronous sweeps
+        // (#185 invariant — nothing async may run before them).
+        warmSttInBackground()
+        // Read-only walk-log hydrate (D5/R4): `listSessions` mutates nothing
+        // and Recording rows are excluded, so it cannot surface or disturb a
+        // walk. Runs here (the quiescent app-open point), never on a
+        // scenePhase re-trigger — and it is once-per-process guarded anyway.
+        hydrateWalkLog()
     }
 
     /// The offline banner ("SAVED OFFLINE — DOCUMENTS UNLOCK WHEN YOU
@@ -154,6 +162,26 @@ extension AppModel {
             let recovered = (try? await engine.retryFailedSessions()) ?? 0
             if recovered > 0 {
                 photoLogger.notice("retried and recovered \(recovered, privacy: .public) failed session(s)")
+            }
+        }
+    }
+
+    /// Plan 20 D7: warm the whisper model at app open so the first START WALK
+    /// tap doesn't pay the model read + Metal init (#228). Mirrors
+    /// `retryFailedSessionsInBackground` exactly: a separate, NOT-awaited
+    /// `Task` fired from the TAIL of `runAppOpenSweeps()` — it must NEVER run
+    /// before the synchronous sweeps (#185 invariant: a suspension point ahead
+    /// of them could let a walk start and get swept/Failed) and never delay
+    /// them. Failure is SILENT-DEGRADE: log + swallow; the next `begin`
+    /// cold-loads on demand (today's exact behavior — warm-up must never
+    /// block or crash the app). Idempotent on the Rust side (path-keyed
+    /// holder), so a `.task` re-fire is a cheap no-op.
+    private func warmSttInBackground() {
+        Task {
+            do {
+                try await engine.warmStt()
+            } catch {
+                photoLogger.error("stt warm-up failed (cold-load fallback): \(error, privacy: .public)")
             }
         }
     }

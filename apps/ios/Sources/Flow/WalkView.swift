@@ -18,9 +18,16 @@ struct WalkView: View {
                 RecBanner(timer: model.isPaused ? "PAUSED" : model.elapsedLabel)
             }
 
+            // Plan 20 D9: "MIC STARTING…" masks the engine bring-up behind
+            // the already-painted screen (warm path clears it near-instantly;
+            // the first-ever cold load is what it exists for).
+            // // sac: the starting-state styling is yours — this is the
+            // // sac: functional-plain string swap.
             MetaStrip(
                 left: model.trade.site,
-                right: model.walkMode == .demo ? "DEMO WALK — SCRIPTED" : "REC — ON-DEVICE STT",
+                right: model.micStarting
+                    ? "MIC STARTING…"
+                    : (model.walkMode == .demo ? "DEMO WALK — SCRIPTED" : "REC — ON-DEVICE STT"),
                 warn: model.walkMode == .demo
             )
 

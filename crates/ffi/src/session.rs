@@ -7,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex as StdMutex};
 
 use harness::{LlmProvider, Memory, MemoryStore};
 use murmur_core::{
-    doc_kind_for_template, parse_notes_artifact, CapturedItem, LiveExtractOutcome, LiveExtractor,
+    doc_kind_for_template, parse_notes_artifact, LiveExtractOutcome, LiveExtractor,
     SessionProcessor, Store,
 };
 use tokio::sync::Mutex as TokioMutex;
@@ -412,49 +412,43 @@ impl WalkSession {
         listener.on_event(WalkEvent::BoardUpdated { items: board_items });
     }
 
-    /// The current board (items + batched per-item photo counts), shared by
-    /// `emit_board_snapshot` and the notes builders below.
-    fn board_items_and_photo_counts(&self) -> (Vec<CapturedItem>, HashMap<String, u32>) {
-        let store = self.store.lock().unwrap();
-        let items = store.list_items_for_session(&self.session_id).unwrap_or_default();
-        let counts =
-            store.count_live_photos_by_item_for_session(&self.session_id).unwrap_or_default();
-        (items, counts)
-    }
-
-    /// Plan 14 D5-14/D6-14: reads the session's latest `kind=="notes"`
-    /// artifact (if any) and tolerant-parses it back to core-side
-    /// `NotesEntry` (`bucket` as a wire string — mapped to the FFI enum by
-    /// `notes_payload`, dropping unknown buckets, R6). ANY failure — no
-    /// artifact (pre-14 session, empty/offline finish that never reached
-    /// `process()`), a poisoned lock, a store error — degrades to `[]`,
-    /// never a panic across FFI.
-    fn session_notes(&self) -> Vec<murmur_core::NotesEntry> {
-        let Ok(store) = self.store.lock() else {
-            return Vec::new();
-        };
-        let Ok(artifacts) = store.list_artifacts_for_session(&self.session_id) else {
-            return Vec::new();
-        };
-        // Newest-first: a reprocess writes a fresh notes artifact after
-        // clear_authoritative_outputs sweeps the prior one, but taking the
-        // last match is defensive against any future multi-write scenario.
-        let Some(artifact) = artifacts.iter().rev().find(|a| a.kind == "notes") else {
-            return Vec::new();
-        };
-        parse_notes_artifact(&artifact.body)
-    }
-
     /// Builds a `NotesPayload` from whatever is on the current board (Plan
     /// 13 D3) plus the stored notes artifact (Plan 14 D6-14). Shared by: the
     /// offline-degrade path (`queued: true`, D9), the empty-transcript short
     /// circuit, and the double-finish/degraded exit (all `queued: false` —
     /// nothing is pending in those cases).
+    ///
+    /// Plan 20 D1/R1: DELEGATES to `notes_payload_from_store` — the ONE
+    /// reconstruction funnel `load_notes` also uses — then overrides
+    /// `summary`/`queued` with the caller's inline knowledge (which agrees
+    /// with the store-derived values for any committed state; the override
+    /// preserves `finish()`'s exact historical behavior on the degrade arms).
     fn partial_notes(&self, summary: &str, queued: bool) -> NotesPayload {
-        let doc_kind = doc_kind_for_template(self.template.as_deref());
-        let (items, photo_counts) = self.board_items_and_photo_counts();
-        let notes = self.session_notes();
-        notes_payload(&self.session_id, doc_kind, summary, &items, &photo_counts, &notes, queued)
+        let reconstructed = self
+            .store
+            .lock()
+            .ok()
+            .and_then(|store| notes_payload_from_store(&store, &self.session_id).ok());
+        match reconstructed {
+            Some(mut payload) => {
+                payload.summary = summary.to_string();
+                payload.queued = queued;
+                payload
+            }
+            // Degraded arm (a finish() after cancel(): the session row is
+            // tombstoned so `get_session` NotFounds; or a poisoned lock):
+            // empty board/notes with the template-derived kind — never a
+            // panic across FFI.
+            None => notes_payload(
+                &self.session_id,
+                doc_kind_for_template(self.template.as_deref()),
+                summary,
+                &[],
+                &HashMap::new(),
+                &[],
+                queued,
+            ),
+        }
     }
 
     /// Degrade path for a `finish()` call that can't transition the session
@@ -472,6 +466,68 @@ impl WalkSession {
         }
         .unwrap_or_default();
         self.partial_notes(&summary, false)
+    }
+}
+
+/// The session's latest stored `kind=="notes"` artifact, tolerant-parsed back
+/// to core-side `NotesEntry` (Plan 14 D5-14/D6-14; `bucket` stays a wire
+/// string here — `notes_payload` maps it to the FFI enum, dropping unknown
+/// buckets, R6). ANY failure — no artifact (pre-14 session, empty/offline
+/// finish that never reached `process()`), a store error — degrades to `[]`.
+fn stored_session_notes(store: &Store, session_id: &str) -> Vec<murmur_core::NotesEntry> {
+    let Ok(artifacts) = store.list_artifacts_for_session(session_id) else {
+        return Vec::new();
+    };
+    // Newest-first: a reprocess writes a fresh notes artifact after
+    // clear_authoritative_outputs sweeps the prior one, but taking the
+    // last match is defensive against any future multi-write scenario.
+    let Some(artifact) = artifacts.iter().rev().find(|a| a.kind == "notes") else {
+        return Vec::new();
+    };
+    parse_notes_artifact(&artifact.body)
+}
+
+/// Plan 20 D1/R1 — the ONE reconstruction funnel: rebuilds a `NotesPayload`
+/// for a session from committed rows only (no live `WalkSession` needed).
+/// `WalkSession::partial_notes` (live finish/degrade) and
+/// `MurmurEngine::load_notes` (board reopen) BOTH call this, so the two
+/// paths cannot drift (the WE-A equality contract). `summary` is
+/// `session.summary.unwrap_or_default()`; `queued = status != Processed` —
+/// the one field `finish()` knows inline and this reads back from the
+/// terminal status. A missing/tombstoned session is `Err` (`get_session`
+/// filters `deleted_at IS NULL` and returns `NotFound`).
+pub(crate) fn notes_payload_from_store(
+    store: &Store,
+    session_id: &str,
+) -> Result<NotesPayload, murmur_core::CoreError> {
+    let session = store.get_session(session_id)?;
+    let doc_kind = doc_kind_for_template(session.template.as_deref());
+    let items = store.list_items_for_session(session_id).unwrap_or_default();
+    let photo_counts =
+        store.count_live_photos_by_item_for_session(session_id).unwrap_or_default();
+    let notes = stored_session_notes(store, session_id);
+    let summary = session.summary.unwrap_or_default();
+    let queued = session.status != murmur_core::SessionStatus::Processed;
+    Ok(notes_payload(session_id, doc_kind, &summary, &items, &photo_counts, &notes, queued))
+}
+
+#[uniffi::export]
+impl MurmurEngine {
+    /// Plan 20 D1/D4 — the walk-reopen read seam AND the Plan 16 clause-(b)
+    /// sanctioned post-edit fresh read. Returns a `NotesPayload`
+    /// field-by-field identical to what `finish()` returned for the same
+    /// session (WE-A), reconstructed from the store through the SAME funnel
+    /// (`notes_payload_from_store`). Engine-keyed: works after the live
+    /// `WalkSession` is gone (relaunch, board reopen). A missing/tombstoned
+    /// session -> `Err` (a reopen that loses a delete/sweep race surfaces to
+    /// Swift as a catchable error, never a silent payload).
+    pub fn load_notes(&self, session_id: String) -> Result<NotesPayload, EngineError> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| EngineError::Session("store lock poisoned".into()))?;
+        notes_payload_from_store(&store, &session_id)
+            .map_err(|e| EngineError::Session(e.to_string()))
     }
 }
 
@@ -1657,6 +1713,109 @@ mod tests {
         let payload = session.finish().await;
         assert_eq!(payload.notes, Vec::new());
         assert!(payload.queued, "process() failed outright -> queued: true (D9)");
+    }
+
+    // --- Plan 20 Stage 2: load_notes / the ONE reconstruction funnel -------
+
+    /// WE-A (the D1 equality contract): for a session `finish()` has returned
+    /// for, `load_notes` returns a FIELD-BY-FIELD identical payload — both
+    /// read the same committed rows through the same funnel.
+    #[tokio::test]
+    async fn load_notes_equals_finish_for_processed_session() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let engine = MurmurEngine::with_providers(
+            store,
+            Memory::default(),
+            Arc::new(NullMemoryStore),
+            Providers {
+                live: Arc::new(MockProvider::new(vec![])),
+                processing: Arc::new(MockProvider::new(vec![
+                    tool_use("add_item", serde_json::json!({"kind": "todo", "text": "mulch front beds"})),
+                    end_turn("done"),
+                    tool_use(
+                        "write_notes",
+                        serde_json::json!({
+                            "summary": "Estimate for the front yard.",
+                            "notes": [
+                                {"bucket": "scope_of_work", "label": "Mulch", "detail": "Darker than last year."}
+                            ]
+                        }),
+                    ),
+                ])),
+                reflection: Arc::new(MockProvider::new(vec![])),
+            },
+        );
+        let session = engine.clone().begin_walk(None, "landscape".into()).unwrap();
+        let sid = session.session_id();
+        // A manual item with photos: survives the swap, exercises photo_count.
+        {
+            let store = engine.store.lock().unwrap();
+            let manual = store.add_item(&sid, "note", "gate code 4411").unwrap();
+            store.add_photo(&sid, Some(&manual.id), "a.jpg", None).unwrap();
+            store.add_photo(&sid, Some(&manual.id), "b.jpg", None).unwrap();
+            store
+                .append_transcript(&sid, "mulch the front beds; keep it under $1200")
+                .unwrap();
+        }
+
+        let finished = session.finish().await;
+        assert!(!finished.queued);
+        assert!(!finished.items.is_empty());
+        assert_eq!(finished.notes.len(), 1);
+
+        let loaded = engine.load_notes(sid).unwrap();
+        assert_eq!(loaded, finished, "load_notes == finish(), field by field (WE-A)");
+    }
+
+    /// WE-B: reopening a Failed (offline-degraded) session — items intact,
+    /// notes empty, queued=true, summary "".
+    #[tokio::test]
+    async fn load_notes_failed_session_is_queued_with_items() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let engine = MurmurEngine::with_providers(
+            store,
+            Memory::default(),
+            Arc::new(NullMemoryStore),
+            // Empty processing script -> process() errs -> offline degrade.
+            no_op_providers(),
+        );
+        let session = engine.clone().begin_walk(None, "landscape".into()).unwrap();
+        let sid = session.session_id();
+        {
+            let store = engine.store.lock().unwrap();
+            for t in ["check the gutters", "call Dev", "order lumber"] {
+                store.add_item(&sid, "todo", t).unwrap();
+            }
+            store.append_transcript(&sid, "walked the site talking").unwrap();
+        }
+
+        let finished = session.finish().await;
+        assert!(finished.queued, "offline degrade -> queued");
+        assert_eq!(finished.items.len(), 3);
+        assert_eq!(finished.notes, Vec::new());
+        assert_eq!(finished.summary, "");
+
+        let loaded = engine.load_notes(sid).unwrap();
+        assert_eq!(loaded, finished, "load_notes == finish() for the Failed session (WE-B)");
+        assert!(loaded.queued);
+    }
+
+    #[tokio::test]
+    async fn load_notes_unknown_session_errs() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let engine = MurmurEngine::with_providers(
+            store,
+            Memory::default(),
+            Arc::new(NullMemoryStore),
+            no_op_providers(),
+        );
+        assert!(engine.load_notes("no-such-session".into()).is_err());
+
+        // A tombstoned session errs the same way (D3: reopen loses the race).
+        let session = engine.clone().begin_walk(None, "landscape".into()).unwrap();
+        let sid = session.session_id();
+        session.clone().cancel().await;
+        assert!(engine.load_notes(sid).is_err(), "tombstoned -> Err, never a silent payload");
     }
 
     /// D6-14: a double-`finish()` call returns the stored notes artifact from

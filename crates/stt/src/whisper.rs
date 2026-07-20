@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
@@ -9,11 +10,47 @@ use whisper_rs::WhisperSegment;
 use crate::decoder::{Decoder, RawSegment, WordTiming};
 use crate::SttError;
 
-/// whisper.cpp backend (Metal). Owns a loaded model context; each `decode`
-/// creates a fresh state (whisper-rs pattern). The crate NEVER downloads the
-/// model — `open` reads a file the shell has already provisioned.
+/// Plan 20 D6 (F1): the warmed whisper model as an OPAQUE, stt-owned handle.
+/// Wraps the loaded `Arc<WhisperContext>` and deliberately exposes nothing —
+/// callers (the ffi crate) can only hold it and hand it back to
+/// `SttStream::with_warm`; no `whisper_rs` type ever crosses the stt
+/// boundary. Load once via `load_warm_model` (the expensive model read +
+/// Metal init), then every `with_warm` is an `Arc::clone` — no reload.
+pub struct WarmModel {
+    pub(crate) ctx: Arc<WhisperContext>,
+}
+
+/// Compile-assert `WarmModel: Send + Sync` (Plan 20 Stage 3 / R2): the warm
+/// handle is held in the engine and consumed from walk/pump contexts.
+/// Verified true in vendored whisper-rs 0.16.0 (`WhisperInnerContext` is
+/// `unsafe impl Send`/`Sync`; the model is read-only after load, decode
+/// states are per-call).
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<WarmModel>();
+};
+
+/// Load the whisper model once, off the tap path (Plan 20 D6/D7): the same
+/// `WhisperContext::new_with_params` open `SttStream::with_model` performs,
+/// captured into the reusable opaque handle.
+pub fn load_warm_model(model: &Path, use_gpu: bool) -> Result<WarmModel, SttError> {
+    let mut params = WhisperContextParameters::default();
+    params.use_gpu(use_gpu);
+    let ctx = WhisperContext::new_with_params(
+        model.to_str().ok_or_else(|| SttError::ModelLoad("non-utf8 model path".into()))?,
+        params,
+    )
+    .map_err(|e| SttError::ModelLoad(e.to_string()))?;
+    Ok(WarmModel { ctx: Arc::new(ctx) })
+}
+
+/// whisper.cpp backend (Metal). Holds a loaded model context (shared via
+/// `Arc` so a warmed context is reusable across sessions, Plan 20 D6); each
+/// `decode` creates a fresh state (whisper-rs pattern). The crate NEVER
+/// downloads the model — `open` reads a file the shell has already
+/// provisioned.
 pub struct WhisperDecoder {
-    ctx: WhisperContext,
+    ctx: Arc<WhisperContext>,
     language: String,
     /// When on, `decode` sets whisper `token_timestamps` and reconstructs
     /// per-word timing onto `RawSegment.words` (Plan 09 D5). Flows from
@@ -22,6 +59,16 @@ pub struct WhisperDecoder {
 }
 
 impl WhisperDecoder {
+    /// Wrap an already-loaded context (Plan 20 D6): the warm path. NO model
+    /// load happens here — the context is `Arc::clone`d from a `WarmModel`.
+    pub(crate) fn from_context(
+        ctx: Arc<WhisperContext>,
+        language: &str,
+        word_timestamps: bool,
+    ) -> Self {
+        Self { ctx, language: language.to_string(), word_timestamps }
+    }
+
     /// `use_gpu` is LOAD-BEARING (Plan 08 D7, falsified assumption): with the
     /// `metal` cargo feature the default is GPU-on, which HARD-CRASHES on the
     /// iOS simulator (SIGTRAP in ggml_metal_buffer_set_tensor via MTLSimDevice)
@@ -41,7 +88,7 @@ impl WhisperDecoder {
             params,
         )
         .map_err(|e| SttError::ModelLoad(e.to_string()))?;
-        Ok(Self { ctx, language: language.to_string(), word_timestamps })
+        Ok(Self::from_context(Arc::new(ctx), language, word_timestamps))
     }
 }
 

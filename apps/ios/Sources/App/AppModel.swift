@@ -47,15 +47,46 @@ final class AppModel {
     /// `saveDocumentLayout`. Separate from `branding` (style) on purpose.
     var documentLayout: DocumentLayout = .current
 
-    /// One board row per walk finished THIS SESSION (profile mode replaces
-    /// the fixture jobs list with this honest log). In-memory on purpose —
-    /// walk history is a core concern; this is the interim surface.
+    /// One board row per finished walk. Plan 20: no longer this-session-only —
+    /// `hydrateWalkLog()` fills it from `engine.listSessions()` at app open,
+    /// so history survives relaunch; `completeSend`/`discardDocument` still
+    /// append full-fidelity in-session records until the next hydrate.
     struct WalkRecord: Identifiable {
         let id = UUID()
         let time: String     // "9:41"
         let docNo: String
         let docKind: String  // "ESTIMATE" / "MOVE-OUT REPORT" / ...
         let sent: Bool       // false = discarded at review
+        /// The core session id this row reopens (Plan 20 D5). "" only for
+        /// legacy/demo rows with no session (reopen no-ops there).
+        let sessionId: String
+        /// Mirror of `NotesModel.queued` for the reopened-notes gating banner.
+        let queued: Bool
+
+        init(time: String, docNo: String, docKind: String, sent: Bool,
+             sessionId: String, queued: Bool) {
+            self.time = time
+            self.docNo = docNo
+            self.docKind = docKind
+            self.sent = sent
+            self.sessionId = sessionId
+            self.queued = queued
+        }
+
+        /// Board hydration mapping (Plan 20 F7, pinned): `sent` reads a
+        /// built-and-kept walk as "sent"; **`docNo` is synthesized empty** —
+        /// the document number is minted per-build and is not in the
+        /// lightweight projection, an ACCEPTED v1 fidelity loss (in-session
+        /// records keep the real number until the next hydrate overwrites
+        /// the log).
+        init(_ summary: WalkSummary) {
+            self.time = AppModel.clockTime(epochSeconds: summary.startedAt)
+            self.docNo = ""
+            self.docKind = DocKinds.label(for: summary.docKind)
+            self.sent = summary.hasDocument
+            self.sessionId = summary.id
+            self.queued = summary.queued
+        }
     }
     private(set) var sessionWalks: [WalkRecord] = []
 
@@ -126,6 +157,22 @@ final class AppModel {
     /// Set when an item edit/add/remove (Plan 16 CRUD) throws — surfaced on the
     /// notes screen; the edit sheet stays so the operator can retry.
     var notesEditError: String?
+    /// Set when a board-row reopen tap fails (Plan 20 F4: a NotFound/
+    /// tombstoned race must be a breadcrumb, never a silent dead tap).
+    /// // sac: the reopenError chrome is yours; the floor is the log + this
+    /// // sac: breadcrumb string surfaced near the walk log.
+    var reopenError: String?
+    /// How the current notes screen was reached — picks the queued-banner
+    /// copy (Plan 20 F5): a FRESH offline finish can honestly promise
+    /// "unlocks when you reconnect"; a REOPENED still-Failed walk cannot
+    /// (the retry sweep may already have run and exhausted).
+    enum NotesBannerReason { case liveFinish, reopened }
+    var notesBannerReason: NotesBannerReason = .liveFinish
+    /// Once-per-process guard for `hydrateWalkLog()` (Plan 20 F2, mirror of
+    /// `isRetryingFailedSessions`): SwiftUI can re-fire the launching `.task`,
+    /// and a re-hydrate must not re-run (in the demo it would race the
+    /// in-memory log).
+    var isHydratingWalkLog = false
     /// True while a build-document tap is in flight — the notes screen
     /// disables the button so a double-tap can't burn two document numbers
     /// (D7: numbers mint per generate).
@@ -167,6 +214,10 @@ final class AppModel {
     /// Set when the user tries a voice walk with mic permission denied —
     /// BoardView surfaces it with an "open Settings" affordance.
     var micDenied = false
+    /// Plan 20 D9: true from the START WALK paint until `begin` + wiring
+    /// complete — WalkView shows "MIC STARTING…" while the (usually warm,
+    /// occasionally cold-load) engine bring-up runs behind the painted screen.
+    var micStarting = false
 
     /// When live, drive the STT path from a bundled fixture WAV instead of the
     /// mic (`wavwalk=1`, D7) — a mic-free way to exercise real whisper.
@@ -247,62 +298,87 @@ final class AppModel {
         }
     }
 
+    /// Plan 20 D9: paint the walk screen FIRST, then run the (warm ⇒ cheap)
+    /// `begin` + wiring on the next main-actor turn. The paint-first block
+    /// contains ONLY `phase`/`path`/`micStarting` — NOTHING session-dependent
+    /// moves into it (the D9 numbered invariant, F3): STT/audio must never
+    /// wire onto a session `begin` didn't successfully open (Plan 07
+    /// dead-walk — a dead session would pump and silently drop every append).
     private func beginWalk() {
         pumpTask?.cancel()
         eventTask?.cancel()
 
-        // begin() is throwing (review P1): the real engine's session start is
-        // fallible across FFI. If it fails, the user must NOT enter the
-        // walking flow — a dead session would run STT and silently drop every
-        // append (capture loss). Stay on the board; walk state untouched.
-        // sac: this deserves a visible error surface ("couldn't start the
-        // walk — try again"); no error chrome exists in the app yet, so the
-        // floor here is the log breadcrumb + not entering .walking. Yours to
-        // design.
-        let events: AsyncStream<WalkEvent>
-        do {
-            events = try engine.begin(trade: trade)
-        } catch {
-            Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
-                .error("startWalk: engine.begin failed, staying on board: \(error, privacy: .public)")
-            return
-        }
-
-        transcript = ""
-        previewTail = ""
-        items = []
-        isPaused = false
-        walkStart = Date()
-        // Snapshot the session id NOW, while the engine's live session still
-        // has one — see the doc comment on `currentSessionId` (Plan 11 D7).
-        currentSessionId = engine.currentSessionId
-        photos = []
-
-        eventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in events {
-                switch event {
-                case .boardUpdated(let items):
-                    withAnimation(.easeOut(duration: 0.25)) { self.items = items }
-                    // Track the newest by id, NOT array position (see
-                    // `lastCapturedID` doc comment).
-                    self.lastCapturedID = items.last?.id
-                case .transcriptCommitted(let text):
-                    // The audio path's transcript originates in Rust (whisper).
-                    self.transcript += text
-                    self.previewTail = ""
-                case .transcriptPreview(let text):
-                    self.previewTail = text
-                }
-            }
-        }
-
+        // Paint-first block (D9): screen appears immediately; WalkView shows
+        // "MIC STARTING…" until step 4 below clears it.
+        micStarting = true
         phase = .walking
         path = [.walking]
-        if walkMode == .demo {
-            startScriptedSource()
-        } else {
-            startAudioSource()
+
+        Task { [weak self] in
+            guard let self else { return }
+            // Yield so SwiftUI renders the painted walk screen before the
+            // begin work runs on this same main actor.
+            await Task.yield()
+
+            // (1) begin() is throwing (review P1): fallible across FFI. On a
+            // throw, do NOT run steps 2–4 — revert to the board with the log
+            // breadcrumb (the existing stay-on-board posture). F6 accepted
+            // cosmetic: the screen briefly painted .walking and flashes back;
+            // re-serializing the paint behind begin would forfeit the whole
+            // D9 perceived-latency win. sac: visible error chrome is yours.
+            let events: AsyncStream<WalkEvent>
+            do {
+                events = try self.engine.begin(trade: self.trade)
+            } catch {
+                Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
+                    .error("startWalk: engine.begin failed, back to board: \(error, privacy: .public)")
+                self.micStarting = false
+                self.phase = .board
+                self.path = []
+                return
+            }
+
+            // (2) Snapshot the session id STRICTLY AFTER begin returns Ok,
+            // while the engine's live session still has one (Plan 11 D7).
+            // Must not precede (1); must not sit in the paint-first block.
+            self.currentSessionId = self.engine.currentSessionId
+
+            // (3) Reset walk state + wire the event/audio tasks — all
+            // session-dependent, so all strictly after the begin gate.
+            self.transcript = ""
+            self.previewTail = ""
+            self.items = []
+            self.isPaused = false
+            self.walkStart = Date()
+            self.photos = []
+
+            self.eventTask = Task { [weak self] in
+                guard let self else { return }
+                for await event in events {
+                    switch event {
+                    case .boardUpdated(let items):
+                        withAnimation(.easeOut(duration: 0.25)) { self.items = items }
+                        // Track the newest by id, NOT array position (see
+                        // `lastCapturedID` doc comment).
+                        self.lastCapturedID = items.last?.id
+                    case .transcriptCommitted(let text):
+                        // The audio path's transcript originates in Rust (whisper).
+                        self.transcript += text
+                        self.previewTail = ""
+                    case .transcriptPreview(let text):
+                        self.previewTail = text
+                    }
+                }
+            }
+
+            if self.walkMode == .demo {
+                self.startScriptedSource()
+            } else {
+                self.startAudioSource()
+            }
+
+            // (4) live.
+            self.micStarting = false
         }
     }
 
@@ -420,6 +496,9 @@ final class AppModel {
         notesLoading = true
         phase = .notes
         path = [.notes]
+        // A fresh finish — the queued banner may honestly promise the
+        // reconnect retry (Plan 20 F5; the reopen path sets `.reopened`).
+        notesBannerReason = .liveFinish
         Task {
             // Flush before finish (issue #155 / CANON: flush over speed —
             // the last words of a walk are often the price). `stop()` lets a
@@ -430,6 +509,56 @@ final class AppModel {
             let notes = await engine.finish()
             self.notes = notes
             self.notesLoading = false
+        }
+    }
+
+    // MARK: Walk reopen (Plan 20 Half A) — read-only re-entry into NotesView.
+
+    /// Hydrate the board walk log from the engine (Plan 20 D5/F2) so history
+    /// survives relaunch. Called once from the app-open path — read-only
+    /// (`listSessions` mutates nothing), safe alongside the sweeps (R4).
+    /// TWO guards (F2):
+    ///  1. once-per-process (`isHydratingWalkLog`) against `.task` re-fires;
+    ///  2. overwrite only when the fetched list is NON-EMPTY or the engine is
+    ///     real-core — `DemoWalkEngine.listSessions` returns `[]`
+    ///     SUCCESSFULLY (a `??` fallback never fires), and that empty success
+    ///     must not wipe the demo's in-memory log. Real-core's `[]` is a
+    ///     legitimate "no sessions yet" and may clear a stale log.
+    func hydrateWalkLog() {
+        guard !isHydratingWalkLog else { return }
+        isHydratingWalkLog = true
+        let fetched = (try? engine.listSessions()) ?? []
+        let isRealCore = !(engine is DemoWalkEngine)
+        if !fetched.isEmpty || isRealCore {
+            sessionWalks = fetched.map(WalkRecord.init)
+        }
+    }
+
+    /// Reopen a finished walk from the board into the EXISTING NotesView
+    /// (Plan 20 D5): `loadNotes` re-reads the same payload `finish()`
+    /// returned, `currentSessionId` re-keys buildDocument/edits, and the nav
+    /// path is `[.notes]` — back returns to the board root, never to a live
+    /// walk. Read-only re-entry: no pump, no `.walking`, no resurrection.
+    /// F4: a NotFound/tombstoned race (the row was deleted/swept between
+    /// hydrate and tap) mirrors `buildDocument`'s catch — log + breadcrumb,
+    /// board stays put, never a silent dead tap.
+    func reopenWalk(sessionId: String) {
+        guard phase == .board, !sessionId.isEmpty else { return }
+        reopenError = nil
+        Task {
+            do {
+                let loaded = try await engine.loadNotes(sessionId: sessionId)
+                self.notes = loaded
+                self.notesLoading = false
+                self.notesBannerReason = .reopened
+                self.currentSessionId = sessionId
+                self.phase = .notes
+                self.path = [.notes]
+            } catch {
+                Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
+                    .error("reopenWalk(\(sessionId, privacy: .public)) failed: \(error, privacy: .public)")
+                self.reopenError = "Couldn’t reopen that walk — it may have been removed."
+            }
         }
     }
 
@@ -444,6 +573,7 @@ final class AppModel {
         notesEditError = nil
         reviewKind = nil
         currentSessionId = nil
+        notesBannerReason = .liveFinish
         phase = .board
         path = []
     }
@@ -501,13 +631,11 @@ final class AppModel {
         guard let sessionId = currentSessionId else { return }
         notesEditError = nil
         do {
-            let updated = try engine.updateItem(
+            _ = try engine.updateItem(
                 sessionId: sessionId, itemId: item.id.uuidString.lowercased(),
                 text: text, kind: nil, right: right
             )
-            guard var n = notes, let idx = n.items.firstIndex(where: { $0.id == item.id }) else { return }
-            n.items[idx] = updated
-            notes = n
+            refreshNotes(sessionId: sessionId)
         } catch {
             itemEditFailed("save", error)
         }
@@ -519,8 +647,8 @@ final class AppModel {
         guard let sessionId = currentSessionId else { return }
         notesEditError = nil
         do {
-            let added = try engine.addItem(sessionId: sessionId, kind: "note", text: text, right: right)
-            if var n = notes { n.items.append(added); notes = n }
+            _ = try engine.addItem(sessionId: sessionId, kind: "note", text: text, right: right)
+            refreshNotes(sessionId: sessionId)
         } catch {
             itemEditFailed("add", error)
         }
@@ -533,9 +661,26 @@ final class AppModel {
         notesEditError = nil
         do {
             try engine.removeItem(sessionId: sessionId, itemId: item.id.uuidString.lowercased())
-            if var n = notes { n.items.removeAll { $0.id == item.id }; notes = n }
+            refreshNotes(sessionId: sessionId)
         } catch {
             itemEditFailed("remove", error)
+        }
+    }
+
+    /// Plan 20 D4 (the Plan 16 clause-(b) contract, finally honored): after a
+    /// successful mutation the notes screen RE-READS from the engine via
+    /// `loadNotes` — the only sanctioned post-edit path — instead of patching
+    /// `notes.items` in place (the echo-as-truth anti-pattern). A failed
+    /// re-read keeps the current screen state and logs; the next edit or
+    /// reopen re-reads again.
+    private func refreshNotes(sessionId: String) {
+        Task {
+            do {
+                self.notes = try await engine.loadNotes(sessionId: sessionId)
+            } catch {
+                Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "items")
+                    .error("post-edit loadNotes failed: \(error, privacy: .public)")
+            }
         }
     }
 
@@ -677,6 +822,17 @@ final class AppModel {
         return formatter.string(from: Date())
     }
 
+    /// Board-log time from a core `started_at` (epoch seconds) — the hydrate
+    /// path's counterpart of `clockNow()` (Plan 20 F7 mapping). `nonisolated`:
+    /// pure value formatting, callable from `WalkRecord.init` (a nonisolated
+    /// struct initializer).
+    fileprivate nonisolated static func clockTime(epochSeconds: UInt64) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "h:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(epochSeconds)))
+    }
+
     // MARK: Review interactions
 
     func beginEdit(_ row: DocRowFixture) {
@@ -750,7 +906,8 @@ final class AppModel {
             )
         }
         sessionWalks.append(WalkRecord(
-            time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: true
+            time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: true,
+            sessionId: currentSessionId ?? "", queued: notes?.queued ?? false
         ))
         shareURL = nil
         document = nil
@@ -765,7 +922,8 @@ final class AppModel {
     /// review state resets.
     func discardDocument() {
         sessionWalks.append(WalkRecord(
-            time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: false
+            time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: false,
+            sessionId: currentSessionId ?? "", queued: notes?.queued ?? false
         ))
         shareURL = nil
         document = nil

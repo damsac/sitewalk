@@ -168,5 +168,28 @@ extension MurmurEngine {
     static func emptyNotes() -> NotesModel {
         NotesModel(summary: "", items: [], docKind: "report", queued: false)
     }
+
+    // MARK: - Walk-log mapping (Plan 20 D2/D5)
+
+    static func walkSummary(_ summary: FFIWalkSummary) -> WalkSummary {
+        WalkSummary(
+            id: summary.id,
+            docKind: summary.docKind,
+            status: walkStatus(summary.status),
+            summary: summary.summary,
+            startedAt: summary.startedAt,
+            itemCount: summary.itemCount,
+            hasDocument: summary.hasDocument,
+            queued: summary.queued
+        )
+    }
+
+    static func walkStatus(_ status: FFIWalkStatus) -> WalkStatus {
+        switch status {
+        case .processing: return .processing
+        case .processed: return .processed
+        case .failed: return .failed
+        }
+    }
 }
 #endif

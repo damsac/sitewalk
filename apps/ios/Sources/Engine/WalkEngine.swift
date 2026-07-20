@@ -111,6 +111,32 @@ struct NotesModel {
     var notes: [NotesEntryFixture] = []
 }
 
+/// Plan 20 D2/D3: a finished walk's status in the board log. Mirrors the
+/// uniffi `WalkStatus` enum (core `AwaitingProcessing` maps to `.processing`;
+/// `Recording` never crosses the seam — the core query excludes it).
+enum WalkStatus {
+    case processing
+    case processed
+    case failed
+}
+
+/// Plan 20 D2: one board walk-log row — the app-facing mirror of the uniffi
+/// `WalkSummary` record. A LIGHTWEIGHT projection: never a transcript.
+/// `queued` is the same gating predicate `NotesModel.queued` carries
+/// (`status != processed`); `hasDocument` = a kept document exists for the
+/// session (a built walk).
+struct WalkSummary: Identifiable, Equatable {
+    var id: String
+    var docKind: String
+    var status: WalkStatus
+    var summary: String
+    /// Epoch SECONDS (core `Store::now()` — the session clock).
+    var startedAt: UInt64
+    var itemCount: UInt32
+    var hasDocument: Bool
+    var queued: Bool
+}
+
 /// App-facing mirror of the uniffi `SeedReport` record (Plan 15): the exact
 /// outcome of one `seedVocabulary` pass. Declared app-side so the DEMO build
 /// compiles without MurmurCoreFFI (`#if canImport` seam); `MurmurEngine` maps
@@ -266,14 +292,17 @@ protocol WalkEngine: AnyObject {
     // // sac:     same `!notes.queued` predicate the build buttons already
     // // sac:     follow — don't offer an edit control that will only throw.
     // // sac:
-    // // sac: (b) After an edit, re-read from the engine — the fresh read is
-    // // sac:     the ONLY sanctioned post-edit path. Never reconstruct screen
-    // // sac:     state from the returned item, and never patch local state in
-    // // sac:     place: the returned record is an echo for optimistic
-    // // sac:     feedback, not a source of truth (it deliberately omits
-    // // sac:     sibling items and any list-membership cascade like
-    // // sac:     list_open_todos). This is keeper D-#7, the one-source-of-
-    // // sac:     truth rule that motivates the whole design.
+    // // sac: (b) After an edit, re-read from the engine via
+    // // sac:     `loadNotes(sessionId:)` — that call is the ONLY sanctioned
+    // // sac:     post-edit path (Plan 20 D4 closed the gap the #232 review
+    // // sac:     flagged: the contract demanded a fresh read before any read
+    // // sac:     method existed). Never reconstruct screen state from the
+    // // sac:     returned item, and never patch local state in place: the
+    // // sac:     returned record is an echo for optimistic feedback, not a
+    // // sac:     source of truth (it deliberately omits sibling items and any
+    // // sac:     list-membership cascade like list_open_todos). This is
+    // // sac:     keeper D-#7, the one-source-of-truth rule that motivates the
+    // // sac:     whole design. AppModel's edit paths now re-read this way.
     // // sac:
     // // sac: (c) Core `right` is quantity, NOT price — narrower than the demo
     // // sac:     fixtures' free-chrome usage. Fixtures.swift puts prices
@@ -298,4 +327,33 @@ protocol WalkEngine: AnyObject {
         sessionId: String, kind: String, text: String, right: String
     ) throws -> CapturedFixture
     func removeItem(sessionId: String, itemId: String) throws
+
+    // Walk-reopen read seam (Plan 20 Half A). Both are pure READS — no pump,
+    // no session resurrection, no mutation.
+
+    /// The board walk log (D2/D3): every reopenable walk, newest first — a
+    /// transcript-free projection. Recording (live/zombie) and deleted walks
+    /// never appear. Throwing: the real FFI call is fallible (store lock).
+    /// `DemoWalkEngine` returns `[]` (its walk log is the in-memory
+    /// `sessionWalks`; an empty result must NOT clobber it — see
+    /// `AppModel.hydrateWalkLog`'s F2 guard).
+    func listSessions() throws -> [WalkSummary]
+
+    /// Plan 20 D7: warm the on-device STT model (the expensive model read +
+    /// Metal init) so the first START WALK tap doesn't pay it. Fired
+    /// fire-and-forget from the TAIL of the app-open sweeps — AFTER the
+    /// synchronous sweeps, never before them (#185 invariant). Idempotent; a
+    /// failure is silent-degrade (log + swallow — the next begin cold-loads
+    /// exactly as before). `async` so the real engine can hop the blocking
+    /// model load off the main actor (the attachPhoto pattern).
+    /// `DemoWalkEngine` no-ops (no model to warm).
+    func warmStt() async throws
+
+    /// Re-read a session's notes from the store (D1) — the SAME payload
+    /// `finish()` returned for it, field by field (the Rust side reconstructs
+    /// through one shared funnel). Used by the board's reopen tap AND as the
+    /// clause-(b) post-edit fresh read above. Throwing: a missing/tombstoned
+    /// session (a reopen that lost a delete/sweep race) surfaces as an error
+    /// the caller turns into a breadcrumb — never a silent dead tap (F4).
+    func loadNotes(sessionId: String) async throws -> NotesModel
 }

@@ -590,10 +590,29 @@ public protocol MurmurEngineProtocol : AnyObject {
     func listPhotos(sessionId: String) throws  -> [PhotoRef]
     
     /**
+     * The board walk log (D2/D3): every reopenable walk, newest first —
+     * never a transcript (Plan 04 lesson), never a Recording or tombstoned
+     * row. Read-only: safe at app-open alongside the sweeps (R4).
+     */
+    func listSessions() throws  -> [WalkSummary]
+    
+    /**
      * The user's vocabulary terms, insertion order. Read-only — no lock held
      * across FFI beyond the clone.
      */
     func listVocabulary() throws  -> [String]
+    
+    /**
+     * Plan 20 D1/D4 — the walk-reopen read seam AND the Plan 16 clause-(b)
+     * sanctioned post-edit fresh read. Returns a `NotesPayload`
+     * field-by-field identical to what `finish()` returned for the same
+     * session (WE-A), reconstructed from the store through the SAME funnel
+     * (`notes_payload_from_store`). Engine-keyed: works after the live
+     * `WalkSession` is gone (relaunch, board reopen). A missing/tombstoned
+     * session -> `Err` (a reopen that loses a delete/sweep race surfaces to
+     * Swift as a catchable error, never a silent payload).
+     */
+    func loadNotes(sessionId: String) throws  -> NotesPayload
     
     /**
      * Tombstone. A second remove of the same id errors (the store's
@@ -695,6 +714,15 @@ public protocol MurmurEngineProtocol : AnyObject {
      * after any mutation (keeper D-#7), never rebuild state from this echo.
      */
     func updateItem(sessionId: String, itemId: String, text: String?, kind: String?, right: String?) throws  -> BoardItem
+    
+    /**
+     * Plan 20 D7: app-open background STT warm-up. The shell fires this
+     * fire-and-forget from the TAIL of its app-open sweeps (AFTER the
+     * synchronous sweeps — the #185 invariant); a failure is silent-degrade
+     * (log + swallow on the Swift side): the next `begin` cold-loads on
+     * demand exactly as before. Must never block or crash the app.
+     */
+    func warmStt() throws 
     
 }
 
@@ -884,12 +912,42 @@ open func listPhotos(sessionId: String)throws  -> [PhotoRef] {
 }
     
     /**
+     * The board walk log (D2/D3): every reopenable walk, newest first —
+     * never a transcript (Plan 04 lesson), never a Recording or tombstoned
+     * row. Read-only: safe at app-open alongside the sweeps (R4).
+     */
+open func listSessions()throws  -> [WalkSummary] {
+    return try  FfiConverterSequenceTypeWalkSummary.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_list_sessions(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * The user's vocabulary terms, insertion order. Read-only — no lock held
      * across FFI beyond the clone.
      */
 open func listVocabulary()throws  -> [String] {
     return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
     uniffi_ffi_fn_method_murmurengine_list_vocabulary(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Plan 20 D1/D4 — the walk-reopen read seam AND the Plan 16 clause-(b)
+     * sanctioned post-edit fresh read. Returns a `NotesPayload`
+     * field-by-field identical to what `finish()` returned for the same
+     * session (WE-A), reconstructed from the store through the SAME funnel
+     * (`notes_payload_from_store`). Engine-keyed: works after the live
+     * `WalkSession` is gone (relaunch, board reopen). A missing/tombstoned
+     * session -> `Err` (a reopen that loses a delete/sweep race surfaces to
+     * Swift as a catchable error, never a silent payload).
+     */
+open func loadNotes(sessionId: String)throws  -> NotesPayload {
+    return try  FfiConverterTypeNotesPayload.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_load_notes(self.uniffiClonePointer(),
+        FfiConverterString.lower(sessionId),$0
     )
 })
 }
@@ -1059,6 +1117,19 @@ open func updateItem(sessionId: String, itemId: String, text: String?, kind: Str
         FfiConverterOptionString.lower(right),$0
     )
 })
+}
+    
+    /**
+     * Plan 20 D7: app-open background STT warm-up. The shell fires this
+     * fire-and-forget from the TAIL of its app-open sweeps (AFTER the
+     * synchronous sweeps — the #185 invariant); a failure is silent-degrade
+     * (log + swallow on the Swift side): the next `begin` cold-loads on
+     * demand exactly as before. Must never block or crash the app.
+     */
+open func warmStt()throws  {try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_warm_stt(self.uniffiClonePointer(),$0
+    )
+}
 }
     
 
@@ -3083,6 +3154,152 @@ public func FfiConverterTypeSeedReport_lower(_ value: SeedReport) -> RustBuffer 
 
 
 /**
+ * One board walk-log row (D2): a lightweight projection — NO transcript.
+ * `queued = status != Processed` (the same predicate `NotesPayload.queued`
+ * carries); `has_document` = a live `document` artifact exists (a
+ * built-and-kept walk).
+ */
+public struct WalkSummary {
+    public var id: String
+    /**
+     * `doc_kind_for_template(template)` — advisory, for row labeling.
+     */
+    public var docKind: String
+    public var status: WalkStatus
+    /**
+     * `session.summary`, `""` when the session never reached Processed.
+     */
+    public var summary: String
+    /**
+     * Epoch SECONDS (`Store::now()` is `as_secs` — the same clock every
+     * session timestamp uses).
+     */
+    public var startedAt: UInt64
+    /**
+     * Live items only.
+     */
+    public var itemCount: UInt32
+    public var hasDocument: Bool
+    public var queued: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, 
+        /**
+         * `doc_kind_for_template(template)` — advisory, for row labeling.
+         */docKind: String, status: WalkStatus, 
+        /**
+         * `session.summary`, `""` when the session never reached Processed.
+         */summary: String, 
+        /**
+         * Epoch SECONDS (`Store::now()` is `as_secs` — the same clock every
+         * session timestamp uses).
+         */startedAt: UInt64, 
+        /**
+         * Live items only.
+         */itemCount: UInt32, hasDocument: Bool, queued: Bool) {
+        self.id = id
+        self.docKind = docKind
+        self.status = status
+        self.summary = summary
+        self.startedAt = startedAt
+        self.itemCount = itemCount
+        self.hasDocument = hasDocument
+        self.queued = queued
+    }
+}
+
+
+
+extension WalkSummary: Equatable, Hashable {
+    public static func ==(lhs: WalkSummary, rhs: WalkSummary) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.docKind != rhs.docKind {
+            return false
+        }
+        if lhs.status != rhs.status {
+            return false
+        }
+        if lhs.summary != rhs.summary {
+            return false
+        }
+        if lhs.startedAt != rhs.startedAt {
+            return false
+        }
+        if lhs.itemCount != rhs.itemCount {
+            return false
+        }
+        if lhs.hasDocument != rhs.hasDocument {
+            return false
+        }
+        if lhs.queued != rhs.queued {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(docKind)
+        hasher.combine(status)
+        hasher.combine(summary)
+        hasher.combine(startedAt)
+        hasher.combine(itemCount)
+        hasher.combine(hasDocument)
+        hasher.combine(queued)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWalkSummary: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> WalkSummary {
+        return
+            try WalkSummary(
+                id: FfiConverterString.read(from: &buf), 
+                docKind: FfiConverterString.read(from: &buf), 
+                status: FfiConverterTypeWalkStatus.read(from: &buf), 
+                summary: FfiConverterString.read(from: &buf), 
+                startedAt: FfiConverterUInt64.read(from: &buf), 
+                itemCount: FfiConverterUInt32.read(from: &buf), 
+                hasDocument: FfiConverterBool.read(from: &buf), 
+                queued: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: WalkSummary, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.docKind, into: &buf)
+        FfiConverterTypeWalkStatus.write(value.status, into: &buf)
+        FfiConverterString.write(value.summary, into: &buf)
+        FfiConverterUInt64.write(value.startedAt, into: &buf)
+        FfiConverterUInt32.write(value.itemCount, into: &buf)
+        FfiConverterBool.write(value.hasDocument, into: &buf)
+        FfiConverterBool.write(value.queued, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWalkSummary_lift(_ buf: RustBuffer) throws -> WalkSummary {
+    return try FfiConverterTypeWalkSummary.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWalkSummary_lower(_ value: WalkSummary) -> RustBuffer {
+    return FfiConverterTypeWalkSummary.lower(value)
+}
+
+
+/**
  * Fallible-path errors that cross the FFI boundary as a thrown error rather
  * than a panic (Plan 07 CANON: no panics across FFI). `flat_error` means the
  * Swift side receives the variant plus its `Display` message — no api key is
@@ -3426,6 +3643,82 @@ extension WalkEvent: Equatable, Hashable {}
 
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * A finished walk's status at the FFI boundary (D3). Core's
+ * `AwaitingProcessing` maps to `Processing` (Swift's `.processing`);
+ * `Recording` never crosses — `list_walk_summaries` excludes it.
+ */
+
+public enum WalkStatus {
+    
+    case processing
+    case processed
+    case failed
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWalkStatus: FfiConverterRustBuffer {
+    typealias SwiftType = WalkStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> WalkStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .processing
+        
+        case 2: return .processed
+        
+        case 3: return .failed
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: WalkStatus, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .processing:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .processed:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .failed:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWalkStatus_lift(_ buf: RustBuffer) throws -> WalkStatus {
+    return try FfiConverterTypeWalkStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWalkStatus_lower(_ value: WalkStatus) -> RustBuffer {
+    return FfiConverterTypeWalkStatus.lower(value)
+}
+
+
+
+extension WalkStatus: Equatable, Hashable {}
+
+
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -3747,6 +4040,31 @@ fileprivate struct FfiConverterSequenceTypeSchemaSection: FfiConverterRustBuffer
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeWalkSummary: FfiConverterRustBuffer {
+    typealias SwiftType = [WalkSummary]
+
+    public static func write(_ value: [WalkSummary], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeWalkSummary.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [WalkSummary] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [WalkSummary]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeWalkSummary.read(from: &buf))
+        }
+        return seq
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
 
@@ -3833,7 +4151,13 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_murmurengine_list_photos() != 9711) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ffi_checksum_method_murmurengine_list_sessions() != 19041) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_murmurengine_list_vocabulary() != 10809) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_load_notes() != 52536) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_remove_document_schema() != 20008) {
@@ -3861,6 +4185,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_update_item() != 53674) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_warm_stt() != 63939) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walkeventlistener_on_event() != 10314) {
