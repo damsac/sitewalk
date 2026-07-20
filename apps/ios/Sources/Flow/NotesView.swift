@@ -185,7 +185,15 @@ struct NotesView: View {
                         .foregroundStyle(Theme.C.ink)
                         .lineSpacing(3)
                     if notes.queued {
-                        Text("SAVED OFFLINE — DOCUMENTS UNLOCK WHEN YOU RECONNECT")
+                        // Plan 20 F5: a REOPENED still-queued walk must not
+                        // reuse the reconnect promise — the app-open retry
+                        // sweep may already have run and exhausted. Distinct
+                        // string per banner reason.
+                        // // sac: the reopened-Failed copy below is a
+                        // // sac: placeholder — the wording is yours.
+                        Text(model.notesBannerReason == .reopened
+                             ? "COULDN’T FINISH THIS WALK — RETRYING AUTOMATICALLY"
+                             : "SAVED OFFLINE — DOCUMENTS UNLOCK WHEN YOU RECONNECT")
                             .font(Theme.F.mono(8.5, .semibold)).tracking(0.4)
                             .foregroundStyle(Theme.C.yellowTag)
                             .padding(.top, 2)

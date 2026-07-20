@@ -48,6 +48,8 @@ typealias FFIDocLine = MurmurCoreFFI.DocLine
 typealias FFINotesPayload = MurmurCoreFFI.NotesPayload
 typealias FFINotesEntry = MurmurCoreFFI.NotesEntry
 typealias FFIBoardItem = MurmurCoreFFI.BoardItem
+typealias FFIWalkSummary = MurmurCoreFFI.WalkSummary
+typealias FFIWalkStatus = MurmurCoreFFI.WalkStatus
 private typealias FFIWalkEvent = MurmurCoreFFI.WalkEvent
 private typealias FFIWalkEventListener = MurmurCoreFFI.WalkEventListener
 
@@ -308,6 +310,23 @@ final class MurmurEngine: WalkEngine {
 
     func removeItem(sessionId: String, itemId: String) throws {
         try engine.removeItem(sessionId: sessionId, itemId: itemId)
+    }
+
+    // MARK: - Walk-reopen read seam (Plan 20 Half A): pure reads, engine-keyed.
+
+    func listSessions() throws -> [WalkSummary] {
+        try engine.listSessions().map(Self.walkSummary)
+    }
+
+    // Off-main like `attachPhoto`: the FFI read takes the same store lock the
+    // pump contends for. Reopen happens from the board (no live walk), so the
+    // wait is short — but never hold the main actor for it.
+    func loadNotes(sessionId: String) async throws -> NotesModel {
+        let engine = self.engine
+        let payload = try await Task.detached {
+            try engine.loadNotes(sessionId: sessionId)
+        }.value
+        return Self.notes(payload)
     }
 
     func sweepZombieSessions() throws -> UInt64 {

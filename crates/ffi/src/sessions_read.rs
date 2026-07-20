@@ -30,7 +30,8 @@ pub struct WalkSummary {
     pub status: WalkStatus,
     /// `session.summary`, `""` when the session never reached Processed.
     pub summary: String,
-    /// Epoch-ms, the same clock `walkStart` uses.
+    /// Epoch SECONDS (`Store::now()` is `as_secs` — the same clock every
+    /// session timestamp uses).
     pub started_at: u64,
     /// Live items only.
     pub item_count: u32,

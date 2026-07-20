@@ -165,8 +165,25 @@ struct BoardView: View {
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else {
+                    // Plan 20 D5: rows are tappable — reopen the walk's notes.
+                    // // sac: the reopen affordance visuals (chevron? row
+                    // // sac: press state?) + the reopened banner are yours.
                     ForEach(model.sessionWalks) { walk in
-                        WalkLogRow(walk: walk)
+                        Button {
+                            model.reopenWalk(sessionId: walk.sessionId)
+                        } label: {
+                            WalkLogRow(walk: walk)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let reopenError = model.reopenError {
+                        // F4 floor: the breadcrumb surfaces; chrome is sac's.
+                        Text(reopenError.uppercased())
+                            .font(Theme.F.mono(8.5))
+                            .tracking(0.4)
+                            .foregroundStyle(Theme.C.orangeDeep)
+                            .padding(.horizontal, Theme.S.screenPad)
+                            .padding(.top, 8)
                     }
                 }
             } else {

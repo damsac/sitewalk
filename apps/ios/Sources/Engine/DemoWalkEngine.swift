@@ -211,13 +211,37 @@ final class DemoWalkEngine: WalkEngine {
         // Simulate the notes-compute beat (the real engine targets < 8 s).
         try? await Task.sleep(for: .seconds(0.8))
         let itemWord = board.count == 1 ? "item" : "items"
-        return NotesModel(
+        let notes = NotesModel(
             summary: "Walked \(trade.site.capitalized(with: nil)) — \(board.count) \(itemWord) captured.",
             items: board,
             docKind: DocKinds.primaryKind(for: trade.key),
             queued: false,
             notes: Self.sampleNotes
         )
+        lastNotes = notes
+        return notes
+    }
+
+    // MARK: Walk-reopen read seam (Plan 20) — no-op history in the demo.
+
+    /// The last finished walk's notes, kept so the reopen/fresh-read paths
+    /// compile and behave in the demo (Plan 20 demo posture).
+    private var lastNotes: NotesModel?
+
+    /// The demo keeps its walk log in-memory (`AppModel.sessionWalks`) —
+    /// `listSessions` stays a `[]` no-op stub. `hydrateWalkLog`'s F2 guard is
+    /// what keeps this empty-success from clobbering the demo log.
+    func listSessions() -> [WalkSummary] { [] }
+
+    /// The last demo notes with the CURRENT board (so a post-edit fresh read
+    /// reflects the edit rather than reverting it), or empty notes if no walk
+    /// has finished. A harmless no-op path — never throws, never resurrects.
+    func loadNotes(sessionId: String) -> NotesModel {
+        guard var notes = lastNotes else {
+            return NotesModel(summary: "", items: [], docKind: "report", queued: false)
+        }
+        notes.items = board
+        return notes
     }
 
     // Plan 14 Task 6: scripted sample buckets (WE-A shape) so the demo build
