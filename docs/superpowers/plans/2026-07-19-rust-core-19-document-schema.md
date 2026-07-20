@@ -9,6 +9,14 @@ schema-driven rendering over dam's absence, ON TOP of this seam.
 Plan numbers **17** (corrections-learning) and **18** (bucket-edit) are RESERVED
 for other queued work — do not renumber.
 
+**Rev 2 (adversarial review):** seeding moved out of the migration's inline SQL
+into a Rust `seed_builtin_schemas` called from `from_connection` after migrate
+(ONE source of truth = `builtin_schemas()`, sentinel `device_id`, guard live on
+every open — folds in NIT 2); fill provider-`Err` now sets `queued` to mirror the
+pricing degrade (SHOULD-FIX 3); WE-C + a named sac follow-up list pin the Swift
+prefix-map divergence (SHOULD-FIX 2); WE-B's fill prompt reuses the real
+`format_pricing_items` item shape (NIT 1).
+
 ---
 
 ## 1. Thinking
@@ -47,10 +55,16 @@ honors each as a hard constraint:
    future relaxation; the schema shape must not foreclose it.
 3. **Schemas scoped per `trade_key`.** Matches how doc kinds already key off
    template. Cross-trade sharing later = copy, not reference.
-4. **Built-ins seeded in the core migration WITH the resurrection pin.** Fixed
-   UUIDs + skip-if-tombstoned: an operator who deletes a built-in must not see
-   it resurrect on the next migration/app-update. This is the one place the
-   design can silently betray the user, so it is an explicit Stage-1 acceptance
+4. **Built-ins seeded from `from_connection` (after migrate) WITH the
+   resurrection pin.** The v7 migration creates the TABLE only; a Rust
+   `seed_builtin_schemas(conn, ...)` runs the INSERTs, iterating the ONE source
+   `builtin_schemas()` (the migration cannot: `migrate_with` is pure SQL strings
+   with no Rust hook, and it runs BEFORE `device_id` exists — `store/mod.rs`:47-50).
+   Fixed UUIDs + skip-if-tombstoned: an operator who deletes a built-in must not
+   see it resurrect on the next app-update. Because the seed runs on **every
+   open** (guarded by `NOT EXISTS` incl. tombstoned rows), the resurrection guard
+   is LIVE on every launch, not inert-after-v7. This is the one place the design
+   can silently betray the user, so it is an explicit Stage-1 acceptance
    criterion (WE-A).
 
 Out of scope (named so the seam's shape accounts for them, but no code):
@@ -215,7 +229,12 @@ EXACTLY — pinned in Stage 1.
 4. **Price** iff `line_items.priced && !items.is_empty()` — today's `price_items`
    pass, unchanged (degrade → `queued`, R7).
 5. **Fill** iff the schema has ≥1 `filled` field — ONE focused `fill_fields`
-   pass (Stage 5). Built-ins have none → skipped → byte-identical.
+   pass (Stage 5). Built-ins have none → skipped → byte-identical. A provider
+   `Err` on this pass sets `queued = true`, mirroring the pricing degrade
+   (`document.rs`:337) — ONE consistent meaning: "a model call this build needed
+   didn't complete; regenerate to retry." A model-*declined* field (the call
+   succeeded, the field is simply absent) is a truthful gap and does NOT set
+   `queued`.
 6. **Total** from the schema envelope `total_kind`/`total_label_key` (replaces
    `total_shape`).
 7. **Number** — mint the per-kind integer (unchanged `document_sequences`
@@ -244,33 +263,56 @@ built-in id consts, and `builtin_schemas() -> Vec<DocumentSchema>` (the ONE
 source of the table above). Export via `lib.rs`.
 
 New: `crates/murmur-core/src/store/schemas.rs` (module wired into
-`store/mod.rs`). Contains `seed_builtin_schemas(conn)` used by the migration.
+`store/mod.rs`). Contains `seed_builtin_schemas(conn, ...)`.
 
-Edit: `store/migrations.rs` — append v7:
+Edit: `store/migrations.rs` — append v7, **the TABLE only** (no inline seed
+SQL — the migration framework is pure SQL strings, `migrate_with` iterates
+`&[&str]` and `execute_batch`es each, and it runs BEFORE `device_id`/clock exist
+at `store/mod.rs`:47-50, so there is no Rust hook at v7):
 ```sql
 CREATE TABLE document_schemas ( … as §3 … );
 CREATE INDEX idx_document_schemas_kind ON document_schemas(kind) WHERE deleted_at IS NULL;
 ```
-plus the seed INSERTs, each **tombstone-respecting**:
+
+Edit: `store/mod.rs::from_connection` — after `migrations::migrate(&conn)?`, call
+`schemas::seed_builtin_schemas(&conn)?`. This is where the seed belongs, not the
+migration: it runs after the table exists, and the seed uses **pinned literals**
+(no clock/device_id needed) so its position ahead of the `with_clock` override is
+irrelevant. `seed_builtin_schemas` iterates `builtin_schemas()` — the ONE source
+of truth, no inline-SQL duplicate — and for each does a **parameterized**,
+tombstone-respecting insert:
 ```sql
-INSERT INTO document_schemas (id, kind, …, deleted_at)
-SELECT '…0001','estimate',…,NULL
-WHERE NOT EXISTS (SELECT 1 FROM document_schemas WHERE id = '…0001');
+INSERT INTO document_schemas (id, kind, …, created_at, updated_at, device_id, deleted_at)
+SELECT ?, ?, …, ?, ?, ?, NULL
+WHERE NOT EXISTS (SELECT 1 FROM document_schemas WHERE id = ?);
 ```
+Every seeded row uses a **SENTINEL `device_id` identical on every device** (pin
+the literal: `"builtin"`) so built-ins share fixed UUIDs *and* a fixed origin —
+together the stable sync merge key that lets two devices converge on "the same
+built-in" rather than duplicating it. `created_at`/`updated_at` are **fixed
+literals** (pin: `0`) so a seeded row is byte-identical on every device.
+
 The `WHERE NOT EXISTS` checks **every** row incl. tombstoned — a fixed-id row
-that was soft-deleted blocks re-seed. (Migrations already run once per
-`user_version`; the guard defends the case where a *future* migration re-runs
-the seed block to add a new built-in — WE-A.)
+that was soft-deleted blocks re-seed. Because `seed_builtin_schemas` runs on
+**every** `Store::open` (not once per `user_version`), the resurrection guard is
+LIVE on every launch: a new built-in added to `builtin_schemas()` seeds naturally
+on the next open, and a deleted built-in stays deleted forever (WE-A). No future
+migration is needed to add a built-in.
 
 Tests (`store/schemas.rs` + `store/migrations.rs`):
 - `fresh_store_is_at_schema_v7` — replaces the v6 pin.
 - `v7_seeds_exactly_the_seven_builtins` — ids + kinds + trade_keys + prefixes.
+- `seeded_rows_deep_equal_builtin_schemas` — read every seeded row back and
+  assert it deep-equals the corresponding `builtin_schemas()` element (the guard
+  that the parameterized INSERT and the `Vec` source never drift; catches the
+  SQL/Vec divergence an inline-SQL duplicate would have risked).
 - `builtin_schemas_reproduce_todays_pricing_and_total_shape` — for every kind,
   `line_items.priced == is_pricing_kind(kind)` and the envelope
   `total_kind/label == total_shape(kind)`. (The parity net between the old
   hardcoded functions and the seeds.)
-- `seed_is_tombstone_respecting_idempotent` — insert, tombstone `…0001`,
-  re-run `seed_builtin_schemas`; `…0001` stays tombstoned (WE-A core).
+- `tombstoned_builtin_survives_a_fresh_seed_call` — insert, tombstone `…0001`,
+  re-run `seed_builtin_schemas`; `…0001` stays tombstoned, not resurrected
+  (WE-A core — the guard exercised the way every real launch exercises it).
 
 ### Stage 2 — store CRUD + resolution
 
@@ -291,8 +333,9 @@ Tests:
 - `resolve_prefers_newest_and_matches_kind_plus_trade`
 - `resolve_report_only_for_none_template_not_for_landscape` (parity guard)
 - `resolve_returns_none_for_a_tombstoned_builtin` (resurrection consequence)
-- `we_a_migration_over_a_tombstoned_builtin_yields_the_pinned_surviving_set`
-  (WE-A end-to-end — see §6).
+- `we_a_reopen_over_a_tombstoned_builtin_yields_the_pinned_surviving_set`
+  (WE-A end-to-end: tombstone a built-in, reopen the store — re-running the seed
+  — assert the exact surviving live set; see §6).
 
 ### Stage 3 — save-time validation (R6, reject-never-coerce)
 
@@ -337,21 +380,31 @@ New tests:
 ### Stage 5 — `fill_fields` pass + payload `number_prefix` + `fields[]`
 
 `pipeline/document.rs::fill_fields(provider, filled_fields, items, summary,
-max_tokens, usage) -> Result<HashMap<String,String>, HarnessError>` — the
-`price_items` twin: ONE forced structured-output call, input is the **items +
-session summary only (never the transcript, R6)**, forced tool `fill_fields`
-with `{ fields: [{ key, value }] }`. Echo-and-validate against the schema's
-`filled` field keys, first-wins dedup, drop unknown keys. Accumulate usage
-before judging (R9). Provider `Err` → propagate (no tokens); a call that returns
-an unparseable/absent tool block → `Ok(empty)` after logging (R9), and the
-fields degrade to gaps (R7 — a fill failure is never a hard failure; an unfilled
-field is a truthful gap).
+max_tokens, usage) -> Result<HashMap<String,String>, HarnessError>` — the exact
+`price_items` twin (including its degrade contract): ONE forced structured-output
+call; input is the **items + session summary only (never the transcript, R6)**;
+the items block reuses `format_pricing_items` (ONE item-formatting helper, no
+divergent shape); forced tool `fill_fields` with `{ fields: [{ key, value }] }`.
+Echo-and-validate against the schema's `filled` field keys, first-wins dedup,
+drop unknown keys. Accumulate usage before judging (R9). Two failure modes,
+mirroring pricing: a provider `Err` carries no usage and returns `Err`; a
+completed response whose tool block is **unparseable/absent** returns
+`Err(HarnessError::Provider(…))` after `usage.add` (R9 — it cost tokens), exactly
+as `price_items` does (`document.rs`:186-188). A tool block that IS present but
+simply omits a field is NOT an error — that field is a truthful gap.
 
-`build`: after pricing, if the schema has ≥1 `filled` field, run `fill_fields`;
-assemble the `fields[]` output — one entry per authored `filled`/`static` field
-in schema order: `static` → `static_value` (is_gap false); `walk`/`manual` →
-`fill_fields` value if present (is_gap false) else `value=null, is_gap=true`.
-`manual` fields are always gaps in v1 (operator completes at review — no LLM).
+`build`: after pricing, if the schema has ≥1 `filled` field, run `fill_fields`,
+matching on its result exactly like the pricing pass (`document.rs`:334-337):
+`Ok(map)` → use the values; **`Err(_)` → `queued = true`** (a model call this
+build needed didn't complete — regenerate to retry), and every `walk`/`manual`
+field with no value degrades to a gap. Then assemble the `fields[]` output — one
+entry per authored `filled`/`static` field in schema order: `static` →
+`static_value` (is_gap false); `walk`/`manual` → `fill_fields` value if present
+(is_gap false) else `value=null, is_gap=true`. `manual` fields are always gaps in
+v1 (operator completes at review — no LLM). Note the two distinct meanings: a
+**model-declined** `walk` field (call succeeded, field omitted) is a gap with
+`queued` UNCHANGED; a **fill-call failure** (provider `Err` or unparseable) sets
+`queued=true` AND its fields fall to gaps.
 
 FFI surface (`ffi/document.rs`): add `DocumentPayload.number_prefix:
 Option<String>` and `DocumentPayload.fields: Vec<DocField>` where `DocField {
@@ -368,7 +421,11 @@ Tests:
 - `omitted_field_renders_as_a_gap_row` (R6 — WE-B F2)
 - `static_field_passes_through_its_value`
 - `manual_field_is_always_a_gap_in_v1`
-- `fill_failure_degrades_fields_to_gaps_not_a_hard_failure` (R7)
+- `fill_call_failure_sets_queued_and_degrades_fields_to_gaps` (R7 — provider
+  `Err`; assert `queued == true` and the affected fields are gaps, never a hard
+  build failure — the pricing-degrade posture)
+- `model_declined_field_is_a_gap_without_queued` (the call succeeded but omitted
+  the field; assert the field is a gap and `queued == false`)
 - `custom_schema_full_render` (WE-B — lines + fields + static, exact)
 - `number_prefix_comes_from_the_schema_row_across_interleaved_builds` (WE-C)
 - `builtins_emit_empty_fields_and_todays_prefix` (byte-identical guard)
@@ -425,23 +482,30 @@ Tests (`ffi/schemas.rs`):
 
 ## 6. Arithmetic-pinned worked examples (hand-recompute against real code)
 
-### WE-A — migration over a tombstoned built-in → exact surviving set
+### WE-A — reopen (re-seed) over a tombstoned built-in → exact surviving set
 
 Pin ids: estimate=`…0001`, invoice=`…0002`, work_order=`…0003`,
 condition=`…0004`, move_out=`…0005`, inspection=`…0006`, report=`…0007`.
 
-1. Fresh store → v7 seeds `{0001..0007}`, all live.
+The guard is NOT a migration-only event: `seed_builtin_schemas` runs on **every**
+`Store::open` (from `from_connection`, after migrate), so this trace is what
+every launch does — adding a built-in to `builtin_schemas()` needs no migration,
+and a deleted built-in stays deleted across every subsequent open.
+
+1. First open → v7 creates the table, `seed_builtin_schemas` seeds `{0001..0007}`
+   live (each `INSERT … SELECT … WHERE NOT EXISTS(id)` fires once).
    `list_document_schemas(Some("landscape"))` = trade ∈ {landscape, NULL} =
    **`[0001 estimate, 0002 invoice, 0003 work_order, 0007 report]`**.
 2. `remove_document_schema("…0001")` → `0001.deleted_at` set.
-3. A later **v8** migration adds built-in `…0008` punch_list (landscape, prefix
-   PUN) and re-runs the seed block (each `INSERT … WHERE NOT EXISTS(id)`).
+3. A later app-update adds built-in `…0008` punch_list (landscape, prefix PUN) to
+   `builtin_schemas()`. On the **next open**, `seed_builtin_schemas` re-runs over
+   the full (now eight-element) `builtin_schemas()`:
    - `…0001`: a row with that id EXISTS (tombstoned) → `WHERE NOT EXISTS` is
      false → **not re-inserted, stays tombstoned** (resurrection defused).
    - `…0002..0007`: exist live → skipped.
    - `…0008`: no such id → inserted live.
-4. Post-v8 live set = **`{0002,0003,0004,0005,0006,0007,0008}`**; `0001` remains
-   tombstoned. `list_document_schemas(Some("landscape"))` =
+4. Post-reopen live set = **`{0002,0003,0004,0005,0006,0007,0008}`**; `0001`
+   remains tombstoned. `list_document_schemas(Some("landscape"))` =
    **`[0002 invoice, 0003 work_order, 0007 report, 0008 punch_list]`** —
    estimate ABSENT. This is the acceptance criterion the review demanded.
 
@@ -472,12 +536,19 @@ Fields:
 - [reviewed_by] Reviewed by
 
 Session items:
-- [todo] Install boxwood hedge
-- [part] bark mulch (3 CU YD)
+- [todo] Install boxwood hedge (item_id: item-A)
+- [part] bark mulch (item_id: item-B)
 
 Session summary:
 Walked the front yard; HOA approval 41827 on file.
 ```
+The `Session items` block is `format_pricing_items(items)` verbatim (the same
+helper the pricing pass uses — `document.rs`:116-122: `- [{kind}] {text} (item_id:
+{id})`), NOT a fill-specific shape; only the surrounding `Fields:` / `Session
+summary:` framing is the fill prompt's own (pinned here). Note `right_text`
+("3 CU YD") is deliberately absent — `format_pricing_items` omits it, and the
+fill pass does not re-add it.
+
 Model returns `fill_fields { "fields": [ {"key":"hoa_no","value":"41827"} ] }`
 — `reviewed_by` omitted (not stated → R6).
 
@@ -512,8 +583,28 @@ at 0, mint = prev+1. Interleaved builds:
 | 5 | hoa_addendum | 1→2 | 2 | HOA | HOA-0002 |
 | 6 | estimate     | 2→3 | 3 | EST | EST-0003 |
 
-`number_prefix` is read from each resolved schema row (not a Swift switch); the
-integer is the unchanged per-kind `document_sequences` counter; `%04d` render.
+Core-side, `number_prefix` is read from each resolved schema row (not a Swift
+switch) and stamped into the payload; the integer is the unchanged per-kind
+`document_sequences` counter; `%04d` render. **The rendered column is the state
+once Swift consumes `payload.number_prefix`** — TODAY, `MurmurEngineFormatting.
+docNumberLabel` (`apps/ios/…/MurmurEngineFormatting.swift`:63) is a hardcoded
+`switch` over `docKind` with `default → "DOC"`, so a custom `hoa_addendum` would
+render **`DOC-0001`, not `HOA-0001`**, even though the core already emits
+`number_prefix:"HOA"`. Likewise `DocKinds.legalKinds/label/stamp` (`apps/ios/
+Sources/Fixtures/Fixtures.swift`:96+) are hardcoded built-in mirrors, so the
+core's legality UNION never surfaces a custom kind's button in the UI. This is
+**launch-safe today**: every built-in maps correctly through those hardcoded
+switches (`estimate→EST`, …), and v1 ships on built-ins only, so the payload's
+`number_prefix` is redundant-but-correct for built-ins. Custom kinds render
+correctly only after the sac follow-ups below.
+
+**sac follow-ups (editor milestone — NOT this plan):**
+- `MurmurEngineFormatting.docNumberLabel` → read `payload.number_prefix` instead
+  of the hardcoded `docKind` switch (fall back to the switch only when the field
+  is absent, for pre-Rev-2 payloads).
+- `DocKinds.legalKinds` (and `label`/`stamp`) → drive the kind list from the seam
+  (`list_document_schemas(trade)`), not the hardcoded per-template arrays, so
+  custom kinds surface their buttons + copy.
 
 ### WE-D — save with an unknown field kind → exact error, nothing persisted
 
