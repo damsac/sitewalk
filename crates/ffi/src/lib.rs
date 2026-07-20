@@ -16,6 +16,7 @@ pub mod photos;
 pub mod schemas;
 pub mod session;
 pub mod session_retry;
+pub mod sessions_read;
 pub mod vocabulary;
 
 pub use convert::document_payload;
@@ -26,3 +27,4 @@ pub use notes::{NotesBucket, NotesEntry, NotesPayload};
 pub use photos::PhotoRef;
 pub use schemas::{DocumentSchema, SchemaField, SchemaSection};
 pub use session::WalkSession;
+pub use sessions_read::{WalkStatus, WalkSummary};
