@@ -386,7 +386,7 @@ struct OnboardingFlow: View {
             Text(micState == .granted ? "You’re ready to walk." : "Let Jefe hear your walk.")
                 .font(Theme.F.ui(23, .bold))
                 .padding(.top, 6)
-            Text("EVERYTHING TRANSCRIBES ON YOUR PHONE")
+            Text("YOUR AUDIO STAYS ON YOUR PHONE")
                 .font(Theme.F.mono(8.5))
                 .tracking(0.8)
                 .foregroundStyle(Theme.C.ink60)
