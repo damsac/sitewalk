@@ -253,9 +253,19 @@ struct CustomizeView: View {
                 tabButton("WORDS", .words)
             }
 
-            switch tab {
-            case .paperwork: LetterheadStudioView(model: model, embedded: true)
-            case .words: VocabularyView(model: model, embedded: true)
+            // Both tabs stay ALIVE (ZStack + opacity), not a `switch` that
+            // tears the inactive branch down. LetterheadStudioView holds its
+            // edits in @State draft (name/color/logo/terms) committed only on
+            // SAVE — a `switch` would destroy that draft on every tab hop,
+            // silently losing uncommitted letterhead edits (review #247). The
+            // hidden tab is non-interactive so it can't steal touches.
+            ZStack {
+                LetterheadStudioView(model: model, embedded: true)
+                    .opacity(tab == .paperwork ? 1 : 0)
+                    .allowsHitTesting(tab == .paperwork)
+                VocabularyView(model: model, embedded: true)
+                    .opacity(tab == .words ? 1 : 0)
+                    .allowsHitTesting(tab == .words)
             }
         }
         .background(Theme.C.paper.ignoresSafeArea())
