@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import UIKit
 import os
 
 // One observable model drives the whole flow:
@@ -304,6 +305,14 @@ final class AppModel {
     /// moves into it (the D9 numbered invariant, F3): STT/audio must never
     /// wire onto a session `begin` didn't successfully open (Plan 07
     /// dead-walk — a dead session would pump and silently drop every append).
+    /// Keep the display awake for the duration of a walk. Without this the phone
+    /// auto-locks in a pocket mid-walk, iOS suspends/kills the app, and the
+    /// in-progress walk is discarded (the whole "pocket it and keep walking"
+    /// flow). Toggled off at every walk exit so the board sleeps normally.
+    private func keepScreenAwake(_ on: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = on
+    }
+
     private func beginWalk() {
         pumpTask?.cancel()
         eventTask?.cancel()
@@ -313,6 +322,7 @@ final class AppModel {
         micStarting = true
         phase = .walking
         path = [.walking]
+        keepScreenAwake(true)   // don't let the phone sleep + kill the walk
 
         Task { [weak self] in
             guard let self else { return }
@@ -333,6 +343,7 @@ final class AppModel {
                 Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
                     .error("startWalk: engine.begin failed, back to board: \(error, privacy: .public)")
                 self.micStarting = false
+                self.keepScreenAwake(false)
                 self.phase = .board
                 self.path = []
                 return
@@ -452,6 +463,7 @@ final class AppModel {
     }
 
     func discardWalk() {
+        keepScreenAwake(false)
         source?.abort()
         audioSource?.stop()
         pumpTask?.cancel()
@@ -489,6 +501,7 @@ final class AppModel {
     var notesLoading = false
 
     func finishWalk() {
+        keepScreenAwake(false)   // recording's done — let the phone sleep normally
         source?.stop()
         audioSource?.stop()
         // Navigate once, immediately, into the notes phase in a loading state.
