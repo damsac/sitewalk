@@ -6,13 +6,17 @@ What sac is working on right now. Updated with every PR.
 
 ## Headline for dam (what needs you)
 
-*(freshened 2026-07-17 — onboarding + rename + the beta site landed this session.)*
+*(freshened 2026-07-21.)*
 
-### 1. Review + merge the launch-readiness stack, then cut a TestFlight build
+### 1. Cut the `v1.1.0` external build — the stack is MERGED, `main` is READY
 
-This is the critical path to putting Jefe in front of real testers. All are
-**app-side, no FFI surface, MERGEABLE, build-verified** on the iPhone 17 sim
-(each rendered on-sim where there's UI):
+**STATUS (2026-07-21): the whole launch-readiness stack is on `main`** — #236
+intro, #237 coach marks, #235 dark-mode, #239 rename→Jefe, #246 privacy-accuracy
+fix — plus your core (#242–#245 DocumentSchema seam / walk-reopen / whisper
+warm-up). `main` builds + ships as **Jefe** (verified on-sim end-to-end: onboarding
+→ walk → live extraction → paperwork). **The only thing left for the first public
+beta is tagging the external build (see THE ASK).** The stack detail, for
+reference:
 
 - **Onboarding set** — teach a historically non-technical crew by *showing*, in
   plain words (no "AI/transcript/extraction" anywhere):
@@ -38,6 +42,19 @@ This is the critical path to putting Jefe in front of real testers. All are
   (`SitewalkGallery`) unchanged. Takes effect next build.
 - **#235 dark-mode light-lock** — dark mode whited out ink text; locks the app to
   light appearance (`UIUserInterfaceStyle: Light`).
+
+**Launch candidate still OPEN — Isaac's call for v1.1.0:**
+- **#247 board clarity (MERGEABLE)** — the cryptic board chips (VOCAB + PAPER) were
+  opaque to a non-technical audience → now ONE amber **MY BUSINESS** button opening
+  a two-tab sheet (PAPERWORK [logo/colors/letterhead] + WORDS [the vocab editor]).
+  Also: the mic + MY BUSINESS buttons got the START-WALK raised-block look (read as
+  buttons), and the VOICE/DEMO chip is **removed** from the board (voice-only for
+  users; `demo=1` still works for QA). Build-verified real-core; Isaac's eyeballing
+  it on-device — if he likes it, merge before tagging so the first testers get the
+  clearer customization entry.
+
+**Not blocking v1.1.0** (both CONFLICTING, optional / next build): #238 practice
+walk, #240 Plan 18 notes-buckets UI.
 
 **None of these reach TestFlight until you merge + the release lane fires** (the
 sacmeng Actions gate, item 4).
