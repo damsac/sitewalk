@@ -23,24 +23,9 @@ struct BoardView: View {
                         .tracking(2.0)
                         .foregroundStyle(Theme.C.orangeDeep)
                     Spacer()
-                    // Input-mode chip: VOICE (the product) vs DEMO (the canned
-                    // walk — graduates into onboarding). Tap to toggle;
-                    // launch-arg-forced modes lock it.
-                    Button { model.toggleMode() } label: {
-                        raisedChip(
-                            face: model.walkMode == .voice ? Theme.C.greenTint : Theme.C.yellowTint,
-                            edge: model.walkMode == .voice ? Theme.C.greenTag : Theme.C.yellowTag
-                        ) {
-                            Text(model.walkMode == .voice ? "MIC · VOICE" : "DEMO WALK")
-                                .font(Theme.F.mono(8, .semibold))
-                                .tracking(1.0)
-                                .foregroundStyle(model.walkMode == .voice ? Theme.C.greenTag : Theme.C.yellowTag)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(model.modeLocked ? 0.5 : 1)
-                    .disabled(model.modeLocked)
+                    // Input mode is voice-only for users; the DEMO toggle was a
+                    // dev affordance (still reachable via the `demo=1` launch arg
+                    // for QA/screenshots) — removed from the board per Isaac.
                     // One clear entry for making the app yours — replaces two
                     // cryptic chips (VOCAB + PAPER). A raised amber block (same
                     // pressed-block grammar as START WALK) so it reads as a
