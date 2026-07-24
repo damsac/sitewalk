@@ -6,7 +6,34 @@ What sac is working on right now. Updated with every PR.
 
 ## Headline for dam (what needs you)
 
-*(freshened 2026-07-21.)*
+*(freshened 2026-07-23.)*
+
+### 0. WE'RE LIVE — first external beta out; two field fixes just merged
+
+**Build 2.0.0 (54) is APPROVED on external TestFlight** (Isaac promoted it to the
+"Jefe Beta" external group; public link + getjefe.netlify.app site are live).
+
+**🔓 The sacmeng Actions hold is LIFTED** — Isaac's merges now fire the release
+lane (verified: two runs fired with `actor=sacmeng`). So Isaac can cut TestFlight
+builds himself now; you're no longer the only actor. **Workflow split is unchanged
+in spirit** — you mostly backend/core, Isaac mostly frontend/UI — but Isaac may
+now pick up the occasional backend/release change (like the STT model swap below).
+Nothing needed from you; just FYI so a build firing on Isaac's actor isn't a
+surprise.
+
+**First tester hit two issues — both root-caused + fixed + merged to main (a
+build is firing now):**
+- **#250 photo-upload CRASH = OOM.** Both photo paths stored FULL-RES images
+  (12–48 MP); decode+encode during a live whisper walk (model + Metal already in
+  RAM) = jetsam kill. Fix caps captures at 2048px before store (`PhotoDownsize`).
+- **#251 worse ACCURACY = base.en.** The external build shipped **base.en**;
+  earlier local builds used **small.en** (spike-validated better WER). Re-promoted
+  small.en in all 3 spots (release.yml / EngineResolution / generate.sh).
+  **⚠️ YOUR-DOMAIN CAVEAT:** small.en was demoted 2026-07-10 for felt lag on the
+  iPhone 16e — but that predates your Plan 20 warm-up (#245). Isaac is re-testing
+  live RTF on device; if it lags, one-line revert to base.en. If small.en still
+  lags with the warm-up, that's a core/perf question for you (faster small model?
+  decode params?).
 
 ### 1. Cut the `v1.1.0` external build — the stack is MERGED, `main` is READY
 
