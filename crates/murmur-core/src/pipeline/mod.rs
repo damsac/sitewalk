@@ -412,7 +412,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::ToolUse { id: "tu_1".into(), name: name.into(), input }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 100, output_tokens: 20 },
+            usage: Usage { input_tokens: 100, output_tokens: 20, ..Default::default() },
         }
     }
 
@@ -420,7 +420,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::Text { text: text.into() }],
             stop_reason: StopReason::EndTurn,
-            usage: Usage { input_tokens: 50, output_tokens: 10 },
+            usage: Usage { input_tokens: 50, output_tokens: 10, ..Default::default() },
         }
     }
 
@@ -441,7 +441,7 @@ mod tests {
         assert_eq!(outcome.session.summary.as_deref(), Some("Ordered lumber; Dev handles framing."));
         // usage: 100+20, 100+20, 50+10 agent + 100+20 summary — NO build_document
         // call (Plan 13 Stage 2 drops phase B): finish is strictly cheaper.
-        assert_eq!(outcome.usage, Usage { input_tokens: 350, output_tokens: 70 });
+        assert_eq!(outcome.usage, Usage { input_tokens: 350, output_tokens: 70, ..Default::default() });
 
         let store = store.lock().unwrap();
         assert_eq!(store.list_items_for_session(&sid).unwrap().len(), 1);

@@ -247,7 +247,7 @@ mod tests {
                 input: serde_json::json!({ "sections": sections }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 100, output_tokens: 50 },
+            usage: Usage { input_tokens: 100, output_tokens: 50, ..Default::default() },
         }
     }
 
@@ -292,7 +292,7 @@ mod tests {
                 session: None,
             }
         );
-        assert_eq!(out.usage, Usage { input_tokens: 100, output_tokens: 50 });
+        assert_eq!(out.usage, Usage { input_tokens: 100, output_tokens: 50, ..Default::default() });
 
         // request shape: forced tool, memory + activity present, corrected marker rendered
         let reqs = provider.requests();
@@ -374,7 +374,7 @@ mod tests {
                 input: serde_json::json!({ "sections": "not an object" }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 77, output_tokens: 11 },
+            usage: Usage { input_tokens: 77, output_tokens: 11, ..Default::default() },
         }]));
         let engine = ReflectionEngine::new(provider);
         let err = engine.reflect(&Memory::default(), &[], 999).await.unwrap_err();
@@ -382,7 +382,7 @@ mod tests {
             matches!(&err.source, HarnessError::Provider(msg) if msg.contains("malformed sections"))
         );
         // post-completion failure: usage from the completed response is preserved
-        assert_eq!(err.usage, Usage { input_tokens: 77, output_tokens: 11 });
+        assert_eq!(err.usage, Usage { input_tokens: 77, output_tokens: 11, ..Default::default() });
     }
 
     #[tokio::test]
@@ -395,8 +395,8 @@ mod tests {
         assert!(
             matches!(&err.source, HarnessError::Provider(msg) if msg.contains("empty memory"))
         );
-        // write_memory_response uses Usage { input_tokens: 100, output_tokens: 50 }
-        assert_eq!(err.usage, Usage { input_tokens: 100, output_tokens: 50 });
+        // write_memory_response uses Usage { input_tokens: 100, output_tokens: 50, ..Default::default() }
+        assert_eq!(err.usage, Usage { input_tokens: 100, output_tokens: 50, ..Default::default() });
     }
 
     #[test]

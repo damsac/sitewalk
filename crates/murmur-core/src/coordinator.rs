@@ -182,7 +182,7 @@ mod tests {
                 input: serde_json::json!({"sections": sections}),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 200, output_tokens: 40 },
+            usage: Usage { input_tokens: 200, output_tokens: 40, ..Default::default() },
         }
     }
 
@@ -308,7 +308,7 @@ mod tests {
                 input: serde_json::json!({ "sections": "not an object" }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 200, output_tokens: 40 },
+            usage: Usage { input_tokens: 200, output_tokens: 40, ..Default::default() },
         };
         let (coordinator, memory, _memory_store, store) =
             coordinator_with(vec![malformed], store_with_ended_session());

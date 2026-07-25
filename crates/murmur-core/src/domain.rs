@@ -373,8 +373,15 @@ pub struct LlmUsageRow {
     /// folded into a single row per session by design), "reflection", or future
     /// pipeline phases. "summary" never appears as a standalone purpose.
     pub purpose: String,
+    /// Prompt tokens billed at the full rate — the *uncached remainder* when
+    /// caching is on, not the whole prompt. Sum all three token fields for
+    /// "how big was the prompt" (see `harness::Usage::total_input_tokens`).
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Prompt tokens written to the cache (~1.25x). 0 on pre-v8 rows.
+    pub cache_creation_input_tokens: u64,
+    /// Prompt tokens served from the cache (~0.1x). 0 on pre-v8 rows.
+    pub cache_read_input_tokens: u64,
     pub created_at: u64,
     pub device_id: String,
 }

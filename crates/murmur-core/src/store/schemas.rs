@@ -330,11 +330,11 @@ mod tests {
     }
 
     #[test]
-    fn fresh_store_is_at_schema_v7() {
+    fn fresh_store_is_at_schema_v8() {
         let s = Store::open_in_memory("device-a").unwrap();
         let v: i64 =
             s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 7, "v7 added document_schemas (Plan 19)");
+        assert_eq!(v, 8, "v8 added the llm_usage prompt-cache token columns");
     }
 
     #[test]

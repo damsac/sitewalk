@@ -13,6 +13,12 @@ fn usage_from_row(row: &Row) -> Result<LlmUsageRow, CoreError> {
         purpose: row.get("purpose").map_err(CoreError::Sqlite)?,
         input_tokens: row.get::<_, i64>("input_tokens").map_err(CoreError::Sqlite)? as u64,
         output_tokens: row.get::<_, i64>("output_tokens").map_err(CoreError::Sqlite)? as u64,
+        cache_creation_input_tokens: row
+            .get::<_, i64>("cache_creation_input_tokens")
+            .map_err(CoreError::Sqlite)? as u64,
+        cache_read_input_tokens: row
+            .get::<_, i64>("cache_read_input_tokens")
+            .map_err(CoreError::Sqlite)? as u64,
         created_at: row.get::<_, i64>("created_at").map_err(CoreError::Sqlite)? as u64,
         device_id: row.get("device_id").map_err(CoreError::Sqlite)?,
     })
@@ -28,14 +34,18 @@ impl Store {
         usage: &Usage,
     ) -> Result<(), CoreError> {
         self.conn.execute(
-            "INSERT INTO llm_usage (id, session_id, purpose, input_tokens, output_tokens, created_at, device_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO llm_usage (id, session_id, purpose, input_tokens, output_tokens,
+                                    cache_creation_input_tokens, cache_read_input_tokens,
+                                    created_at, device_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 new_id(),
                 session_id,
                 purpose,
                 usage.input_tokens as i64,
                 usage.output_tokens as i64,
+                usage.cache_creation_input_tokens as i64,
+                usage.cache_read_input_tokens as i64,
                 self.now() as i64,
                 self.device_id,
             ],
@@ -45,7 +55,8 @@ impl Store {
 
     pub fn list_llm_usage_for_session(&self, session_id: &str) -> Result<Vec<LlmUsageRow>, CoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, session_id, purpose, input_tokens, output_tokens, created_at, device_id
+            "SELECT id, session_id, purpose, input_tokens, output_tokens,
+                    cache_creation_input_tokens, cache_read_input_tokens, created_at, device_id
              FROM llm_usage WHERE session_id = ?1 ORDER BY id ASC",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -58,13 +69,39 @@ impl Store {
 
     /// (total input tokens, total output tokens) across all recorded calls —
     /// the spend meter's raw feed.
+    ///
+    /// "Input" here is EVERY prompt token processed, cached or not — the sum of
+    /// the three input columns, not the `input_tokens` column alone. Summing
+    /// only that column would make the meter appear to drop sharply the moment
+    /// caching is enabled, because the API moves most of the prompt into the
+    /// cache columns. Pre-v8 rows are unaffected (their cache columns are 0).
     pub fn usage_totals(&self) -> Result<(u64, u64), CoreError> {
         let (i, o): (i64, i64) = self.conn.query_row(
-            "SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0) FROM llm_usage",
+            "SELECT COALESCE(SUM(input_tokens + cache_creation_input_tokens
+                                 + cache_read_input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0)
+             FROM llm_usage",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         Ok((i as u64, o as u64))
+    }
+
+    /// The spend meter's cost-accurate feed: (full-rate input, cache writes,
+    /// cache reads, output). The three input classes bill at ~1x / ~1.25x /
+    /// ~0.1x, so a single token count can't express spend once caching is on —
+    /// this is what a real cost-per-walk figure has to be computed from.
+    pub fn usage_totals_detailed(&self) -> Result<(u64, u64, u64, u64), CoreError> {
+        let (i, cw, cr, o): (i64, i64, i64, i64) = self.conn.query_row(
+            "SELECT COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(cache_creation_input_tokens), 0),
+                    COALESCE(SUM(cache_read_input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0)
+             FROM llm_usage",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?;
+        Ok((i as u64, cw as u64, cr as u64, o as u64))
     }
 }
 
@@ -87,7 +124,7 @@ mod tests {
         s.record_llm_usage(
             Some(&session.id),
             "processing",
-            &Usage { input_tokens: 900, output_tokens: 120 },
+            &Usage { input_tokens: 900, output_tokens: 120, ..Default::default() },
         )
         .unwrap();
         let rows = s.list_llm_usage_for_session(&session.id).unwrap();
@@ -101,7 +138,7 @@ mod tests {
     #[test]
     fn sessionless_usage_is_allowed() {
         let s = store();
-        s.record_llm_usage(None, "reflection", &Usage { input_tokens: 300, output_tokens: 80 })
+        s.record_llm_usage(None, "reflection", &Usage { input_tokens: 300, output_tokens: 80, ..Default::default() })
             .unwrap();
         assert_eq!(s.usage_totals().unwrap(), (300, 80));
     }
@@ -110,9 +147,9 @@ mod tests {
     fn totals_sum_across_rows() {
         let s = store();
         let session = s.start_session(None).unwrap();
-        s.record_llm_usage(Some(&session.id), "processing", &Usage { input_tokens: 10, output_tokens: 1 })
+        s.record_llm_usage(Some(&session.id), "processing", &Usage { input_tokens: 10, output_tokens: 1, ..Default::default() })
             .unwrap();
-        s.record_llm_usage(None, "reflection", &Usage { input_tokens: 5, output_tokens: 2 })
+        s.record_llm_usage(None, "reflection", &Usage { input_tokens: 5, output_tokens: 2, ..Default::default() })
             .unwrap();
         assert_eq!(s.usage_totals().unwrap(), (15, 3));
         assert_eq!(s.list_llm_usage_for_session(&session.id).unwrap().len(), 1);
@@ -124,4 +161,69 @@ mod tests {
         let err = s.record_llm_usage(Some("nope"), "processing", &Usage::default());
         assert!(err.is_err(), "FK to sessions must hold");
     }
+
+    #[test]
+    fn cache_tokens_round_trip_through_the_row() {
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        s.record_llm_usage(
+            Some(&session.id),
+            "processing",
+            &Usage {
+                input_tokens: 20,
+                output_tokens: 7,
+                cache_creation_input_tokens: 4000,
+                cache_read_input_tokens: 8000,
+            },
+        )
+        .unwrap();
+        let rows = s.list_llm_usage_for_session(&session.id).unwrap();
+        assert_eq!(rows[0].cache_creation_input_tokens, 4000);
+        assert_eq!(rows[0].cache_read_input_tokens, 8000);
+    }
+
+    #[test]
+    fn totals_count_cached_prompt_tokens_not_just_the_remainder() {
+        // The regression this guards: with caching on, the API moves most of the
+        // prompt into the cache fields. A meter summing `input_tokens` alone
+        // would report 20 here and look like a 99.5% cost drop that never was.
+        let s = store();
+        s.record_llm_usage(
+            None,
+            "reflection",
+            &Usage {
+                input_tokens: 20,
+                output_tokens: 7,
+                cache_creation_input_tokens: 4000,
+                cache_read_input_tokens: 8000,
+            },
+        )
+        .unwrap();
+        assert_eq!(s.usage_totals().unwrap(), (12_020, 7));
+    }
+
+    #[test]
+    fn detailed_totals_keep_the_three_input_classes_separate() {
+        // They bill at ~1x / ~1.25x / ~0.1x, so cost needs them unmerged.
+        let s = store();
+        s.record_llm_usage(
+            None,
+            "reflection",
+            &Usage {
+                input_tokens: 20,
+                output_tokens: 7,
+                cache_creation_input_tokens: 4000,
+                cache_read_input_tokens: 8000,
+            },
+        )
+        .unwrap();
+        s.record_llm_usage(
+            None,
+            "reflection",
+            &Usage { input_tokens: 5, output_tokens: 1, ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(s.usage_totals_detailed().unwrap(), (25, 4000, 8000, 8));
+    }
+
 }

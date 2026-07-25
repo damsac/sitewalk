@@ -173,6 +173,16 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_document_schemas_kind ON document_schemas(kind) WHERE deleted_at IS NULL;
     "#,
+    // v8: prompt-cache token columns on llm_usage (R9 stays honest under
+    // caching). The API reports cache tokens in SEPARATE fields and collapses
+    // `input_tokens` to the uncached remainder — so without these two columns,
+    // switching caching on would make the spend meter read like a huge saving
+    // that never happened. Additive with DEFAULT 0: every pre-v8 row is
+    // correct as-is, because those calls genuinely cached nothing.
+    r#"
+    ALTER TABLE llm_usage ADD COLUMN cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE llm_usage ADD COLUMN cache_read_input_tokens INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), CoreError> {
@@ -206,6 +216,45 @@ fn migrate_with(conn: &Connection, migrations: &[&str]) -> Result<(), CoreError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v8_upgrade_preserves_existing_llm_usage_rows() {
+        // Every device already in the field is at v7. v8 must add the two cache
+        // columns without disturbing rows written before it — those calls
+        // genuinely cached nothing, so 0 is the honest value, not a placeholder.
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Bring the DB to v7 only, then write a row the pre-v8 way.
+        let v7: Vec<&str> = MIGRATIONS.iter().take(7).copied().collect();
+        migrate_with(&conn, &v7).unwrap();
+        conn.execute(
+            "INSERT INTO llm_usage (id, session_id, purpose, input_tokens, output_tokens,
+                                    created_at, device_id)
+             VALUES ('u1', NULL, 'processing', 900, 120, 1000, 'device-a')",
+            [],
+        )
+        .unwrap();
+
+        // Apply the full set — v8 lands on top of that existing row.
+        migrate_with(&conn, MIGRATIONS).unwrap();
+
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 8);
+
+        let (input, cw, cr, output): (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT input_tokens, cache_creation_input_tokens,
+                        cache_read_input_tokens, output_tokens
+                 FROM llm_usage WHERE id = 'u1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((input, output), (900, 120), "existing counts untouched");
+        assert_eq!((cw, cr), (0, 0), "new columns default to 0, not NULL");
+    }
 
     #[test]
     fn failed_migration_rolls_back_cleanly() {

@@ -222,14 +222,14 @@ mod tests {
                 input: serde_json::json!({"summary": "Walked the deck; two todos."}),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 40, output_tokens: 12 },
+            usage: Usage { input_tokens: 40, output_tokens: 12, ..Default::default() },
         }]));
         let (summary, spoken_total_cents, buckets, usage) =
             summarize(provider.clone(), "transcript text", 512).await.unwrap();
         assert_eq!(summary.as_deref(), Some("Walked the deck; two todos."));
         assert_eq!(spoken_total_cents, None, "no total was stated");
         assert_eq!(buckets, Vec::new(), "no notes array in the response -> []");
-        assert_eq!(usage, Usage { input_tokens: 40, output_tokens: 12 });
+        assert_eq!(usage, Usage { input_tokens: 40, output_tokens: 12, ..Default::default() });
         let reqs = provider.requests();
         assert_eq!(reqs[0].tool_choice.as_deref(), Some("write_notes"));
         assert!(reqs[0].max_tokens >= 1);
@@ -255,7 +255,7 @@ mod tests {
                 }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 40, output_tokens: 12 },
+            usage: Usage { input_tokens: 40, output_tokens: 12, ..Default::default() },
         }]));
         let (_summary, _spoken_total_cents, buckets, _usage) =
             summarize(provider, "t", 512).await.unwrap();
@@ -282,7 +282,7 @@ mod tests {
                 }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 40, output_tokens: 12 },
+            usage: Usage { input_tokens: 40, output_tokens: 12, ..Default::default() },
         }]));
         let (summary, _spoken_total_cents, buckets, _usage) =
             summarize(provider, "t", 512).await.unwrap();
@@ -341,13 +341,13 @@ mod tests {
         let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
             content: vec![ContentBlock::Text { text: "no tool".into() }],
             stop_reason: StopReason::EndTurn,
-            usage: Usage { input_tokens: 50, output_tokens: 10 },
+            usage: Usage { input_tokens: 50, output_tokens: 10, ..Default::default() },
         }]));
         let (summary, spoken_total_cents, buckets, usage) = summarize(provider, "t", 512).await.unwrap();
         assert!(summary.is_none(), "missing tool call is not an Err — spend must be loggable");
         assert_eq!(spoken_total_cents, None);
         assert_eq!(buckets, Vec::new());
-        assert_eq!(usage, Usage { input_tokens: 50, output_tokens: 10 });
+        assert_eq!(usage, Usage { input_tokens: 50, output_tokens: 10, ..Default::default() });
     }
 
     #[tokio::test]
@@ -362,7 +362,7 @@ mod tests {
                 }),
             }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 40, output_tokens: 12 },
+            usage: Usage { input_tokens: 40, output_tokens: 12, ..Default::default() },
         }]));
         let (summary, spoken_total_cents, _buckets, _usage) =
             summarize(provider, "transcript text", 512).await.unwrap();

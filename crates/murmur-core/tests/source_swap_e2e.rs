@@ -13,11 +13,11 @@ impl MemoryStore for NullMemoryStore {
 }
 fn tool_use(name: &str, input: serde_json::Value) -> CompletionResponse {
     CompletionResponse { content: vec![ContentBlock::ToolUse { id: "tu".into(), name: name.into(), input }],
-        stop_reason: StopReason::ToolUse, usage: Usage { input_tokens: 30, output_tokens: 8 } }
+        stop_reason: StopReason::ToolUse, usage: Usage { input_tokens: 30, output_tokens: 8, ..Default::default() } }
 }
 fn end_turn(t: &str) -> CompletionResponse {
     CompletionResponse { content: vec![ContentBlock::Text { text: t.into() }],
-        stop_reason: StopReason::EndTurn, usage: Usage { input_tokens: 10, output_tokens: 2 } }
+        stop_reason: StopReason::EndTurn, usage: Usage { input_tokens: 10, output_tokens: 2, ..Default::default() } }
 }
 fn summary(t: &str) -> CompletionResponse { tool_use("write_notes", serde_json::json!({"summary": t})) }
 

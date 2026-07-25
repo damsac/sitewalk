@@ -265,7 +265,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::ToolUse { id: "tu_1".into(), name: name.into(), input }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 30, output_tokens: 8 },
+            usage: Usage { input_tokens: 30, output_tokens: 8, ..Default::default() },
         }
     }
 
@@ -273,7 +273,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::Text { text: text.into() }],
             stop_reason: StopReason::EndTurn,
-            usage: Usage { input_tokens: 10, output_tokens: 2 },
+            usage: Usage { input_tokens: 10, output_tokens: 2, ..Default::default() },
         }
     }
 
@@ -316,7 +316,7 @@ mod tests {
             outcome,
             LiveExtractOutcome::Extracted {
                 items_added: 1,
-                usage: Usage { input_tokens: 40, output_tokens: 10 },
+                usage: Usage { input_tokens: 40, output_tokens: 10, ..Default::default() },
             }
         );
         // cursor advanced to the transcript length in chars
@@ -407,7 +407,7 @@ mod tests {
         let outcome = extractor.maybe_extract().await.unwrap();
         assert_eq!(
             outcome,
-            LiveExtractOutcome::Failed { usage: Usage { input_tokens: 30, output_tokens: 8 } }
+            LiveExtractOutcome::Failed { usage: Usage { input_tokens: 30, output_tokens: 8, ..Default::default() } }
         );
         assert_eq!(extractor.cursor(), 0, "cursor held so the window retries");
 
@@ -459,7 +459,7 @@ mod tests {
             outcome,
             LiveExtractOutcome::Extracted {
                 items_added: 0,
-                usage: Usage { input_tokens: 40, output_tokens: 10 },
+                usage: Usage { input_tokens: 40, output_tokens: 10, ..Default::default() },
             }
         );
 

@@ -79,14 +79,37 @@ pub enum StopReason {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
+    /// The prompt tokens billed at the FULL rate. When prompt caching is in
+    /// play this is the *uncached remainder only* — NOT the whole prompt.
+    /// `total_input_tokens()` is what you want for "how big was the prompt".
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Prompt tokens written to the cache this call (billed ~1.25x). Absent on
+    /// providers/responses that don't cache, hence `default` — a missing field
+    /// must never fail response parsing (same posture as `StopReason::Unknown`).
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    /// Prompt tokens served FROM the cache this call (billed ~0.1x).
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
 }
 
 impl Usage {
     pub fn add(&mut self, other: &Usage) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
+        self.cache_creation_input_tokens += other.cache_creation_input_tokens;
+        self.cache_read_input_tokens += other.cache_read_input_tokens;
+    }
+
+    /// Every prompt token the call actually processed, cached or not.
+    ///
+    /// Cost analysis must use this rather than `input_tokens`: once caching is
+    /// on, the API moves most of the prompt into the two cache fields and
+    /// `input_tokens` collapses to the remainder. Reading `input_tokens` alone
+    /// would show a dramatic "saving" that is purely a reporting artifact.
+    pub fn total_input_tokens(&self) -> u64 {
+        self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
     }
 }
 
@@ -138,9 +161,60 @@ mod tests {
 
     #[test]
     fn usage_adds() {
-        let mut u = Usage { input_tokens: 10, output_tokens: 5 };
-        u.add(&Usage { input_tokens: 3, output_tokens: 7 });
-        assert_eq!(u, Usage { input_tokens: 13, output_tokens: 12 });
+        let mut u = Usage { input_tokens: 10, output_tokens: 5, ..Default::default() };
+        u.add(&Usage { input_tokens: 3, output_tokens: 7, ..Default::default() });
+        assert_eq!(u, Usage { input_tokens: 13, output_tokens: 12, ..Default::default() });
+    }
+
+    #[test]
+    fn usage_adds_accumulates_cache_tokens_too() {
+        // A dropped cache field here would silently under-report spend across a
+        // multi-turn run — the exact failure R9 exists to prevent.
+        let mut u = Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: 200,
+        };
+        u.add(&Usage {
+            input_tokens: 1,
+            output_tokens: 2,
+            cache_creation_input_tokens: 3,
+            cache_read_input_tokens: 4,
+        });
+        assert_eq!(
+            u,
+            Usage {
+                input_tokens: 11,
+                output_tokens: 7,
+                cache_creation_input_tokens: 103,
+                cache_read_input_tokens: 204,
+            }
+        );
+    }
+
+    #[test]
+    fn total_input_tokens_spans_all_three_input_classes() {
+        let u = Usage {
+            input_tokens: 10,
+            output_tokens: 999,
+            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: 1_000,
+        };
+        // Not 10: reading `input_tokens` alone is the reporting artifact that
+        // makes caching look like a 99% saving.
+        assert_eq!(u.total_input_tokens(), 1_110);
+    }
+
+    #[test]
+    fn usage_without_cache_fields_parses_leniently() {
+        // The mock provider and any non-caching response omit these entirely.
+        let u: Usage =
+            serde_json::from_value(serde_json::json!({"input_tokens": 42, "output_tokens": 7}))
+                .unwrap();
+        assert_eq!(u.cache_creation_input_tokens, 0);
+        assert_eq!(u.cache_read_input_tokens, 0);
+        assert_eq!(u.total_input_tokens(), 42);
     }
 
     #[test]
