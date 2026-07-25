@@ -24,15 +24,32 @@ The load-bearing invariant is unchanged and is what keeps this from shipping wro
 
 Pricing today: **Haiku 4.5 $1/$5 per MTok**, Sonnet-tier $3/$15. STT is on-device whisper — **zero marginal cost**, which is the whole local-first advantage and the reason these margins work at all.
 
-Per walk, roughly: live extraction (Haiku, incremental passes) ~$0.10–0.15 · `write_notes` ~$0.03 · `build_document` ~$0.03. **≈ $0.20/walk.**
+**A walk is not a uniform unit of cost.** Processing re-sends the whole assembled transcript on *every* agent turn, so spend scales with transcript length × turns taken. The governing constants are `transcript_budget_tokens: 12_000` and `max_turns: 16` (`pipeline/mod.rs:108-120`) and, on the live side, an 8000-char window with `max_turns: 8` (`pipeline/live.rs:100-105`).
 
-This is measurable, not guesswork — `llm_usage` already records input/output tokens per session per phase:
+Modeled from those budgets (Sonnet 4.5 + Haiku 4.5, pre-lever):
+
+| Per walk | Short (~10 min) | Long (~40 min, at the 12k budget) |
+|---|---|---|
+| Live extraction (Haiku) | ~$0.01 | ~$0.06 |
+| Processing extraction (Sonnet, multi-turn) | ~$0.09 | ~$0.30 |
+| `write_notes` summary | ~$0.02 | ~$0.05 |
+| `build_document` | ~$0.02 | ~$0.02 |
+| **Total** | **~$0.14** | **~$0.43** |
+
+A long walk costs roughly **3x** a short one. One real safety valve: `transcript_budget_tokens` caps the transcript, so a two-hour walk is not 4x a thirty-minute one — per-walk cost has a ceiling near $0.50.
+
+These are modeled, not measured. The meter that settles it shipped with migration v8 — `usage_totals_detailed()` returns the four token classes separately, and per-phase spend is one query:
 
 ```sql
-SELECT phase, SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM llm_usage GROUP BY phase;
+SELECT purpose,
+       SUM(input_tokens), SUM(cache_creation_input_tokens),
+       SUM(cache_read_input_tokens), SUM(output_tokens), COUNT(*)
+FROM llm_usage GROUP BY purpose;
 ```
 
-**At $12.99 with Apple's Small Business Program (15%), net is $11.04 — break-even is ~55 walks/month.** A typical contractor at 20–40 walks costs $4–8, so 27–64% margin. A heavy user at 60+ walks is underwater. **At this price, cost reduction is not an optimization — it is what makes the price viable.**
+**At $12.99 with Apple's Small Business Program (15%), net is $11.04.** At a post-lever blended ~$0.15/walk, break-even is **~74 walks/month**: a typical contractor at 20–40 walks costs $3–6 and clears **45–73% margin**. A heavy user at 60 walks is thin but positive. **A heavy user who also takes long walks (60 x $0.25 ≈ $15) is underwater.**
+
+So the price holds for typical use, but the exposure is **walk length, not walk count** — 40 long walks cost more than 70 short ones. Cost reduction is not an optimization here; it is what keeps the headroom.
 
 ### 2.1 Where caching actually pays (corrected 07-25 after reading the loop)
 
@@ -57,9 +74,11 @@ Turning on caching without extending `Usage` first would make R9 under-report an
 
 Also note `Agent::run` sends `tool_choice: None` — the extraction agent reaches for `add_item` **voluntarily**, and Sonnet 5 with thinking disabled is documented as less likely to reach for tools. So `thinking: disabled` is the cheapest but risks quality on exactly the path that matters. Preferred config is **adaptive thinking + `effort: low`**, which preserves tool-reaching while controlling spend.
 
-This is measurable rather than a judgement call: `cargo test -p evals` is a deterministic F0.5 grader over a synthetic site-walk corpus. Land the swap behind an eval comparison, not a vibe.
+**Thinking can cost more than caching saves.** Sonnet 5's introductory pricing is −33% on the Sonnet legs, worth ~$0.05 on a long walk. But thinking bills at *output* rates: ~1,000 thinking tokens across the ~8 Sonnet calls in a walk is ~$0.08 at $10/MTok. Left uncontrolled, the swap is a net **loss** that also erases the caching win. It is only a gain at `effort: low` (or thinking off), which is precisely why it must not ship on faith.
 
-Target after all three levers: **~$0.08–0.10/walk**, break-even ~110 walks/month, 65–80% margin at typical use. Revisit the price against real per-user data once the proxy is metering.
+This is measurable rather than a judgement call: `cargo test -p evals` is a deterministic F0.5 grader over a synthetic site-walk corpus. Land the swap behind an eval comparison — quality from the grader, cost from `usage_totals_detailed()` — not a vibe.
+
+**Target after all three levers: ~$0.15/walk blended** (~$0.10 short, ~$0.25 long), break-even ~74 walks/month, 45–73% margin at typical use. Caching alone takes a long walk from ~$0.43 to ~$0.25 by cutting the processing-extraction leg ~70%.
 
 ---
 
@@ -120,7 +139,7 @@ The proxy (one serverless endpoint — Workers/Vercel; no accounts, no user tabl
 1. Verify **App Attest** — caller is a genuine build of our app.
 2. Verify the **StoreKit 2 transaction JWS** against the App Store Server API → entitled or not.
 3. Free tier: check + increment the walk counter, keyed to **DeviceCheck**'s two persistent per-device bits, which survive reinstall. This is how we meter anonymously without forcing a contractor to make an account at first launch.
-4. Forward to Anthropic with the real key. Log usage per install.
+4. Forward to Anthropic with the real key. **Record the response's four token classes per install** — that is the cost-side meter §5.3 keys the fair-use ceiling on, and it costs nothing extra because the proxy already has the response in hand.
 
 This also retires the launch blocker: **`EngineResolution.swift:136` reads a live `sk-ant-` key out of `Info.plist`, baked in by CI.** Anyone who downloads the IPA can extract it and spend against Isaac's account. Fine for a handful of testers; not fine on a public listing.
 
@@ -132,11 +151,13 @@ This also retires the launch blocker: **`EngineResolution.swift:136` reads a liv
 
 **5.2 Upload is Pro, not a third tier.** §1 and §2. Revisit only if measured comprehension cost turns out to be materially higher than estimated.
 
-**5.3 "Unlimited" carries a fair-use ceiling.** At $12.99, a user past ~110 walks/month is unprofitable. Meter it, don't advertise it, and only act if it actually happens.
+**5.3 "Unlimited" carries a fair-use ceiling, and it keys on cost — not walk count.** §2 is the reason: a walk varies ~3x in cost with its length, so a count-based ceiling is calibrated to a unit whose price we don't control. Forty long walks cost more than seventy short ones. The proxy sees every call, so metering *tokens* is nearly free and is the number that actually predicts the bill. Trip review at roughly **$8/month of spend** rather than at a walk count. Meter it, don't advertise it, and only act if it happens.
 
-**5.4 One `line_items` section per document** (v2 plan §7.2, dam's recommendation). Inference maps the template's obvious table region to it and drops any second candidate.
+**5.4 Free-tier walks stay a count, deliberately.** "5 walks/month" is legible to a contractor in a way "$1.20 of inference" never will be. The count is the *promise*; cost metering runs underneath it. The cap is low enough that length variance can't hurt much (5 long walks ≈ $1.25 worst case).
 
-**5.5 The inferred schema is never auto-saved.** Draft → operator confirms → save. No exceptions; this is the whole reliability argument.
+**5.5 One `line_items` section per document** (v2 plan §7.2, dam's recommendation — and already enforced core-side by `validate_schema`, which rejects a schema with 0 or 2+). Inference maps the template's obvious table region to it and drops any second candidate.
+
+**5.6 The inferred schema is never auto-saved.** Draft → operator confirms → save. No exceptions; this is the whole reliability argument.
 
 ---
 
