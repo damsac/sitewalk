@@ -188,6 +188,14 @@ final class AppModel {
     // Not fully `private`: read from AppModel+Photos.swift (a same-module
     // extension in a different file — Swift's `private` is file-scoped).
     private(set) var engine: WalkEngine
+    /// The real engine, parked while a practice run borrows a throwaway
+    /// `DemoWalkEngine` (F1, dam's #238 review): a practice walk must NOT touch
+    /// the real store. Swapping the engine gives structural isolation — on
+    /// real-core, `begin`/`append`/`finish`/`buildDocument` would otherwise all
+    /// persist a phantom session+items+document (demo-only CI can't see it,
+    /// since the demo engine never persists). Non-nil ⇔ a practice run is
+    /// borrowing the demo engine; restored on every practice-exit path.
+    private var suspendedEngine: WalkEngine?
     private var source: TranscriptSource?
     /// The live PCM source (Plan 08): used instead of `source` when
     /// `!scripted`. Produces PCM (not text) — STT is Rust-side whisper. Either
@@ -284,9 +292,26 @@ final class AppModel {
     /// PRACTICE marker frame it.
     func armPracticeWalk() {
         isPracticeWalk = true
+        // F1 (dam's #238 review): park the real engine and run the practice
+        // walk against a throwaway DemoWalkEngine so the full lifecycle stays
+        // off the real store. Idempotent — arm is only reached from onboarding,
+        // but guard against a double-arm leaking the real engine reference.
+        if suspendedEngine == nil {
+            suspendedEngine = engine
+            engine = DemoWalkEngine()
+        }
         micDenied = false
         phase = .board
         path = []
+    }
+
+    /// Restore the real engine after a practice run. No-op outside practice
+    /// (`suspendedEngine` is nil), so it's safe to call from every exit path.
+    private func restoreEngineAfterPractice() {
+        if let real = suspendedEngine {
+            engine = real
+            suspendedEngine = nil
+        }
     }
 
     /// Exit an active practice run to the board WITHOUT logging it or flipping a
@@ -295,6 +320,7 @@ final class AppModel {
     private func exitPracticeIfActive() -> Bool {
         guard isPracticeWalk else { return false }
         isPracticeWalk = false
+        restoreEngineAfterPractice()
         shareURL = nil
         document = nil
         notes = nil
@@ -552,6 +578,9 @@ final class AppModel {
         documentBuildError = nil
         notesEditError = nil
         isPracticeWalk = false
+        // Restore AFTER the local `engine` capture above cancelled the
+        // throwaway demo session (F1); safe no-op for a real discard.
+        restoreEngineAfterPractice()
         phase = .board
         path = []
     }
@@ -648,6 +677,7 @@ final class AppModel {
     /// resets local UI state.
     func dismissNotes() {
         isPracticeWalk = false
+        restoreEngineAfterPractice()
         notes = nil
         documentBuildError = nil
         notesEditError = nil
