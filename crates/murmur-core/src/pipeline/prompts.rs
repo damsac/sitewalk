@@ -125,6 +125,12 @@ pub(crate) async fn summarize(
             tools: vec![notes_tool_spec()],
             max_tokens,
             tool_choice: Some(WRITE_NOTES.into()),
+            // Single-shot. Note this call carries the SAME transcript the
+            // extraction agent just cached — but it can't read that cache: the
+            // system prompt and tool set both differ, and tools render at
+            // position 0, so the prefix diverges immediately. Sharing it would
+            // mean reshaping the two-phase split (see the v1 design doc §2.1).
+            cache_prefix: false,
         })
         .await?;
 

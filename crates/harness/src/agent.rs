@@ -83,6 +83,11 @@ impl Agent {
                     tools: self.tool_specs(),
                     max_tokens: self.config.max_tokens,
                     tool_choice: None,
+                    // The one place caching pays: this loop re-sends
+                    // `messages.clone()` every turn behind a byte-identical
+                    // `system` + `tools` prefix, so turn N reads what turn N-1
+                    // wrote. See CompletionRequest::cache_prefix.
+                    cache_prefix: true,
                 })
                 .await
                 .map_err(|e| RunError { source: e, usage })?;
@@ -263,6 +268,41 @@ mod tests {
                 content: "saved".into(),
                 is_error: false,
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn every_turn_opts_into_prefix_caching() {
+        // The loop re-sends the whole conversation behind a byte-identical
+        // system + tools prefix, so turn N reads what turn N-1 wrote. Missing
+        // the flag on ANY turn breaks the chain: that request writes a fresh
+        // entry at ~1.25x instead of reading the existing one at ~0.1x.
+        let mut reg = ToolRegistry::new();
+        reg.register(Recorder {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            reply: Ok("saved".into()),
+        });
+        let (agent, provider) = agent_with(
+            vec![
+                tool_call("recorder", serde_json::json!({"x": 1})),
+                tool_call("recorder", serde_json::json!({"x": 2})),
+                text_end("done"),
+            ],
+            reg,
+        );
+        agent.run(vec![Message::user_text("go")]).await.unwrap();
+
+        let reqs = provider.requests();
+        assert_eq!(reqs.len(), 3);
+        assert!(
+            reqs.iter().all(|r| r.cache_prefix),
+            "every turn must opt in, not just the first"
+        );
+        // The prefix that gets cached has to actually be stable, or the reads
+        // never hit — this is the invariant the flag depends on.
+        assert!(
+            reqs.iter().all(|r| r.system == reqs[0].system && r.tools == reqs[0].tools),
+            "system + tools must be byte-identical across turns"
         );
     }
 
