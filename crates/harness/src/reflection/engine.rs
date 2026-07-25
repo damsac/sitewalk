@@ -123,6 +123,9 @@ impl ReflectionEngine {
                 tools: vec![self.tool_spec()],
                 max_tokens: self.max_tokens,
                 tool_choice: Some(WRITE_MEMORY.into()),
+                // Single-shot forced call — a cache write here would bill at
+                // ~1.25x and never be read back.
+                cache_prefix: false,
             })
             .await
             .map_err(|e| RunError { source: e, usage: Usage::default() })?;

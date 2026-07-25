@@ -57,6 +57,7 @@ mod tests {
             tools: vec![],
             max_tokens: 100,
             tool_choice: None,
+            cache_prefix: false,
         };
         let r1 = mock.complete(req.clone()).await.unwrap();
         let r2 = mock.complete(req.clone()).await.unwrap();
@@ -75,6 +76,7 @@ mod tests {
             tools: vec![],
             max_tokens: 1,
             tool_choice: None,
+            cache_prefix: false,
         };
         let err = mock.complete(req).await.unwrap_err();
         assert!(matches!(err, crate::HarnessError::Provider(_)));

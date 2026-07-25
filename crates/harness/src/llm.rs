@@ -63,6 +63,16 @@ pub struct CompletionRequest {
     pub max_tokens: u32,
     /// Force the model to call this tool by name (None = model decides).
     pub tool_choice: Option<String>,
+    /// Ask the provider to cache this request's stable prefix.
+    ///
+    /// Opt-in per request, NOT a global provider setting, because caching only
+    /// pays when the same prefix is sent more than once. A cache write bills at
+    /// ~1.25x and a read at ~0.1x, so break-even is two requests: a single-shot
+    /// call (`summarize`, the forced `build_document` call, reflection) would
+    /// pay the write premium and never read it back. Only `Agent::run` sets
+    /// this, because only it re-sends a growing conversation with a
+    /// byte-identical `system` + `tools` prefix on every turn.
+    pub cache_prefix: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
