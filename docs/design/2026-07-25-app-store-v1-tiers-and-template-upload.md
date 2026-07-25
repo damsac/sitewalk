@@ -135,13 +135,27 @@ Entitlement must be enforced **where the tokens are spent**. A client-side walk 
 
 **The client side is nearly free.** `EngineConfig` already carries `baseUrl` (`EngineResolution.swift:169`) and `AnthropicProvider` already has `with_base_url` — point `baseUrl` at the proxy and swap the baked key for a per-install token. **No core routing changes.**
 
-The proxy (one serverless endpoint — Workers/Vercel; no accounts, no user table, no login):
+**Platform: Cloudflare Workers** (`services/proxy/`). Chosen because the proxy now sits in front of every LLM call during a live walk, so cold starts would be felt mid-walk — Workers have none, Vercel's functions do, and Vercel's commercial tier is $20/mo against Cloudflare's $5. Expect the $5 plan rather than free: KV's free tier allows 1,000 writes/day (one walk is ~30 metered calls) and App Attest's crypto would exceed the free 10ms-CPU-per-request limit. One thing genuinely simplifies it — the Rust provider doesn't stream (`.json()` then `.text()`), so this is a plain request/response forwarder with no SSE passthrough.
+
+**The tradeoff being accepted:** we now operate a dependency the app needs to function. Mitigated, not eliminated, by the core's existing `awaiting_processing` queue — offline sessions queue and process on reconnect, so a proxy outage *degrades* rather than destroys.
+
+The proxy (one serverless endpoint; no accounts, no user table, no login):
 1. Verify **App Attest** — caller is a genuine build of our app.
 2. Verify the **StoreKit 2 transaction JWS** against the App Store Server API → entitled or not.
 3. Free tier: check + increment the walk counter, keyed to **DeviceCheck**'s two persistent per-device bits, which survive reinstall. This is how we meter anonymously without forcing a contractor to make an account at first launch.
 4. Forward to Anthropic with the real key. **Record the response's four token classes per install** — that is the cost-side meter §5.3 keys the fair-use ceiling on, and it costs nothing extra because the proxy already has the response in hand.
 
 This also retires the launch blocker: **`EngineResolution.swift:136` reads a live `sk-ant-` key out of `Info.plist`, baked in by CI.** Anyone who downloads the IPA can extract it and spend against Isaac's account. Fine for a handful of testers; not fine on a public listing.
+
+### 4.5.1 Phase 2 — App Attest — is required before the listing goes public
+
+**Phase 1 (shipped, `services/proxy/`) is not the finished article.** It authenticates callers with a shared secret embedded in the app binary, extractable by anyone willing to unzip an IPA. What it buys is real but bounded: the Anthropic key is off every device, spend is metered per install and revocable, and worst-case loss is bounded by a daily cap rather than by an attacker's appetite. What it does **not** buy is proof the caller is a genuine, unmodified copy of the app on real Apple hardware.
+
+**Phase 2 is App Attest:** the app asks the Secure Enclave for a hardware-backed key plus an attestation blob; the proxy validates it against Apple's certificate chain and pins the key id; every later request carries an assertion signed by that key.
+
+The sequencing is deliberate, and the reasoning is worth keeping: **a spend cap protects more than attestation does.** Attestation stops abuse; a cap bounds damage from *any* cause — abuse, a retry bug, one user in a loop — and takes an afternoon rather than a week. So Phase 1 ships the cap and gets the key off devices now; Phase 2 follows in days, not months.
+
+**The trigger is the public listing, not the calendar.** TestFlight is a closed group we invited. A public listing means the binary is downloadable by anyone, and an open LLM proxy is an actively-scanned-for target. `authenticate()` in `src/auth.ts` is the seam: Phase 2 replaces that function's body and adds a key-id store. Nothing else in the worker changes.
 
 ---
 
@@ -168,7 +182,7 @@ Ordered so nothing is blocked on dam's return, and so the launch blocker clears 
 1. **Usage accounting** — extend `Usage` + the `llm_usage` columns with `cache_creation_input_tokens` / `cache_read_input_tokens`. No behavior change; makes the R9 meter capable of telling a real saving from a reporting artifact.
 2. **Prompt caching** — `cache_prefix` opt-in on `CompletionRequest`, emitted as top-level `cache_control` by the Anthropic provider, set by `Agent::run` only (§2.1).
 3. **Sonnet 5 + explicit thinking config** — model string plus `thinking`/`effort`, landed against an eval comparison (§2.3).
-4. **Proxy + StoreKit** — clears the baked-key blocker. Independent of the template feature; can ship to TestFlight behind the flag (§8) as soon as it's green.
+4. **Proxy + StoreKit** — clears the baked-key blocker. Independent of the template feature; can ship to TestFlight behind the flag (§8) as soon as it's green. Split three ways, because the first slice clears the blocker alone: **4a key custody + spend cap** (done, `services/proxy/`) · **4b app wiring** (point `baseUrl` at the worker; no core change) · **4c StoreKit entitlement**. **App Attest (§4.5.1) must land before the listing is public** — it is not optional, only deferred.
 5. **Document Builder + schema-driven rendering** — pure app-side, sac, no core dependency. Ships the "custom doc types" half of Pro on its own.
 6. **Vision content blocks** (§4.1) — the one core item. Needed only for step 7.
 7. **Comprehension pass + upload flow** — lands on the Builder from step 5 as the confirm screen.
