@@ -90,7 +90,8 @@ async fn real_api_eval_is_well_formed() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures");
     let deck = evals::corpus::load_corpus(dir).unwrap().into_iter()
         .find(|s| s.id == "deck_walk_contacts").unwrap();
-    let provider = std::sync::Arc::new(harness::AnthropicProvider::new(api_key, "claude-haiku-4-5"));
+    let provider =
+        std::sync::Arc::new(harness::AnthropicProvider::from_env(api_key, "claude-haiku-4-5"));
     let report = evals::run::run_scenario(&deck, provider, "claude-haiku-4-5").await.unwrap();
     // well-formed: metrics in range, cost recorded (R9)
     assert!((0.0..=1.0).contains(&report.score.f_half));

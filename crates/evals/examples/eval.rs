@@ -50,7 +50,11 @@ async fn run() -> Result<(), String> {
         if corpus.is_empty() { return Err("no scenarios matched --scenario".into()); }
     }
 
-    let provider = Arc::new(AnthropicProvider::new(api_key, &model));
+    // from_env, not new: the key and host are a matched pair, and a PPQ-issued
+    // key sent to api.anthropic.com 401s. This runner previously ignored
+    // ANTHROPIC_BASE_URL while examples/walk.rs honored it, so a local .env
+    // that worked for one silently failed the other.
+    let provider = Arc::new(AnthropicProvider::from_env(api_key, &model));
     let mut reports = Vec::new();
     for scenario in &corpus {
         eprintln!("running {} ...", scenario.id);

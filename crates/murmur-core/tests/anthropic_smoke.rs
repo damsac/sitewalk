@@ -47,7 +47,7 @@ async fn real_anthropic_site_walk() {
     let store = Arc::new(Mutex::new(store));
 
     let processor = SessionProcessor::new(
-        Arc::new(AnthropicProvider::new(api_key, MODEL)),
+        Arc::new(AnthropicProvider::from_env(api_key, MODEL)),
         store.clone(),
         Arc::new(Mutex::new(Memory::default())),
         Arc::new(NullMemoryStore),

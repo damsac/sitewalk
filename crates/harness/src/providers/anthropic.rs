@@ -33,6 +33,33 @@ impl AnthropicProvider {
         self.base_url = base_url.trim_end_matches('/').to_string();
         self
     }
+
+    /// Applies a base-URL override only when there is one to apply.
+    ///
+    /// Empty and whitespace-only mean "no override", NOT "override with the
+    /// empty string" — an exported-but-blank `ANTHROPIC_BASE_URL` must fall
+    /// through to the Anthropic default rather than POST to `/v1/messages`.
+    pub fn with_base_url_opt(self, base_url: Option<&str>) -> Self {
+        match base_url.map(str::trim).filter(|b| !b.is_empty()) {
+            Some(base) => self.with_base_url(base),
+            None => self,
+        }
+    }
+
+    /// Builds a provider honoring an ambient `ANTHROPIC_BASE_URL`.
+    ///
+    /// **The key and the host are a matched pair.** A PPQ-issued key works only
+    /// against PPQ's host; a direct `sk-ant-` key works only against Anthropic's.
+    /// Mismatching them yields a 401 that surfaces far downstream — in the iOS
+    /// app it degrades every walk to "saved offline", which is exactly what
+    /// shipped in builds #24-#32 (see the note in `.github/workflows/release.yml`).
+    ///
+    /// Every entry point that builds a provider from ambient env should use this
+    /// rather than rolling its own read, so the pairing rule is applied uniformly.
+    pub fn from_env(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        Self::new(api_key, model)
+            .with_base_url_opt(std::env::var("ANTHROPIC_BASE_URL").ok().as_deref())
+    }
 }
 
 #[derive(Deserialize)]
@@ -145,6 +172,28 @@ mod tests {
         assert_eq!(body["max_tokens"], 256);
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["tools"][0]["name"], "echo");
+    }
+
+    #[test]
+    fn base_url_opt_applies_a_real_override() {
+        let p = AnthropicProvider::new("k", "m").with_base_url_opt(Some("https://api.ppq.ai"));
+        assert_eq!(p.base_url, "https://api.ppq.ai");
+    }
+
+    #[test]
+    fn base_url_opt_treats_absent_and_blank_as_no_override() {
+        // An exported-but-empty ANTHROPIC_BASE_URL is the trap: naively applying
+        // it would POST to "/v1/messages" with no host. Blank means "default".
+        for raw in [None, Some(""), Some("   "), Some("\n")] {
+            let p = AnthropicProvider::new("k", "m").with_base_url_opt(raw);
+            assert_eq!(p.base_url, "https://api.anthropic.com", "raw = {raw:?}");
+        }
+    }
+
+    #[test]
+    fn base_url_opt_still_normalizes_a_trailing_slash() {
+        let p = AnthropicProvider::new("k", "m").with_base_url_opt(Some("https://api.ppq.ai/"));
+        assert_eq!(p.base_url, "https://api.ppq.ai");
     }
 
     #[tokio::test]
