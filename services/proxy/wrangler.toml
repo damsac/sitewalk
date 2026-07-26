@@ -15,9 +15,9 @@ PER_INSTALL_DAILY_CAP_USD = "2"
 
 [[kv_namespaces]]
 binding = "METER"
-# Replace with the id printed by:
-#   wrangler kv namespace create METER
-id = "REPLACE_ME"
+# Created 2026-07-26 via `wrangler kv namespace create METER`.
+# Not a secret — a namespace id is useless without account credentials.
+id = "b23e593ab16e469b8a60167557cb3fac"
 
 [observability]
 enabled = true

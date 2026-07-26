@@ -32,6 +32,13 @@ targets:
         # Provider base URL (e.g. https://api.ppq.ai). Same injection flow as
         # the key; empty => provider default (api.anthropic.com).
         ANTHROPIC_BASE_URL: "$(ANTHROPIC_BASE_URL)"
+        # The proxy (services/proxy). When BOTH are set they win over the
+        # direct key above, and no Anthropic key is present in the build at
+        # all — which is the point: a key in Info.plist is extractable from any
+        # downloaded IPA. Same build-variable injection as the key; neither
+        # tracked value ever holds a secret.
+        JEFE_PROXY_URL: "$(JEFE_PROXY_URL)"
+        JEFE_APP_SECRET: "$(JEFE_APP_SECRET)"
         CFBundleDisplayName: Jefe
         CFBundleName: Jefe
         # Fixed paper-and-ink theme: lock light appearance so system dark mode
