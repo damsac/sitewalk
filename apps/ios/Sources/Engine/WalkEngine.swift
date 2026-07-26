@@ -175,6 +175,19 @@ protocol WalkEngine: AnyObject {
     /// `DemoWalkEngine` no-ops it (the scripted demo needs no audio).
     func pushAudio(_ samples: [Float])
 
+    /// Background gate for the whisper Metal-GPU crash: stop / restart the STT
+    /// pump's decoding across app background transitions. whisper encodes on the
+    /// Metal GPU and iOS aborts GPU work submitted while backgrounded
+    /// (`ggml_abort` → SIGABRT — a C `abort()` no Swift/Rust catch can contain,
+    /// so PREVENTION is the only lever). `pausePump()` makes the Rust pump take
+    /// no new Metal work while we're out of the foreground (a decode in flight
+    /// drains); `resumePump()` wakes it on return. Called from
+    /// `handleBackgroundTransition` alongside pausing the audio source (#253's
+    /// source pause stops new PCM; this positively halts the pump). Cheap and
+    /// non-blocking — safe from the main actor. `DemoWalkEngine` no-ops both.
+    func pausePump()
+    func resumePump()
+
     /// End the session and return its NOTES (Plan 13 D1/D2) — items +
     /// summary, computed by the pipeline's existing extraction+summary pass.
     /// No document is built here anymore; that's the deliberate, on-demand

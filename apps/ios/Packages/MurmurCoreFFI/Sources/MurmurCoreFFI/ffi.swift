@@ -1421,6 +1421,22 @@ public protocol WalkSessionProtocol : AnyObject {
     func finish() async  -> NotesPayload
     
     /**
+     * Background gate (durable fix for the whisper Metal `ggml_abort` crash):
+     * stop the pump from starting any NEW Metal decode. Swift calls this from
+     * the scene-phase transition (`handleBackgroundTransition`) the instant the
+     * app leaves the foreground, alongside pausing the audio source. Setting
+     * `paused` only ADDS a park condition the pump checks before its next
+     * `poll()`; a decode already in flight completes (drains) and the loop then
+     * parks — no new work is submitted to Metal while backgrounded. Cheap and
+     * non-blocking (a short lock; never joins the pump), so it is safe to call
+     * from the main actor. Idempotent. No `notify` needed: a running pump sees
+     * the flag at its next loop check, and a parked pump is already not
+     * decoding — only `resume_pump` must wake a pump parked BY this gate.
+     * No-op for a text-only (`stt: None`) session — the pump was never spawned.
+     */
+    func pausePump() 
+    
+    /**
      * Enqueue mic PCM for the STT pump (D1/D2). A CHEAP enqueue: buffers the
      * samples under a short lock and wakes the pump thread — the long Metal
      * decode happens on the pump thread, never here. No-op for a text-only
@@ -1428,6 +1444,15 @@ public protocol WalkSessionProtocol : AnyObject {
      * background task fed by the audio render thread.
      */
     func pushAudio(samples: [Float]) 
+    
+    /**
+     * Lift the background gate (`pause_pump`) and wake the pump so it resumes
+     * decoding buffered windows. Swift calls this when the app returns to the
+     * foreground. `notify_all` is REQUIRED: the pump may be parked solely
+     * because `paused` was set (with `wake` already pending), and only this
+     * notify releases it. Idempotent.
+     */
+    func resumePump() 
     
     /**
      * The store id of this walk's session — so the capture UI can call
@@ -1585,6 +1610,26 @@ open func finish()async  -> NotesPayload {
 }
     
     /**
+     * Background gate (durable fix for the whisper Metal `ggml_abort` crash):
+     * stop the pump from starting any NEW Metal decode. Swift calls this from
+     * the scene-phase transition (`handleBackgroundTransition`) the instant the
+     * app leaves the foreground, alongside pausing the audio source. Setting
+     * `paused` only ADDS a park condition the pump checks before its next
+     * `poll()`; a decode already in flight completes (drains) and the loop then
+     * parks — no new work is submitted to Metal while backgrounded. Cheap and
+     * non-blocking (a short lock; never joins the pump), so it is safe to call
+     * from the main actor. Idempotent. No `notify` needed: a running pump sees
+     * the flag at its next loop check, and a parked pump is already not
+     * decoding — only `resume_pump` must wake a pump parked BY this gate.
+     * No-op for a text-only (`stt: None`) session — the pump was never spawned.
+     */
+open func pausePump() {try! rustCall() {
+    uniffi_ffi_fn_method_walksession_pause_pump(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
      * Enqueue mic PCM for the STT pump (D1/D2). A CHEAP enqueue: buffers the
      * samples under a short lock and wakes the pump thread — the long Metal
      * decode happens on the pump thread, never here. No-op for a text-only
@@ -1594,6 +1639,19 @@ open func finish()async  -> NotesPayload {
 open func pushAudio(samples: [Float]) {try! rustCall() {
     uniffi_ffi_fn_method_walksession_push_audio(self.uniffiClonePointer(),
         FfiConverterSequenceFloat.lower(samples),$0
+    )
+}
+}
+    
+    /**
+     * Lift the background gate (`pause_pump`) and wake the pump so it resumes
+     * decoding buffered windows. Swift calls this when the app returns to the
+     * foreground. `notify_all` is REQUIRED: the pump may be parked solely
+     * because `paused` was set (with `wake` already pending), and only this
+     * notify releases it. Idempotent.
+     */
+open func resumePump() {try! rustCall() {
+    uniffi_ffi_fn_method_walksession_resume_pump(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -4202,7 +4260,13 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_walksession_finish() != 63833) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ffi_checksum_method_walksession_pause_pump() != 44148) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_walksession_push_audio() != 33536) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_walksession_resume_pump() != 6771) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_walksession_session_id() != 15531) {

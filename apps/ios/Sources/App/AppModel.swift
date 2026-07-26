@@ -454,6 +454,13 @@ final class AppModel {
         if backgrounded {
             guard !isPaused else { return }   // don't fight a manual pause
             isPaused = true
+            // Positively HALT the Rust STT pump first: pausing the audio source
+            // only stops NEW PCM, but the pump can still decode already-buffered
+            // windows on the Metal GPU — and a Metal decode submitted while
+            // backgrounded is the ggml_abort/SIGABRT crash. pausePump() gates
+            // the pump so no new decode starts while we're out of foreground
+            // (the durable, core-side half of #253's mitigation).
+            engine.pausePump()
             source?.pause()
             audioSource?.pause()
             pausedByBackground = true
@@ -462,6 +469,7 @@ final class AppModel {
             isPaused = false
             source?.resume()
             audioSource?.resume()
+            engine.resumePump()
         }
     }
 
