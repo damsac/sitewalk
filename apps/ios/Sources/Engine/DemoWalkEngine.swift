@@ -367,4 +367,117 @@ final class DemoWalkEngine: WalkEngine {
             send: trade.send
         )
     }
+
+    // MARK: Document schemas (Plan 19) — in-memory demo conformance.
+
+    /// Mirrors the subset of `domain::builtin_schemas()` a demo needs: enough
+    /// doc types to exercise the picker, across more than one trade so the
+    /// `tradeKey` filter is actually visible. Marked `isBuiltin` so the editor
+    /// steers toward Duplicate, matching real-core behavior where these are
+    /// seeded rows shared across devices.
+    private static func seededSchemas() -> [DocumentSchemaModel] {
+        func lineItems(_ priced: Bool) -> SchemaSectionModel {
+            SchemaSectionModel(
+                key: "line_items",
+                kind: "line_items",
+                label: priced ? "Items & pricing" : "Items",
+                priced: priced,
+                fields: [
+                    SchemaFieldModel(
+                        key: "items", kind: "line_items", label: "Captured items", fill: "walk"
+                    )
+                ]
+            )
+        }
+        func terms(_ text: String) -> SchemaSectionModel {
+            SchemaSectionModel(
+                key: "terms",
+                kind: "static",
+                label: "Terms",
+                priced: false,
+                fields: [
+                    SchemaFieldModel(
+                        key: "terms_body",
+                        kind: "static",
+                        label: "Terms",
+                        fill: "static",
+                        staticValue: text
+                    )
+                ]
+            )
+        }
+        return [
+            DocumentSchemaModel(
+                id: "builtin-estimate",
+                kind: "estimate",
+                label: "Estimate",
+                numberPrefix: "EST",
+                tradeKey: "landscape",
+                sections: [lineItems(true), terms("50% deposit due on acceptance.")],
+                isBuiltin: true
+            ),
+            DocumentSchemaModel(
+                id: "builtin-invoice",
+                kind: "invoice",
+                label: "Invoice",
+                numberPrefix: "INV",
+                tradeKey: "landscape",
+                sections: [lineItems(true), terms("Net 30.")],
+                isBuiltin: true
+            ),
+            DocumentSchemaModel(
+                id: "builtin-condition",
+                kind: "condition",
+                label: "Condition Report",
+                numberPrefix: "COND",
+                tradeKey: "property",
+                sections: [lineItems(false)],
+                isBuiltin: true
+            ),
+            DocumentSchemaModel(
+                id: "builtin-inspection",
+                kind: "inspection",
+                label: "Inspection Report",
+                numberPrefix: "IR",
+                tradeKey: "inspection",
+                totalKind: "static",
+                totalLabelKey: "findings",
+                sections: [lineItems(false)],
+                isBuiltin: true
+            ),
+        ]
+    }
+
+    private var schemas: [DocumentSchemaModel] = DemoWalkEngine.seededSchemas()
+    /// Monotonic counter standing in for core's UUIDv7 minting on create.
+    private var nextSchemaOrdinal = 1
+
+    func listDocumentSchemas(tradeKey: String?) -> [DocumentSchemaModel] {
+        guard let tradeKey else { return schemas }
+        // nil tradeKey on a schema means "all trades" — it must survive the
+        // filter, mirroring core's resolution.
+        return schemas.filter { $0.tradeKey == nil || $0.tradeKey == tradeKey }
+    }
+
+    func saveDocumentSchema(_ schema: DocumentSchemaModel) -> DocumentSchemaModel {
+        var saved = schema
+        if saved.id.isEmpty {
+            saved.id = "custom-\(nextSchemaOrdinal)"
+            nextSchemaOrdinal += 1
+        }
+        // A saved copy is the operator's, never a built-in — duplicating a
+        // built-in and saving must produce an editable row, not another
+        // undeletable default.
+        saved.isBuiltin = false
+        if let index = schemas.firstIndex(where: { $0.id == saved.id }) {
+            schemas[index] = saved
+        } else {
+            schemas.append(saved)
+        }
+        return saved
+    }
+
+    func removeDocumentSchema(id: String) {
+        schemas.removeAll { $0.id == id }
+    }
 }
