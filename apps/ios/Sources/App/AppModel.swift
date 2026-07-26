@@ -603,6 +603,10 @@ final class AppModel {
                 self.notesLoading = false
                 self.notesBannerReason = .reopened
                 self.currentSessionId = sessionId
+                // Rehydrate the gallery for the reopened walk (jefe-2026-07-24):
+                // its photos live in the store, not in the stale in-memory
+                // `photos` array left over from whatever was on screen before.
+                self.loadPhotos(sessionId: sessionId)
                 self.phase = .notes
                 self.path = [.notes]
             } catch {

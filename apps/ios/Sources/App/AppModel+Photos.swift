@@ -186,15 +186,49 @@ extension AppModel {
         }
     }
 
+    /// Files younger than this are held back from the orphan sweep — the
+    /// grace window that closes the narrow byte-loss path (field fix,
+    /// jefe-2026-07-24). See `sweepPhotoBytes()`.
+    private static let orphanSweepGrace: TimeInterval = 24 * 60 * 60 // 1 day
+
     /// Reconciling sweep (Plan 11 D4): delete every file in <Documents>/photos/
     /// whose name is NOT in the engine's live set. Idempotent, crash-safe;
     /// reaps tombstoned-row bytes AND never-committed capture orphans with one
     /// rule.
+    ///
+    /// Byte-loss guard (jefe-2026-07-24): capture writes bytes FIRST, then
+    /// commits the row via `attachPhoto`. If the attach throws after the write
+    /// (session no longer attachable, id mismatch, poisoned lock) — or the app
+    /// is killed between the two (e.g. the whisper background crash) — the file
+    /// is an orphan NOT in the live set, and the very next app-open sweep used
+    /// to delete it, silently losing a photo the operator believed they took.
+    /// We now hold back any file younger than `orphanSweepGrace`: a just-
+    /// captured orphan survives the immediate relaunch instead of being reaped
+    /// out from under a retry, while genuinely stale orphans (and tombstoned-
+    /// row bytes, whose files predate the grace window in the common case) are
+    /// still reclaimed. Display-safe: a held-back orphan has no row, so it
+    /// never renders — the grace window only DELAYS reclamation, never surfaces
+    /// a phantom photo.
     func sweepPhotoBytes() {
         guard let live = try? Set(engine.liveLivePhotoFilenames()) else { return }
+        let now = Date()
         for file in photoDirContents() where !live.contains(file) {
-            deletePhotoFile(file)
+            // Keep recent orphans (attach in flight/failed, or crash mid-
+            // capture). An unreadable mtime is treated as "recent" — never
+            // risk deleting a file we can't age.
+            if let age = photoFileAge(file, now: now), age >= Self.orphanSweepGrace {
+                deletePhotoFile(file)
+            }
         }
+    }
+
+    /// Seconds since `file` was last modified, or `nil` if its mtime can't be
+    /// read. Used by the orphan-sweep grace window.
+    private func photoFileAge(_ name: String, now: Date) -> TimeInterval? {
+        let url = photosDirectory.appendingPathComponent(name)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let mtime = attrs[.modificationDate] as? Date else { return nil }
+        return now.timeIntervalSince(mtime)
     }
 
     /// A crash/force-quit mid-walk leaves a `Recording` session that can

@@ -100,6 +100,18 @@ struct NotesView: View {
         .sheet(isPresented: Binding(get: { exportURL != nil }, set: { if !$0 { exportURL = nil } })) {
             if let url = exportURL { ShareSheet(url: url) { _ in exportURL = nil } }
         }
+        .task {
+            // Rehydrate the photo gallery from the store whenever the notes
+            // screen appears (field fix, jefe-2026-07-24). `model.photos` is an
+            // in-memory array; before this it was only reloaded in ReviewView,
+            // so a reopened walk — and a walk finished after a relaunch — showed
+            // ZERO photos even though the bytes + rows were safely persisted,
+            // reading to the operator as "my photos disappeared." Mirrors
+            // ReviewView.task; a cheap, idempotent store read.
+            if let sessionId = model.currentSessionId {
+                model.loadPhotos(sessionId: sessionId)
+            }
+        }
         .onAppear {
             guard !UserDefaults.standard.bool(forKey: Self.vocabCardShownKey),
                   let pack = VocabPack.bundled(for: model.trade.key) else { return }
