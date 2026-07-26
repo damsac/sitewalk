@@ -101,7 +101,12 @@ struct NotesView: View {
             if let url = exportURL { ShareSheet(url: url) { _ in exportURL = nil } }
         }
         .onAppear {
-            guard !UserDefaults.standard.bool(forKey: Self.vocabCardShownKey),
+            // F2 (dam's #238 review): never burn the one-shot vocab-seed on a
+            // practice run — the card would pop mid-"nothing gets saved" (and
+            // confirming writes REAL vocabulary), then the user's first real
+            // walk would never see it.
+            guard !model.isPracticeWalk,
+                  !UserDefaults.standard.bool(forKey: Self.vocabCardShownKey),
                   let pack = VocabPack.bundled(for: model.trade.key) else { return }
             UserDefaults.standard.set(true, forKey: Self.vocabCardShownKey) // show once, ever
             vocabPack = pack

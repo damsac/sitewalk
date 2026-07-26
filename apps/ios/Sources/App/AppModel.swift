@@ -188,6 +188,14 @@ final class AppModel {
     // Not fully `private`: read from AppModel+Photos.swift (a same-module
     // extension in a different file — Swift's `private` is file-scoped).
     private(set) var engine: WalkEngine
+    /// The real engine, parked while a practice run borrows a throwaway
+    /// `DemoWalkEngine` (F1, dam's #238 review): a practice walk must NOT touch
+    /// the real store. Swapping the engine gives structural isolation — on
+    /// real-core, `begin`/`append`/`finish`/`buildDocument` would otherwise all
+    /// persist a phantom session+items+document (demo-only CI can't see it,
+    /// since the demo engine never persists). Non-nil ⇔ a practice run is
+    /// borrowing the demo engine; restored on every practice-exit path.
+    private var suspendedEngine: WalkEngine?
     private var source: TranscriptSource?
     /// The live PCM source (Plan 08): used instead of `source` when
     /// `!scripted`. Produces PCM (not text) — STT is Rust-side whisper. Either
@@ -220,6 +228,12 @@ final class AppModel {
     /// occasionally cold-load) engine bring-up runs behind the painted screen.
     var micStarting = false
 
+    /// A scripted, unsaved "practice run" armed from onboarding's optional
+    /// offer. While set, the next walk plays demo content regardless of the
+    /// persisted mode (a first-timer needn't know what to say) AND never lands
+    /// on the real board — cleared the moment the practice run leaves the flow.
+    private(set) var isPracticeWalk = false
+
     /// When live, drive the STT path from a bundled fixture WAV instead of the
     /// mic (`wavwalk=1`, D7) — a mic-free way to exercise real whisper.
     private let wavFixture: Bool
@@ -235,8 +249,9 @@ final class AppModel {
     var makeScriptedSource: (TradeFixture) -> TranscriptSource = { ScriptedSource(trade: $0) }
 
     init(engine: WalkEngine? = nil, forcedMode: WalkMode? = nil, wavFixture: Bool = false,
-         voiceProcessing: Bool = false) {
+         voiceProcessing: Bool = false, practiceArmed: Bool = false) {
         self.engine = engine ?? DemoWalkEngine()
+        self.isPracticeWalk = practiceArmed  // QA: practice=1 lands on a practice board
         if let forcedMode {
             self.walkMode = forcedMode
             self.modeLocked = true
@@ -270,6 +285,50 @@ final class AppModel {
         if walkMode == .demo { micDenied = false }
     }
 
+    /// Arm the optional practice walk (onboarding's "try a practice walk"): a
+    /// scripted dry run that is never saved. We deliberately do NOT touch
+    /// `walkMode` — the persisted default stays whatever the operator will
+    /// really use — and just land on the board so the START coach mark + the
+    /// PRACTICE marker frame it.
+    func armPracticeWalk() {
+        isPracticeWalk = true
+        // F1 (dam's #238 review): park the real engine and run the practice
+        // walk against a throwaway DemoWalkEngine so the full lifecycle stays
+        // off the real store. Idempotent — arm is only reached from onboarding,
+        // but guard against a double-arm leaking the real engine reference.
+        if suspendedEngine == nil {
+            suspendedEngine = engine
+            engine = DemoWalkEngine()
+        }
+        micDenied = false
+        phase = .board
+        path = []
+    }
+
+    /// Restore the real engine after a practice run. No-op outside practice
+    /// (`suspendedEngine` is nil), so it's safe to call from every exit path.
+    private func restoreEngineAfterPractice() {
+        if let real = suspendedEngine {
+            engine = real
+            suspendedEngine = nil
+        }
+    }
+
+    /// Exit an active practice run to the board WITHOUT logging it or flipping a
+    /// job. Returns true if a practice run was active (the caller should stop).
+    @discardableResult
+    private func exitPracticeIfActive() -> Bool {
+        guard isPracticeWalk else { return false }
+        isPracticeWalk = false
+        restoreEngineAfterPractice()
+        shareURL = nil
+        document = nil
+        notes = nil
+        phase = .board
+        path = []
+        return true
+    }
+
     // MARK: Trade switching (validation strategy: same bones, swappable template)
 
     func switchTrade(_ newTrade: TradeFixture) {
@@ -284,7 +343,7 @@ final class AppModel {
     /// Returns immediately when already authorized; first-ever tap shows the
     /// system prompt. Denied → `micDenied` surfaces on the board.
     func startWalk() {
-        if walkMode == .voice && !wavFixture {
+        if walkMode == .voice && !wavFixture && !isPracticeWalk {
             Task { [weak self] in
                 guard let self else { return }
                 if await AudioCaptureSource.requestPermissions() {
@@ -382,7 +441,9 @@ final class AppModel {
                 }
             }
 
-            if self.walkMode == .demo {
+            // Practice runs play the scripted demo content regardless of the
+            // persisted mode (a first-timer needn't know what to say).
+            if self.walkMode == .demo || self.isPracticeWalk {
                 self.startScriptedSource()
             } else {
                 self.startAudioSource()
@@ -516,6 +577,10 @@ final class AppModel {
         notes = nil
         documentBuildError = nil
         notesEditError = nil
+        isPracticeWalk = false
+        // Restore AFTER the local `engine` capture above cancelled the
+        // throwaway demo session (F1); safe no-op for a real discard.
+        restoreEngineAfterPractice()
         phase = .board
         path = []
     }
@@ -611,6 +676,8 @@ final class AppModel {
     /// unlike `discardWalk()` (which cancels a still-live session). Just
     /// resets local UI state.
     func dismissNotes() {
+        isPracticeWalk = false
+        restoreEngineAfterPractice()
         notes = nil
         documentBuildError = nil
         notesEditError = nil
@@ -941,6 +1008,9 @@ final class AppModel {
     }
 
     func completeSend() {
+        // A practice run shows the whole loop (incl. the share sheet) but is
+        // never recorded — no board log, no job flip.
+        if exitPracticeIfActive() { return }
         if let index = jobs.firstIndex(where: { !$0.done }) {
             let old = jobs[index]
             jobs[index] = JobFixture(
@@ -964,6 +1034,7 @@ final class AppModel {
     /// to SENT). The persisted core artifact is untouched — only the app-side
     /// review state resets.
     func discardDocument() {
+        if exitPracticeIfActive() { return }
         sessionWalks.append(WalkRecord(
             time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: false,
             sessionId: currentSessionId ?? "", queued: notes?.queued ?? false

@@ -12,7 +12,9 @@ import UIKit
 struct OnboardingFlow: View {
     /// Called after FINISH on the mic step — the profile is already persisted
     /// (SAVE on step 2); the caller reloads it and shows the board.
-    var onComplete: () -> Void
+    /// Finishes onboarding. `startPractice` is true when the operator chose the
+    /// optional practice walk (a scripted, unsaved dry run) instead of diving in.
+    var onComplete: (_ startPractice: Bool) -> Void
 
     // welcome + 3 "how it works" beats (learn by seeing) → setup (business, mic).
     private enum Step: Int, CaseIterable { case welcome = 1, seeWalk, seeFix, seeDoc, business, mic }
@@ -427,11 +429,26 @@ struct OnboardingFlow: View {
                 }
                 .padding(.bottom, 10)
             case .granted:
-                blockButton("START WALKING") { onComplete() }
+                blockButton("START MY FIRST WALK") { onComplete(false) }
                     .padding(.bottom, 10)
             case .denied:
-                blockButton("CONTINUE") { onComplete() }
+                blockButton("CONTINUE") { onComplete(false) }
                     .padding(.bottom, 10)
+            }
+
+            // Optional dry run: scripted content so a first-timer doesn't need
+            // to know what to say, coach marks guide the taps, and it never
+            // lands on their real board. Offered once the mic decision is made.
+            if micState != .idle {
+                Button { onComplete(true) } label: {
+                    Text("New to this?  Try a practice walk first ›")
+                        .font(Theme.F.cond(14, .semibold))
+                        .foregroundStyle(Theme.C.orangeDeep)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, Theme.S.screenPad)
