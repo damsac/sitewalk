@@ -1,0 +1,23 @@
+name = "jefe-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-07-25"
+
+# Secrets are NOT set here — `wrangler.toml` is committed. Set them with:
+#   wrangler secret put ANTHROPIC_API_KEY
+#   wrangler secret put APP_SECRET
+# See README.md.
+
+[vars]
+# Blast-radius limiters, tunable without a code deploy. Both are checked
+# BEFORE a request is forwarded upstream.
+DAILY_SPEND_CAP_USD = "25"
+PER_INSTALL_DAILY_CAP_USD = "2"
+
+[[kv_namespaces]]
+binding = "METER"
+# Replace with the id printed by:
+#   wrangler kv namespace create METER
+id = "REPLACE_ME"
+
+[observability]
+enabled = true
