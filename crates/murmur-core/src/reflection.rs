@@ -188,7 +188,7 @@ mod tests {
     fn finish_reflection_records_signals_and_logs_cost() {
         let s = store();
         s.record_session_completed().unwrap();
-        s.finish_reflection(0.3, &harness::Usage { input_tokens: 200, output_tokens: 40 })
+        s.finish_reflection(0.3, &harness::Usage { input_tokens: 200, output_tokens: 40, ..Default::default() })
             .unwrap();
         let signals = s.reflection_signals().unwrap();
         assert_eq!(signals.completed_reflections, 1);

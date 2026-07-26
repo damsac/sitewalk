@@ -44,7 +44,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::Text { text: s.into() }],
             stop_reason: StopReason::EndTurn,
-            usage: Usage { input_tokens: 1, output_tokens: 1 },
+            usage: Usage { input_tokens: 1, output_tokens: 1, ..Default::default() },
         }
     }
 

@@ -160,7 +160,7 @@ mod tests {
         let resp = provider.complete(request()).await.unwrap();
 
         assert_eq!(resp.stop_reason, StopReason::ToolUse);
-        assert_eq!(resp.usage, Usage { input_tokens: 42, output_tokens: 7 });
+        assert_eq!(resp.usage, Usage { input_tokens: 42, output_tokens: 7, ..Default::default() });
         assert_eq!(resp.content.len(), 2);
         assert!(matches!(&resp.content[1], ContentBlock::ToolUse { name, .. } if name == "echo"));
 
@@ -194,6 +194,38 @@ mod tests {
     fn base_url_opt_still_normalizes_a_trailing_slash() {
         let p = AnthropicProvider::new("k", "m").with_base_url_opt(Some("https://api.ppq.ai/"));
         assert_eq!(p.base_url, "https://api.ppq.ai");
+    }
+
+    #[tokio::test]
+    async fn parses_prompt_cache_token_fields_from_the_wire() {
+        // A cached call reports FOUR token fields, and `input_tokens` shrinks to
+        // the uncached remainder. Dropping the two cache fields on the floor
+        // would make this response look like a 20-token prompt instead of 4020.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 7,
+                    "cache_creation_input_tokens": 4000,
+                    "cache_read_input_tokens": 0
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider =
+            AnthropicProvider::new("sk-test", "claude-haiku-4-5-20251001").with_base_url(server.uri());
+        let resp = provider.complete(request()).await.unwrap();
+
+        assert_eq!(resp.usage.input_tokens, 20);
+        assert_eq!(resp.usage.cache_creation_input_tokens, 4000);
+        assert_eq!(resp.usage.cache_read_input_tokens, 0);
+        assert_eq!(resp.usage.total_input_tokens(), 4020);
     }
 
     #[tokio::test]

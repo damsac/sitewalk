@@ -73,7 +73,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::ToolUse { id: "tu".into(), name: name.into(), input }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 10, output_tokens: 5 },
+            usage: Usage { input_tokens: 10, output_tokens: 5, ..Default::default() },
         }
     }
 
@@ -81,7 +81,7 @@ mod tests {
         CompletionResponse {
             content: vec![ContentBlock::Text { text: text.into() }],
             stop_reason: StopReason::EndTurn,
-            usage: Usage { input_tokens: 10, output_tokens: 5 },
+            usage: Usage { input_tokens: 10, output_tokens: 5, ..Default::default() },
         }
     }
 

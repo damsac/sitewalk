@@ -617,7 +617,7 @@ mod tests {
         harness::CompletionResponse {
             content: vec![ContentBlock::ToolUse { id: "tu_1".into(), name: name.into(), input }],
             stop_reason: StopReason::ToolUse,
-            usage: Usage { input_tokens: 80, output_tokens: 15 },
+            usage: Usage { input_tokens: 80, output_tokens: 15, ..Default::default() },
         }
     }
 
@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(map.get(a2.as_str()), Some(&31000), "first-wins on the duplicate a2");
         assert_eq!(map.get("bogus"), None, "hallucinated id dropped");
         assert_eq!(map.len(), 2);
-        assert_eq!(usage, Usage { input_tokens: 80, output_tokens: 15 });
+        assert_eq!(usage, Usage { input_tokens: 80, output_tokens: 15, ..Default::default() });
     }
 
     #[tokio::test]
@@ -812,7 +812,7 @@ mod tests {
 
         let outcome = b.build(&sid, "estimate").await.unwrap();
         assert!(!outcome.queued);
-        assert_eq!(outcome.usage, Usage { input_tokens: 80, output_tokens: 15 });
+        assert_eq!(outcome.usage, Usage { input_tokens: 80, output_tokens: 15, ..Default::default() });
 
         let store = store.lock().unwrap();
         let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
@@ -1241,7 +1241,7 @@ mod tests {
         assert_eq!(map.get("reviewed_by").map(String::as_str), Some("Dana"));
         assert_eq!(map.get("gate_code"), None, "hallucinated key dropped");
         assert_eq!(map.len(), 2);
-        assert_eq!(usage, Usage { input_tokens: 80, output_tokens: 15 }, "R9: usage accumulated");
+        assert_eq!(usage, Usage { input_tokens: 80, output_tokens: 15, ..Default::default() }, "R9: usage accumulated");
     }
 
     /// R6 + the WE-B exact prompt: items (via `format_pricing_items`

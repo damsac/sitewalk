@@ -152,7 +152,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn usage1() -> Usage {
-        Usage { input_tokens: 10, output_tokens: 20 }
+        Usage { input_tokens: 10, output_tokens: 20, ..Default::default() }
     }
 
     fn text_end(s: &str) -> CompletionResponse {
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(out.text, "all done");
         assert_eq!(calls.lock().unwrap().as_slice(), &[serde_json::json!({"x": 1})]);
         // usage accumulated over two provider calls
-        assert_eq!(out.usage, Usage { input_tokens: 20, output_tokens: 40 });
+        assert_eq!(out.usage, Usage { input_tokens: 20, output_tokens: 40, ..Default::default() });
 
         // second request must carry assistant tool_use then user tool_result
         let reqs = provider.requests();
@@ -337,7 +337,7 @@ mod tests {
         let err = agent.run(vec![Message::user_text("go")]).await.unwrap_err();
         assert!(matches!(err.source, HarnessError::MaxTurns(5)));
         // all 5 turns' usage is preserved in the error
-        assert_eq!(err.usage, Usage { input_tokens: 50, output_tokens: 100 });
+        assert_eq!(err.usage, Usage { input_tokens: 50, output_tokens: 100, ..Default::default() });
         assert_eq!(provider.requests().len(), 5);
     }
 }
