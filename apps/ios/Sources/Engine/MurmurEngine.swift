@@ -370,5 +370,93 @@ final class MurmurEngine: WalkEngine {
             capturedAt: ref.capturedAt
         )
     }
+
+    // MARK: Document schemas (Plan 19) — passthrough + conversion.
+
+    func listDocumentSchemas(tradeKey: String?) throws -> [DocumentSchemaModel] {
+        try engine.listDocumentSchemas(tradeKey: tradeKey).map(Self.schema)
+    }
+
+    func saveDocumentSchema(_ schema: DocumentSchemaModel) throws -> DocumentSchemaModel {
+        Self.schema(try engine.saveDocumentSchema(schema: Self.ffiSchema(schema)))
+    }
+
+    func removeDocumentSchema(id: String) throws {
+        try engine.removeDocumentSchema(id: id)
+    }
+
+    /// The sentinel `device_id` core stamps on seeded rows
+    /// (`domain::BUILTIN_SCHEMA_DEVICE_ID`). Keep in sync.
+    private static let builtinDeviceId = "builtin"
+
+    private nonisolated static func schema(_ s: MurmurCoreFFI.DocumentSchema) -> DocumentSchemaModel {
+        DocumentSchemaModel(
+            id: s.id,
+            kind: s.kind,
+            label: s.label,
+            numberPrefix: s.numberPrefix,
+            tradeKey: s.tradeKey,
+            totalKind: s.totalKind,
+            totalLabelKey: s.totalLabelKey,
+            sections: s.sections.map { section in
+                SchemaSectionModel(
+                    key: section.key,
+                    kind: section.kind,
+                    label: section.label,
+                    priced: section.priced,
+                    fields: section.fields.map { field in
+                        SchemaFieldModel(
+                            key: field.key,
+                            kind: field.kind,
+                            label: field.label,
+                            fill: field.fill,
+                            staticValue: field.staticValue
+                        )
+                    }
+                )
+            },
+            schemaVersion: s.schemaVersion,
+            isBuiltin: s.deviceId == builtinDeviceId
+        )
+    }
+
+    private nonisolated static func ffiSchema(
+        _ s: DocumentSchemaModel
+    ) -> MurmurCoreFFI.DocumentSchema {
+        // createdAt/updatedAt/deviceId are core's to own: it stamps them on
+        // write from its own clock and device id. Sending zeros rather than
+        // guesses keeps the app from inventing sync metadata it has no
+        // authority over — the same posture as never minting document numbers.
+        MurmurCoreFFI.DocumentSchema(
+            id: s.id,
+            kind: s.kind,
+            label: s.label,
+            numberPrefix: s.numberPrefix,
+            tradeKey: s.tradeKey,
+            totalKind: s.totalKind,
+            totalLabelKey: s.totalLabelKey,
+            sections: s.sections.map { section in
+                MurmurCoreFFI.SchemaSection(
+                    key: section.key,
+                    kind: section.kind,
+                    label: section.label,
+                    priced: section.priced,
+                    fields: section.fields.map { field in
+                        MurmurCoreFFI.SchemaField(
+                            key: field.key,
+                            kind: field.kind,
+                            label: field.label,
+                            fill: field.fill,
+                            staticValue: field.staticValue
+                        )
+                    }
+                )
+            },
+            schemaVersion: s.schemaVersion,
+            createdAt: 0,
+            updatedAt: 0,
+            deviceId: ""
+        )
+    }
 }
 #endif

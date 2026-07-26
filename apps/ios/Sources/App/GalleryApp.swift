@@ -228,7 +228,7 @@ struct AppRoot: View {
 
 struct GalleryRoot: View {
     enum Dest: String, Hashable, CaseIterable {
-        case components, onboarding, jobs, capture, document, vocab
+        case components, onboarding, jobs, capture, document, vocab, structure
 
         var title: String {
             switch self {
@@ -238,6 +238,7 @@ struct GalleryRoot: View {
             case .capture: return "02 · CAPTURE"
             case .document: return "04 · DOCUMENT REVIEW"
             case .vocab: return "05 · FIELD VOCABULARY"
+            case .structure: return "06 · DOCUMENT BUILDER"
             }
         }
     }
@@ -300,6 +301,10 @@ struct GalleryRoot: View {
                 case .capture: CaptureScreen(trade: Fixtures.landscape)
                 case .document: DocumentReviewScreen(trade: Fixtures.landscape)
                 case .vocab: VocabularyView(model: AppModel())
+            // The Document Builder is the surface most in need of design
+            // iteration without a Rust build — the demo engine seeds it
+            // with built-ins, so `screen=structure` is a full editor.
+            case .structure: DocumentBuilderView(model: AppModel())
                 }
             }
         }

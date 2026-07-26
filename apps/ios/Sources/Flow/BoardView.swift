@@ -244,7 +244,7 @@ struct CustomizeView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .paperwork
-    private enum Tab { case paperwork, words }
+    private enum Tab { case paperwork, structure, words }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -265,7 +265,8 @@ struct CustomizeView: View {
             .padding(.bottom, 12)
 
             HStack(spacing: 0) {
-                tabButton("PAPERWORK", .paperwork)
+                tabButton("LOOK", .paperwork)
+                tabButton("STRUCTURE", .structure)
                 tabButton("WORDS", .words)
             }
 
@@ -279,6 +280,13 @@ struct CustomizeView: View {
                 LetterheadStudioView(model: model, embedded: true)
                     .opacity(tab == .paperwork ? 1 : 0)
                     .allowsHitTesting(tab == .paperwork)
+                // Same keep-alive reasoning as the letterhead tab, and for the
+                // same reason: the schema editor holds an uncommitted @State
+                // draft, so tearing it down on a tab hop would silently discard
+                // half-finished section and field edits.
+                DocumentBuilderView(model: model, embedded: true)
+                    .opacity(tab == .structure ? 1 : 0)
+                    .allowsHitTesting(tab == .structure)
                 VocabularyView(model: model, embedded: true)
                     .opacity(tab == .words ? 1 : 0)
                     .allowsHitTesting(tab == .words)

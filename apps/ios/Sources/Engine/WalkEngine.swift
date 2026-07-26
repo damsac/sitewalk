@@ -251,6 +251,28 @@ protocol WalkEngine: AnyObject {
     ) async throws -> PhotoModel
     func listPhotos(sessionId: String) throws -> [PhotoModel]
     func removePhoto(photoId: String) throws
+
+    // Document structure as data (Plan 19 / #244). These drive the Document
+    // Builder: the operator reorders sections, adds fields, and spins up doc
+    // types we don't ship, and the walk fills whatever they authored.
+    //
+    // Engine-keyed, not session-scoped: schemas are OPERATOR-scoped and outlive
+    // any one walk, which is why the Builder is reachable from the board rather
+    // than from the notes screen.
+    //
+    // Throwing for the vocabulary reasons plus one more: `save` runs core's
+    // `validate_schema`, which REJECTS rather than coerces (R6) — an unknown
+    // section/field/fill kind, or anything other than exactly one `line_items`
+    // section. The editor gates on `SchemaValidation` first so that error is
+    // normally unreachable, but core stays the authority and the UI surfaces
+    // what it says rather than crashing.
+    //
+    // `save` returns the PERSISTED schema so the editor picks up the id and
+    // timestamps core minted, in one round-trip (the add/remove-vocabulary
+    // precedent). Pass an empty `id` to create.
+    func listDocumentSchemas(tradeKey: String?) throws -> [DocumentSchemaModel]
+    func saveDocumentSchema(_ schema: DocumentSchemaModel) throws -> DocumentSchemaModel
+    func removeDocumentSchema(id: String) throws
     func liveLivePhotoFilenames() throws -> [String]   // for the sweep
 
     /// App-open zombie sweep: a `Recording` session left behind by a crash or
