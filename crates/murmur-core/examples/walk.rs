@@ -143,13 +143,7 @@ async fn run() -> Result<(), String> {
     println!("session: {}", session.id);
 
     // Process it.
-    let mut provider = AnthropicProvider::new(api_key, MODEL);
-    if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
-        if !base.trim().is_empty() {
-            provider = provider.with_base_url(base);
-        }
-    }
-    let provider = Arc::new(provider);
+    let provider = Arc::new(AnthropicProvider::from_env(api_key, MODEL));
     let store = Arc::new(Mutex::new(store));
     let memory = Arc::new(Mutex::new(memory));
     let processor = SessionProcessor::new(
