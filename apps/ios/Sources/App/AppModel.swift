@@ -515,6 +515,13 @@ final class AppModel {
         if backgrounded {
             guard !isPaused else { return }   // don't fight a manual pause
             isPaused = true
+            // Positively HALT the Rust STT pump first: pausing the audio source
+            // only stops NEW PCM, but the pump can still decode already-buffered
+            // windows on the Metal GPU — and a Metal decode submitted while
+            // backgrounded is the ggml_abort/SIGABRT crash. pausePump() gates
+            // the pump so no new decode starts while we're out of foreground
+            // (the durable, core-side half of #253's mitigation).
+            engine.pausePump()
             source?.pause()
             audioSource?.pause()
             pausedByBackground = true
@@ -523,6 +530,7 @@ final class AppModel {
             isPaused = false
             source?.resume()
             audioSource?.resume()
+            engine.resumePump()
         }
     }
 
@@ -660,6 +668,10 @@ final class AppModel {
                 self.notesLoading = false
                 self.notesBannerReason = .reopened
                 self.currentSessionId = sessionId
+                // Rehydrate the gallery for the reopened walk (jefe-2026-07-24):
+                // its photos live in the store, not in the stale in-memory
+                // `photos` array left over from whatever was on screen before.
+                self.loadPhotos(sessionId: sessionId)
                 self.phase = .notes
                 self.path = [.notes]
             } catch {

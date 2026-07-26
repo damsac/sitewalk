@@ -482,6 +482,21 @@ impl DocumentBuilder {
                 ))
             })?;
             let items = store.list_items_for_session(session_id)?;
+            // Empty-walk guard (field fix, jefe-2026-07-24): a walk that
+            // captured no items must NOT mint a document artifact. Building one
+            // anyway produced the "blank work order" ghost — an all-dashes,
+            // PHOTOS×0 document with a live SEND button — and, under D7
+            // burn-per-tap, a fresh ghost artifact on every preview tap. Skip
+            // truthfully instead: the FFI maps this to EngineError::Document and
+            // the notes screen surfaces it, leaving the action available to
+            // retry once the walk actually has content. (Same "don't create the
+            // record until there's content" class as the Athanor empty-chat
+            // report.)
+            if items.is_empty() {
+                return Err(CoreError::InvalidState(
+                    "nothing to build — this walk has no items yet".into(),
+                ));
+            }
             (session, items, schema)
         };
 
@@ -904,22 +919,35 @@ mod tests {
         assert!(matches!(b2.build(&sid2, "inspection").await, Err(CoreError::InvalidState(_))));
     }
 
+    /// Empty-walk guard (field fix, jefe-2026-07-24): a Processed session with
+    /// ZERO items must NOT mint a document — it produced the blank "work order"
+    /// ghost. `build` now skips truthfully (InvalidState) and, crucially, mints
+    /// NO artifact and makes NO LLM call. (Replaces the prior test that treated
+    /// the zero-item path as a silent success minting an all-dashes document.)
     #[tokio::test]
-    async fn build_empty_but_processed_session_yields_a_truthful_zero_line_document() {
+    async fn build_empty_processed_session_is_skipped_without_minting_an_artifact() {
         let (store, sid) = processed_session_with_items(&[]);
         let store = Arc::new(Mutex::new(store));
         let provider = Arc::new(MockProvider::new(vec![]));
         let b = builder(store.clone(), provider.clone());
 
-        let outcome = b.build(&sid, "estimate").await.unwrap();
-        assert!(!outcome.queued);
-        assert!(provider.requests().is_empty(), "nothing to price for zero items — skip the call");
+        let err = b.build(&sid, "estimate").await.unwrap_err();
+        assert!(
+            matches!(err, CoreError::InvalidState(_)),
+            "an empty walk skips the build instead of minting a blank document: {err:?}"
+        );
+        assert!(provider.requests().is_empty(), "no items -> no pricing/fill call at all");
 
+        // Regression: the guard mints NOTHING — no ghost document artifact, and
+        // no document number was burned.
         let store = store.lock().unwrap();
-        let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
-        assert_eq!(v["doc_number"], 1);
-        assert!(v["lines"].as_array().unwrap().is_empty());
+        let docs: Vec<_> = store
+            .list_artifacts_for_session(&sid)
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.kind == "document")
+            .collect();
+        assert!(docs.is_empty(), "empty walk must not persist a document artifact");
     }
 
     #[tokio::test]
@@ -1462,9 +1490,11 @@ mod tests {
     /// schema row. The six interleaved builds, exact.
     #[tokio::test]
     async fn number_prefix_comes_from_the_schema_row_across_interleaved_builds() {
-        // Zero items: pricing (estimate) and fill (none authored) both skip —
-        // pure numbering.
-        let (store, sid) = processed_session_with_items(&[]);
+        // One item so the empty-walk guard (jefe-2026-07-24) doesn't skip the
+        // build — the trace here is about NUMBERING only. Fill fields are
+        // cleared below; pricing degrades harmlessly on the empty provider
+        // (R7 queued), which does not affect doc_number/number_prefix.
+        let (store, sid) = processed_session_with_items(&[("todo", "mulch")]);
         let mut hoa = hoa_schema();
         hoa.sections[1].fields.clear(); // no fill calls in the WE-C trace
         store.save_document_schema(&hoa).unwrap();

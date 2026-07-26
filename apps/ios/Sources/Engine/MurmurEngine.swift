@@ -176,6 +176,18 @@ final class MurmurEngine: WalkEngine {
         session?.pushAudio(samples: samples)
     }
 
+    // Background gate (durable half of the whisper Metal-crash fix): forward
+    // to the Rust pump's pause/resume so no new Metal decode starts while the
+    // app is backgrounded. No-op when there is no live session. Cheap and
+    // non-blocking on the Rust side — never joins the pump.
+    func pausePump() {
+        session?.pausePump()
+    }
+
+    func resumePump() {
+        session?.resumePump()
+    }
+
     // DISCARD (Plan 08 Task 4): stop the pump + tombstone the session in Rust,
     // then drop our side. Async — the Rust cancel() joins the pump off the
     // async workers; AppModel calls this from a detached Task so the main actor

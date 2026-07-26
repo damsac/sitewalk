@@ -91,6 +91,11 @@ final class DemoWalkEngine: WalkEngine {
     // The scripted demo drives the board from TEXT (append), never audio.
     func pushAudio(_ samples: [Float]) {}
 
+    // No whisper/Metal pump in the scripted demo — the background gate is a
+    // no-op (the crash it guards can only happen on the real audio path).
+    func pausePump() {}
+    func resumePump() {}
+
     // No Rust session to tear down in the demo path.
     func cancel() async {}
 

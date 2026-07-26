@@ -144,6 +144,43 @@ mod tests {
         assert_eq!(docs.len(), 1, "build_document is the only document writer now (phase B is gone)");
     }
 
+    /// Empty-walk guard at the FFI seam (field fix, jefe-2026-07-24): a walk
+    /// that captured nothing finishes Processed with zero items; tapping to
+    /// build a work order must surface `EngineError::Document` and mint NO
+    /// document artifact — not the blank "work order" ghost the operator hit.
+    #[tokio::test]
+    async fn build_document_on_empty_walk_errors_and_mints_no_artifact() {
+        let store = murmur_core::Store::open_in_memory("device-a").unwrap();
+        let engine = MurmurEngine::with_providers(
+            store,
+            Memory::default(),
+            Arc::new(NullMemoryStore),
+            Providers {
+                live: Arc::new(MockProvider::new(vec![])),
+                // A silent walk short-circuits to "(empty session)"; a spare
+                // summary response is harmless if the path never calls out.
+                processing: Arc::new(MockProvider::new(vec![summary_response("(empty session)")])),
+                reflection: Arc::new(MockProvider::new(vec![])),
+            },
+        );
+        // Finish WITHOUT any append_transcript -> Processed, zero items.
+        let session = engine.clone().begin_walk(None, "landscape".into()).unwrap();
+        let sid = session.session_id();
+        let _notes = session.finish().await;
+
+        let err = engine.build_document(sid.clone(), "work_order".into()).await.unwrap_err();
+        assert!(matches!(err, EngineError::Document(_)), "empty walk -> Document error: {err:?}");
+
+        let store = engine.store.lock().unwrap();
+        let docs: Vec<_> = store
+            .list_artifacts_for_session(&sid)
+            .unwrap()
+            .into_iter()
+            .filter(|a| a.kind == "document")
+            .collect();
+        assert!(docs.is_empty(), "no ghost document artifact for an empty walk");
+    }
+
     #[tokio::test]
     async fn build_document_illegal_kind_for_template_is_an_engine_error() {
         let (engine, sid) = processed_landscape_session(vec![]).await;

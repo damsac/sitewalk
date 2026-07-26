@@ -61,11 +61,24 @@ pub struct WalkSession {
 }
 
 /// Shared state the pump thread parks on. `wake` = new PCM was pushed; `stop`
-/// = the session is finishing/cancelling and the pump must exit (Task 4).
+/// = the session is finishing/cancelling and the pump must exit (Task 4);
+/// `paused` = the app is backgrounded and the pump must take NO new Metal work.
+///
+/// `paused` is the durable, core-side half of the whisper background-crash fix
+/// (#253 mitigation → root fix). whisper encodes on the Metal GPU, and iOS
+/// aborts GPU work submitted while the app is backgrounded → `ggml_abort()` →
+/// SIGABRT. That is a C `abort()`, NOT a Rust `panic!`: `catch_unwind` / the
+/// FFI-seam containment CANNOT intercept it — the process is already gone.
+/// Prevention (never start a Metal decode while backgrounded) is the only
+/// lever. When `paused` is set the pump parks BEFORE its next `poll()`, so no
+/// new decode starts; a decode already in flight completes (drains) and then
+/// the loop parks. Swift sets it via `pause_pump()`/`resume_pump()` on the
+/// scene-phase transition.
 #[derive(Default)]
 struct PumpState {
     wake: bool,
     stop: bool,
+    paused: bool,
 }
 
 /// Best-effort safety net (review finding 1): if the host drops its last
@@ -198,9 +211,14 @@ impl WalkSession {
         let handle = std::thread::spawn(move || {
             let (lock, cvar) = &*pump;
             loop {
-                // 1. Park until new PCM (`wake`) or shutdown (`stop`).
+                // 1. Park until there is work to do AND we are not paused, or
+                //    until shutdown (`stop`). The `paused` gate is checked HERE,
+                //    before the decode below: while backgrounded the pump takes
+                //    no new Metal work even if PCM was pushed (`wake`). `stop`
+                //    always wins so finish()/cancel() drain even while paused —
+                //    no deadlock between the three signals.
                 let mut state = lock.lock().unwrap();
-                while !state.wake && !state.stop {
+                while !state.stop && (!state.wake || state.paused) {
                     state = cvar.wait(state).unwrap();
                 }
                 if state.stop {
@@ -683,6 +701,36 @@ impl WalkSession {
         let mut state = lock.lock().unwrap();
         state.wake = true;
         cvar.notify_one();
+    }
+
+    /// Background gate (durable fix for the whisper Metal `ggml_abort` crash):
+    /// stop the pump from starting any NEW Metal decode. Swift calls this from
+    /// the scene-phase transition (`handleBackgroundTransition`) the instant the
+    /// app leaves the foreground, alongside pausing the audio source. Setting
+    /// `paused` only ADDS a park condition the pump checks before its next
+    /// `poll()`; a decode already in flight completes (drains) and the loop then
+    /// parks — no new work is submitted to Metal while backgrounded. Cheap and
+    /// non-blocking (a short lock; never joins the pump), so it is safe to call
+    /// from the main actor. Idempotent. No `notify` needed: a running pump sees
+    /// the flag at its next loop check, and a parked pump is already not
+    /// decoding — only `resume_pump` must wake a pump parked BY this gate.
+    /// No-op for a text-only (`stt: None`) session — the pump was never spawned.
+    pub fn pause_pump(&self) {
+        let (lock, _cvar) = &*self.pump;
+        let mut state = lock.lock().unwrap();
+        state.paused = true;
+    }
+
+    /// Lift the background gate (`pause_pump`) and wake the pump so it resumes
+    /// decoding buffered windows. Swift calls this when the app returns to the
+    /// foreground. `notify_all` is REQUIRED: the pump may be parked solely
+    /// because `paused` was set (with `wake` already pending), and only this
+    /// notify releases it. Idempotent.
+    pub fn resume_pump(&self) {
+        let (lock, cvar) = &*self.pump;
+        let mut state = lock.lock().unwrap();
+        state.paused = false;
+        cvar.notify_all();
     }
 
     /// Number of store faults swallowed by fire-and-forget live ticks so far
@@ -1199,6 +1247,110 @@ mod tests {
         // pump has no more scripted windows, so poll() is a no-op.
         session.clone().push_audio(vec![0.0; 1000]);
         let _ = tokio::time::timeout(std::time::Duration::from_millis(300), rx.recv()).await;
+    }
+
+    /// The background pump-pause gate (durable whisper Metal-crash fix): while
+    /// `pause_pump()` is set, pushing PCM must NOT drive a decode — no new Metal
+    /// work is submitted while backgrounded. After `resume_pump()` the buffered
+    /// window decodes normally and the board tick fires. This is the core-side
+    /// invariant #253's Swift scene-phase pause depends on.
+    #[tokio::test]
+    async fn paused_pump_takes_no_new_work_until_resumed() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let sid = store.start_session(None).unwrap().id;
+        let store = Arc::new(StdMutex::new(store));
+        let memory = Arc::new(StdMutex::new(Memory::default()));
+
+        let mut extractor = LiveExtractor::new(
+            Arc::new(MockProvider::new(vec![
+                tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
+                end_turn("captured"),
+            ])),
+            store.clone(),
+            memory.clone(),
+            &sid,
+        );
+        extractor.min_new_chars = 1;
+
+        let session = WalkSession::new_audio_test_session(
+            sid,
+            store,
+            extractor,
+            Arc::new(MockProvider::new(vec![])),
+            memory,
+            Arc::new(NullMemoryStore),
+            tokio::runtime::Handle::current(),
+            Some("landscape".into()),
+            scripted_audio_stt(),
+            true,
+        );
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        session.clone().set_event_listener(Arc::new(ChannelListener(tx)));
+
+        // Background BEFORE any PCM arrives: the pump must not touch Metal.
+        session.pause_pump();
+        session.clone().push_audio(vec![0.0; 144_000]);
+
+        // The gate holds: no BoardUpdated (nor any event) while paused. A
+        // non-trivial wait — long enough that an ungated pump would have polled
+        // and emitted (the unpaused test above fires well inside this budget).
+        let stalled = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+        assert!(stalled.is_err(), "a paused pump must not decode buffered PCM (no event)");
+
+        // Foreground again: the SAME buffered window now decodes and ticks.
+        session.resume_pump();
+        let items = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                match rx.recv().await {
+                    Some(WalkEvent::BoardUpdated { items }) => return items,
+                    Some(_) => continue,
+                    None => panic!("channel closed without a BoardUpdated"),
+                }
+            }
+        })
+        .await
+        .expect("resume_pump did not let the buffered window decode");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "order lumber");
+    }
+
+    /// finish()/cancel() must win over the pause gate — `stop` drains a paused
+    /// pump so a backgrounded walk can still be finished without deadlock.
+    #[tokio::test]
+    async fn paused_pump_still_finishes_without_deadlock() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let sid = store.start_session(None).unwrap().id;
+        let store = Arc::new(StdMutex::new(store));
+        let memory = Arc::new(StdMutex::new(Memory::default()));
+
+        let extractor = LiveExtractor::new(
+            Arc::new(MockProvider::new(vec![])),
+            store.clone(),
+            memory.clone(),
+            &sid,
+        );
+
+        let session = WalkSession::new_audio_test_session(
+            sid,
+            store,
+            extractor,
+            Arc::new(MockProvider::new(vec![summary_response("done")])),
+            memory,
+            Arc::new(NullMemoryStore),
+            tokio::runtime::Handle::current(),
+            Some("landscape".into()),
+            scripted_audio_stt(),
+            true,
+        );
+
+        // Pause, buffer a window, then finish while still "backgrounded":
+        // stop_pump must join the parked pump promptly (no hang).
+        session.pause_pump();
+        session.clone().push_audio(vec![0.0; 144_000]);
+        let _notes = tokio::time::timeout(std::time::Duration::from_secs(5), session.finish())
+            .await
+            .expect("finish() must not deadlock against a paused pump");
     }
 
     #[tokio::test]
