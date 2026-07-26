@@ -82,6 +82,20 @@ impl LlmProvider for AnthropicProvider {
         if let Some(name) = &req.tool_choice {
             body["tool_choice"] = serde_json::json!({"type": "tool", "name": name});
         }
+        if req.cache_prefix {
+            // Top-level cache_control auto-places the breakpoint on the last
+            // cacheable block, which is exactly the multi-turn pattern: each
+            // turn extends the cached prefix, and the previous turn's entry is
+            // still a valid read point. Placing it by hand would mean tracking
+            // block indices across turns for no gain.
+            //
+            // Silently a no-op below the model's minimum cacheable prefix
+            // (4096 tokens on Haiku 4.5) — no error, and no write premium
+            // either, since nothing is cached. That is what makes it safe to
+            // set unconditionally on the agent path, where live extraction's
+            // small prefix sits under the bar and processing's does not.
+            body["cache_control"] = serde_json::json!({"type": "ephemeral"});
+        }
 
         let resp = self
             .client
@@ -133,6 +147,7 @@ mod tests {
             }],
             max_tokens: 256,
             tool_choice: None,
+            cache_prefix: false,
         }
     }
 
@@ -194,6 +209,60 @@ mod tests {
     fn base_url_opt_still_normalizes_a_trailing_slash() {
         let p = AnthropicProvider::new("k", "m").with_base_url_opt(Some("https://api.ppq.ai/"));
         assert_eq!(p.base_url, "https://api.ppq.ai");
+    }
+
+    #[tokio::test]
+    async fn cache_prefix_emits_top_level_cache_control() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider =
+            AnthropicProvider::new("sk-test", "claude-haiku-4-5").with_base_url(server.uri());
+        provider
+            .complete(CompletionRequest { cache_prefix: true, ..request() })
+            .await
+            .unwrap();
+
+        let received = &server.received_requests().await.unwrap()[0];
+        let body: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
+        assert_eq!(body["cache_control"]["type"], "ephemeral");
+    }
+
+    #[tokio::test]
+    async fn no_cache_control_when_cache_prefix_is_off() {
+        // The single-shot paths (summarize, build_document, reflection) must not
+        // pay the ~1.25x cache-write premium for a prefix nothing will re-read.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider =
+            AnthropicProvider::new("sk-test", "claude-haiku-4-5").with_base_url(server.uri());
+        provider.complete(request()).await.unwrap(); // cache_prefix: false
+
+        let received = &server.received_requests().await.unwrap()[0];
+        let body: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
+        assert!(
+            body.get("cache_control").is_none(),
+            "cache_control must be absent, not null: {body}"
+        );
     }
 
     #[tokio::test]

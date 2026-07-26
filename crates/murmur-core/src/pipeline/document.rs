@@ -192,6 +192,9 @@ pub(crate) async fn price_items(
             tools: vec![price_items_tool_spec()],
             max_tokens,
             tool_choice: Some(PRICE_ITEMS.to_string()),
+            // One forced call, never re-sent — a cache write would bill ~1.25x
+            // with nothing to read it back.
+            cache_prefix: false,
         })
         .await?;
     usage.add(&response.usage);
@@ -303,6 +306,8 @@ pub(crate) async fn fill_fields(
             tools: vec![fill_fields_tool_spec()],
             max_tokens,
             tool_choice: Some(FILL_FIELDS.to_string()),
+            // Single-shot schema fill — see the PRICE_ITEMS note above.
+            cache_prefix: false,
         })
         .await?;
     usage.add(&response.usage);
