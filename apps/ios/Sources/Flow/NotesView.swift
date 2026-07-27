@@ -29,9 +29,88 @@ struct NotesView: View {
     @State private var vocabPack: VocabPack?
     static let vocabCardShownKey = "onboardingVocabCardShown"
 
+    /// The document types actually available, read from the LIVE schemas
+    /// rather than a hardcoded per-trade switch.
+    ///
+    /// `DocKinds.legalKinds` predates the DocumentSchema seam (#244) and only
+    /// knows the seven built-ins, so a doc type authored in the Document
+    /// Builder could be created and then never used — a dead end (Isaac,
+    /// field report). Reading schemas here is what makes the Builder mean
+    /// anything.
+    @State private var docChoices: [DocChoice] = []
+    /// Jobs, for filing this walk. R4: "the user corrects on the report" —
+    /// this screen IS the report, and it's where the operator is standing
+    /// right after the walk, still holding the context.
+    @State private var jobs: [JobModel] = []
+    @State private var fileError: String?
+    @State private var showNewJob = false
+    @State private var newJobName = ""
+
+    /// One offerable document type.
+    struct DocChoice: Identifiable, Hashable {
+        var id: String { kind }
+        let kind: String
+        let label: String
+        let stamp: String
+    }
+
     private var emptyNotes: NotesModel { NotesModel(summary: "", items: [], docKind: "report", queued: false) }
     private var notes: NotesModel { model.notes ?? emptyNotes }
-    private var kinds: [String] { DocKinds.legalKinds(for: model.trade.key) }
+
+    /// Live schemas, falling back to the built-in list.
+    ///
+    /// The fallback matters: the demo engine and any pre-schema path still
+    /// need buttons, and an empty action row would look like a broken screen
+    /// rather than a missing feature.
+    private func loadDocChoices() {
+        let schemas = (try? model.engine.listDocumentSchemas(tradeKey: model.trade.key)) ?? []
+        if schemas.isEmpty {
+            docChoices = DocKinds.legalKinds(for: model.trade.key).map {
+                DocChoice(kind: $0, label: DocKinds.label(for: $0), stamp: DocKinds.stamp(for: $0))
+            }
+        } else {
+            // The schema's own label/prefix, so a custom type reads as the
+            // operator named it rather than falling through to "Report".
+            docChoices = schemas.map {
+                DocChoice(kind: $0.kind, label: $0.label, stamp: $0.numberPrefix.uppercased())
+            }
+        }
+    }
+
+    private func loadJobs() {
+        jobs = ((try? model.engine.listJobs()) ?? []).filter { $0.status == .active }
+    }
+
+    /// The job this walk is currently filed under, if any.
+    private var filedJob: JobModel? {
+        guard let sessionId = model.currentSessionId,
+              let walk = model.sessionWalks.first(where: { $0.sessionId == sessionId }),
+              let jobId = walk.jobId
+        else { return nil }
+        return jobs.first { $0.id == jobId }
+    }
+
+    private func file(under jobId: String?) {
+        guard let sessionId = model.currentSessionId else { return }
+        do {
+            try model.setWalkJob(sessionId: sessionId, jobId: jobId)
+            fileError = nil
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
+
+    private func createAndFile() {
+        let name = newJobName
+        newJobName = ""
+        do {
+            let job = try model.engine.createJob(name: name)
+            loadJobs()
+            file(under: job.id)
+        } catch {
+            fileError = error.localizedDescription
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -113,6 +192,12 @@ struct NotesView: View {
             }
         }
         .onAppear {
+            // Read the LIVE schemas and jobs every appearance, not once: the
+            // operator can author a doc type or add a job between walks, and a
+            // stale list is exactly the dead end this screen had before.
+            loadDocChoices()
+            loadJobs()
+
             // F2 (dam's #238 review): never burn the one-shot vocab-seed on a
             // practice run — the card would pop mid-"nothing gets saved" (and
             // confirming writes REAL vocabulary), then the user's first real
@@ -302,16 +387,91 @@ struct NotesView: View {
         .padding(.horizontal, Theme.S.screenPad).padding(.top, 12)
     }
 
+    // MARK: File under a job
+
+    /// Filing, at the moment the operator actually knows the answer.
+    ///
+    /// This is R4's "the user corrects on the report" half, and it fixes the
+    /// bug Isaac hit in the field: he walked 117 Lexington, finished the walk,
+    /// and it never landed under that job — because nothing files it and the
+    /// only affordance was a chip back on the board. Expecting the walk to end
+    /// up on the job you just walked is the CORRECT mental model; the flow
+    /// simply didn't honor it.
+    ///
+    /// Still not automatic (R4 forbids pre-labeling, and silently filing under
+    /// a guessed job is worse than not filing — the walk lands somewhere the
+    /// operator won't think to look). Inferring a SUGGESTION is issue #265.
+    private var fileUnderRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("FILE UNDER")
+                    .font(Theme.F.mono(8.5, .semibold)).tracking(1.8)
+                    .foregroundStyle(Theme.C.ink60)
+                Spacer()
+                Menu {
+                    ForEach(jobs) { job in
+                        Button {
+                            file(under: job.id)
+                        } label: {
+                            Label(job.name, systemImage:
+                                filedJob?.id == job.id ? "checkmark" : "folder")
+                        }
+                    }
+                    Divider()
+                    Button { showNewJob = true } label: {
+                        Label("New job…", systemImage: "plus")
+                    }
+                    if filedJob != nil {
+                        Button(role: .destructive) { file(under: nil) } label: {
+                            Label("Unfile", systemImage: "xmark")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(filedJob?.name.uppercased() ?? "CHOOSE A JOB")
+                            .font(Theme.F.mono(9, .semibold)).tracking(0.8)
+                            .lineLimit(1).truncationMode(.tail)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundStyle(filedJob == nil ? Theme.C.ink60 : Theme.C.orangeDeep)
+                    .padding(.horizontal, 9).padding(.vertical, 7)
+                    .background(filedJob == nil ? Theme.C.paperDeep : Theme.C.orangeTint)
+                    .contentShape(Rectangle())
+                }
+            }
+            if let fileError {
+                Text(fileError)
+                    .font(Theme.F.mono(8.5)).foregroundStyle(Theme.C.redTag)
+            }
+        }
+        .alert("New job", isPresented: $showNewJob) {
+            TextField("Name", text: $newJobName)
+            Button("Cancel", role: .cancel) { newJobName = "" }
+            Button("Add") { createAndFile() }
+        } message: {
+            Text("Call it whatever you call it on site.")
+        }
+    }
+
     // MARK: Action bar — the differentiation, made visible
 
     private var actionBar: some View {
         VStack(alignment: .leading, spacing: 9) {
+            fileUnderRow
+
             Text("TURN THESE NOTES INTO")
                 .font(Theme.F.mono(8.5, .semibold)).tracking(1.8)
                 .foregroundStyle(Theme.C.ink60)
-            HStack(spacing: 8) {
-                ForEach(Array(kinds.enumerated()), id: \.element) { i, kind in
-                    docButton(kind, hero: i == 0)
+            // Scrolls: with custom document types there can be more than the
+            // three built-ins, and a fixed HStack would squeeze them into
+            // illegibility rather than overflowing.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(docChoices.enumerated()), id: \.element.kind) { i, choice in
+                        docButton(choice, hero: i == 0)
+                            .frame(minWidth: docChoices.count > 3 ? 104 : nil)
+                    }
                 }
             }
             Button { exportNotes() } label: {
@@ -329,7 +489,8 @@ struct NotesView: View {
         .overlay(alignment: .top) { Theme.C.ink.frame(height: 1.5) }
     }
 
-    private func docButton(_ kind: String, hero: Bool) -> some View {
+    private func docButton(_ choice: DocChoice, hero: Bool) -> some View {
+        let kind = choice.kind
         let building = model.buildingKind == kind
         let disabled = notes.queued || (model.isBuildingDocument && !building)
         return Button { model.buildDocument(kind: kind) } label: {
@@ -344,10 +505,11 @@ struct NotesView: View {
                     ProgressView().tint(hero ? Theme.C.onOrange : Theme.C.ink)
                 } else {
                     VStack(spacing: 2) {
-                        Text(DocKinds.label(for: kind).uppercased())
+                        Text(choice.label.uppercased())
                             .font(Theme.F.ui(12, .bold)).tracking(0.04)
                             .foregroundStyle(hero ? Theme.C.onOrange : Theme.C.ink)
-                        Text(DocKinds.stamp(for: kind))
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                        Text(choice.stamp)
                             .font(Theme.F.mono(6.5, .semibold)).tracking(0.6)
                             .foregroundStyle(hero ? Theme.C.onOrange.opacity(0.85) : Theme.C.ink60)
                     }
