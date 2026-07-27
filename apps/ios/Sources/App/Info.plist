@@ -24,6 +24,10 @@
 	<string>1</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>JEFE_APP_SECRET</key>
+	<string>$(JEFE_APP_SECRET)</string>
+	<key>JEFE_PROXY_URL</key>
+	<string>$(JEFE_PROXY_URL)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Photos you take during a walk pin to the item you're describing and land in the finished document.</string>
 	<key>NSMicrophoneUsageDescription</key>

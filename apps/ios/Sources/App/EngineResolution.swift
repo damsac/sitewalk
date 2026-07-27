@@ -125,6 +125,55 @@ func resolveSttModelPath(_ args: [String]) -> String? {
     return nil
 }
 
+/// How this build reaches the model: what to send as the credential, and where.
+private struct ResolvedCredential {
+    let apiKey: String
+    let baseURL: String?
+    /// For logging only — never log either value itself.
+    let via: String
+}
+
+/// Prefers the proxy; falls back to a direct key for local development.
+///
+/// An env var beats Info.plist for both, so a simulator run can be pointed at
+/// a staging proxy (or a personal key) without regenerating the project — the
+/// pre-existing `ANTHROPIC_BASE_URL` override behavior, generalized.
+private func resolveCredential() -> ResolvedCredential? {
+    func plist(_ key: String) -> String? {
+        (Bundle.main.object(forInfoDictionaryKey: key) as? String)
+            .flatMap { $0.isEmpty ? nil : $0 }
+    }
+    func env(_ key: String) -> String? {
+        ProcessInfo.processInfo.environment[key].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    // 1. Proxy. Both halves are required — a URL without the shared secret
+    //    would be rejected by the proxy on every call, and silently falling
+    //    back to a direct key there would defeat the point of configuring one.
+    if let proxyURL = env("JEFE_PROXY_URL") ?? plist("JEFE_PROXY_URL"),
+       let appSecret = env("JEFE_APP_SECRET") ?? plist("JEFE_APP_SECRET") {
+        // Wire format the proxy parses: jefe.<installId>.<appSecret>.
+        return ResolvedCredential(
+            apiKey: "jefe.\(InstallIdentity.current()).\(appSecret)",
+            baseURL: proxyURL,
+            via: "proxy"
+        )
+    }
+
+    // 2. Direct key (local dev). PPQ_API_KEY is the historical Info.plist name;
+    //    the key and the base URL are a MATCHED PAIR (a PPQ key only works
+    //    against PPQ's host, a direct sk-ant- key only against Anthropic's).
+    if let apiKey = env("ANTHROPIC_API_KEY") ?? plist("PPQ_API_KEY") {
+        return ResolvedCredential(
+            apiKey: apiKey,
+            baseURL: env("ANTHROPIC_BASE_URL") ?? plist("ANTHROPIC_BASE_URL"),
+            via: "direct-key"
+        )
+    }
+
+    return nil
+}
+
 @MainActor
 func resolveEngine(demo: Bool) -> WalkEngine? {
     if demo {
@@ -132,18 +181,30 @@ func resolveEngine(demo: Bool) -> WalkEngine? {
         return nil
     }
     #if canImport(MurmurCoreFFI)
-    guard
-        let apiKey = Bundle.main.object(forInfoDictionaryKey: "PPQ_API_KEY") as? String,
-        !apiKey.isEmpty
-    else {
-        engineLog.notice("engine=demo (no PPQ_API_KEY configured)")
-        return nil // no key configured -> demo path (D10)
+    // Two ways to reach the model, tried in this order:
+    //
+    //   1. THE PROXY (what ships). `JEFE_PROXY_URL` + `JEFE_APP_SECRET` in
+    //      Info.plist. The real sk-ant- key lives in Cloudflare and never
+    //      enters a build, which is the whole point — a key baked into
+    //      Info.plist is extractable from any downloaded IPA.
+    //   2. A DIRECT KEY (local dev only). The pre-proxy path, kept so dam and
+    //      anyone else can run real-core against a personal key without
+    //      standing up a proxy.
+    //
+    // Neither configured -> demo (D10), unchanged.
+    //
+    // No core or FFI change is needed for any of this: the provider already
+    // sends `config.api_key` as both `x-api-key` and `Authorization: Bearer`,
+    // and `EngineConfig` already carries `base_url`. The install credential
+    // rides in through that same field and the proxy swaps it for the real
+    // key, so this is a config change end to end.
+    let resolved = resolveCredential()
+    guard let resolved else {
+        engineLog.notice("engine=demo (neither a proxy nor a direct key is configured)")
+        return nil
     }
-    // Env var wins (ad-hoc override via SIMCTL_CHILD_…), else the value baked
-    // into Info.plist by generate.sh — so icon-tap launches hit the right
-    // provider without any environment plumbing.
-    let baseURL = ProcessInfo.processInfo.environment["ANTHROPIC_BASE_URL"]
-        ?? (Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_BASE_URL") as? String)
+    let apiKey = resolved.apiKey
+    let baseURL = resolved.baseURL
     // iOS does not pre-create Application Support; murmur-core opens its SQLite
     // store at dbPath and panics if the parent directory is missing. Ensure it
     // exists before handing the path to the engine.
@@ -177,7 +238,12 @@ func resolveEngine(demo: Bool) -> WalkEngine? {
         sttVadRmsThreshold: stt.vadRms,
         sttNoSpeechProbThreshold: stt.noSpeechProb
     )
-    engineLog.notice("engine=real (murmur-core MurmurEngine, key len=\(apiKey.count, privacy: .public))")
+    // `via` and a length only — never the credential itself. On the proxy path
+    // the credential embeds the shared app secret, so logging it would put the
+    // secret in device logs and any sysdiagnose the user ever shares.
+    engineLog.notice(
+        "engine=real (murmur-core MurmurEngine, via=\(resolved.via, privacy: .public), key len=\(apiKey.count, privacy: .public))"
+    )
     // Throwing constructor (no panics across FFI): if the store can't open,
     // fall back to the demo path rather than crash at launch (D10). The
     // Application Support dir is created above, before this fallible init, so a
