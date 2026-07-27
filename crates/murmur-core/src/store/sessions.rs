@@ -132,6 +132,33 @@ impl Store {
     /// selecting extraction vocabulary + document layout (Plan 07 D4). Only
     /// valid while the session is still recording — reprocessing must stay
     /// template-consistent, so the key can't be changed after the fact.
+    /// Files a session under a job, or unfiles it with `None`.
+    ///
+    /// Deliberately allowed at ANY status, unlike `set_session_template`.
+    /// R4 ("no pre-labeling — the user corrects on the report") means filing
+    /// happens AFTER the walk, on a session that is already Processed. A
+    /// Recording-only guard would make the rule unimplementable.
+    ///
+    /// Re-filing is normal, not exceptional: a walk misfiled to the wrong job
+    /// months ago has to be movable, so this is a plain idempotent update
+    /// rather than a one-shot assignment.
+    pub fn set_session_job(&self, id: &str, job_id: Option<&str>) -> Result<(), CoreError> {
+        // Existence check first so a bad id is NotFound rather than a silent
+        // zero-row update — filing to nowhere would look like it worked.
+        let _ = self.get_session(id)?;
+        if let Some(jid) = job_id {
+            // Validate the job too: SQLite enforces the FK, but surfacing
+            // NotFound here gives the caller the same error shape as a bad
+            // session id instead of an opaque constraint violation.
+            let _ = self.get_job(jid)?;
+        }
+        self.conn.execute(
+            "UPDATE sessions SET job_id = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![job_id, self.now() as i64, id],
+        )?;
+        Ok(())
+    }
+
     pub fn set_session_template(&self, id: &str, template: &str) -> Result<(), CoreError> {
         let session = self.get_session(id)?;
         if session.status != SessionStatus::Recording {

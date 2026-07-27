@@ -162,6 +162,35 @@ struct BoardView: View {
                             WalkLogRow(walk: walk)
                         }
                         .buttonStyle(.plain)
+                        // Filing lives in a context menu rather than a visible
+                        // control: the row's PRIMARY job is reopening the walk,
+                        // and a second button on every row would clutter the
+                        // one screen that has to stay scannable in sunlight.
+                        // A long-press secondary action is the iOS idiom for
+                        // exactly this. (Worth revisiting if it proves
+                        // undiscoverable — filing also belongs on the notes
+                        // screen, which is where R4 says correction happens.)
+                        .contextMenu {
+                            if activeJobs.isEmpty {
+                                Text("No jobs yet")
+                            } else {
+                                ForEach(activeJobs) { job in
+                                    Button {
+                                        fileWalk(walk, to: job.id)
+                                    } label: {
+                                        Label(job.name, systemImage:
+                                            walk.jobId == job.id ? "checkmark" : "folder")
+                                    }
+                                }
+                                if walk.jobId != nil {
+                                    Button(role: .destructive) {
+                                        fileWalk(walk, to: nil)
+                                    } label: {
+                                        Label("Unfile", systemImage: "xmark")
+                                    }
+                                }
+                            }
+                        }
                     }
                     if let reopenError = model.reopenError {
                         // F4 floor: the breadcrumb surfaces; chrome is sac's.
@@ -297,7 +326,9 @@ extension BoardView {
                     .padding(.top, 12)
             } else {
                 ForEach(activeJobs) { job in
-                    OperatorJobCard(job: job)
+                    OperatorJobCard(job: job, walks: walks(for: job.id)) { walk in
+                        model.reopenWalk(sessionId: walk.sessionId)
+                    }
                 }
             }
         }
@@ -324,6 +355,25 @@ extension BoardView {
         }
     }
 
+    /// Files (or unfiles) a walk, then re-reads the log so the job cards
+    /// reflect it. Re-reading rather than mutating in place keeps core as the
+    /// single source of truth for what is filed where.
+    func fileWalk(_ walk: AppModel.WalkRecord, to jobId: String?) {
+        guard !walk.sessionId.isEmpty else { return }  // legacy/demo row
+        do {
+            try model.setWalkJob(sessionId: walk.sessionId, jobId: jobId)
+            jobsError = nil
+        } catch {
+            jobsError = "Couldn't file walk: \(error.localizedDescription)"
+        }
+    }
+
+    /// The walks filed under a job, newest first — the "months later, what
+    /// happened on this job?" surface.
+    func walks(for jobId: String) -> [AppModel.WalkRecord] {
+        model.sessionWalks.filter { $0.jobId == jobId }
+    }
+
     func createJob() {
         let name = newJobName
         newJobName = ""
@@ -345,29 +395,71 @@ extension BoardView {
 /// persistence land, so it's built as a card rather than a row.
 private struct OperatorJobCard: View {
     let job: JobModel
+    let walks: [AppModel.WalkRecord]
+    let onOpenWalk: (AppModel.WalkRecord) -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(job.name)
                     .font(Theme.F.serif(17, .semibold))
                     .foregroundStyle(Theme.C.ink)
                     .lineLimit(2)
-                // Placeholder until walks attach to jobs — stated honestly
-                // rather than faking a count we don't have yet.
-                Text("NO WALKS YET")
+                Spacer()
+                Text(walkCountLabel)
                     .font(Theme.F.mono(8.5))
                     .tracking(0.8)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(walks.isEmpty ? Theme.C.ink35 : Theme.C.orangeDeep)
             }
-            Spacer()
+            .padding(.horizontal, Theme.S.screenPad)
+            .padding(.top, 13)
+            .padding(.bottom, walks.isEmpty ? 13 : 8)
+
+            // The walks themselves — the "an email lands months later asking
+            // about this job" surface. Tapping reopens that walk's notes,
+            // which are the durable record; the document is regenerated from
+            // them on demand rather than stored.
+            ForEach(walks) { walk in
+                Button { onOpenWalk(walk) } label: {
+                    HStack(spacing: 10) {
+                        Rectangle()
+                            .fill(Theme.C.hairline)
+                            .frame(width: 1, height: 13)
+                        Text(walk.time)
+                            .font(Theme.F.mono(9.5))
+                            .foregroundStyle(Theme.C.ink60)
+                        Text(walk.docKind)
+                            .font(Theme.F.mono(9.5))
+                            .tracking(0.6)
+                            .foregroundStyle(Theme.C.ink35)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.C.ink35)
+                    }
+                    .padding(.leading, Theme.S.screenPad + 2)
+                    .padding(.trailing, Theme.S.screenPad)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, walks.isEmpty ? 0 : 8)
         }
-        .padding(.horizontal, Theme.S.screenPad)
-        .padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
+        }
+    }
+
+    private var walkCountLabel: String {
+        switch walks.count {
+        // Honest rather than a fake zero-state: an unfiled job genuinely has
+        // no walks, and long-pressing a walk is how one gets here.
+        case 0: return "NO WALKS YET"
+        case 1: return "1 WALK"
+        default: return "\(walks.count) WALKS"
         }
     }
 }

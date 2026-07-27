@@ -25,6 +25,13 @@ pub enum WalkStatus {
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]
 pub struct WalkSummary {
     pub id: String,
+    /// The job this walk is filed under; `None` = unfiled.
+    ///
+    /// Core has always carried this (`sessions.job_id`); the FFI mirror
+    /// simply dropped it, which is why the board could never group walks
+    /// by job. Multiple walks per job is the common case — a property
+    /// gets walked in March and again in June.
+    pub job_id: Option<String>,
     /// `doc_kind_for_template(template)` — advisory, for row labeling.
     pub doc_kind: String,
     pub status: WalkStatus,
@@ -57,6 +64,7 @@ pub(crate) fn walk_summary(core: &murmur_core::WalkSummary) -> WalkSummary {
         doc_kind: murmur_core::doc_kind_for_template(core.template.as_deref()).to_string(),
         status: walk_status(core.status),
         summary: core.summary.clone().unwrap_or_default(),
+        job_id: core.job_id.clone(),
         started_at: core.started_at,
         item_count: core.item_count.min(u32::MAX as u64) as u32,
         has_document: core.has_document,
@@ -69,6 +77,26 @@ impl MurmurEngine {
     /// The board walk log (D2/D3): every reopenable walk, newest first —
     /// never a transcript (Plan 04 lesson), never a Recording or tombstoned
     /// row. Read-only: safe at app-open alongside the sweeps (R4).
+    /// Files a walk under a job, or unfiles it with `None`.
+    ///
+    /// R4 ("no pre-labeling — the user corrects on the report") means this
+    /// happens AFTER the walk, so it is deliberately allowed at any status.
+    /// Re-filing is normal rather than exceptional: a walk misfiled months ago
+    /// has to be movable.
+    pub fn set_session_job(
+        &self,
+        session_id: String,
+        job_id: Option<String>,
+    ) -> Result<(), EngineError> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| EngineError::Session("store lock poisoned".into()))?;
+        store
+            .set_session_job(&session_id, job_id.as_deref())
+            .map_err(|e| EngineError::Session(e.to_string()))
+    }
+
     pub fn list_sessions(&self) -> Result<Vec<WalkSummary>, EngineError> {
         let store = self
             .store
@@ -183,6 +211,9 @@ mod tests {
         let walks = engine.list_sessions().unwrap();
         let WalkSummary {
             id: _,
+            // An id, not content — the guard is about transcripts never
+            // crossing this boundary, and a foreign key carries none.
+            job_id: _,
             doc_kind: _,
             status: _,
             summary: _,
@@ -191,5 +222,47 @@ mod tests {
             has_document: _,
             queued: _,
         } = walks[0].clone();
+    }
+
+    #[tokio::test]
+    async fn set_session_job_files_unfiles_and_refiles() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let job = store
+            .create_job(murmur_core::NewJob { name: "Alder Court".into(), ..Default::default() })
+            .unwrap();
+        let other = store
+            .create_job(murmur_core::NewJob { name: "The Hendersons".into(), ..Default::default() })
+            .unwrap();
+        let s = store.start_session(None).unwrap();
+        store.end_session(&s.id).unwrap();
+        let engine = engine_over(store);
+
+        // Unfiled to start — R4: nothing is labeled before the walk.
+        assert_eq!(engine.list_sessions().unwrap()[0].job_id, None);
+
+        engine.set_session_job(s.id.clone(), Some(job.id.clone())).unwrap();
+        assert_eq!(engine.list_sessions().unwrap()[0].job_id, Some(job.id.clone()));
+
+        // Re-filing is normal, not exceptional: a walk misfiled months ago has
+        // to be movable to the right job.
+        engine.set_session_job(s.id.clone(), Some(other.id.clone())).unwrap();
+        assert_eq!(engine.list_sessions().unwrap()[0].job_id, Some(other.id));
+
+        // And it can be unfiled again.
+        engine.set_session_job(s.id.clone(), None).unwrap();
+        assert_eq!(engine.list_sessions().unwrap()[0].job_id, None);
+    }
+
+    #[tokio::test]
+    async fn set_session_job_rejects_unknown_ids() {
+        let store = Store::open_in_memory("device-a").unwrap();
+        let s = store.start_session(None).unwrap();
+        store.end_session(&s.id).unwrap();
+        let engine = engine_over(store);
+
+        // Filing to a job that doesn't exist must fail loudly. A silent
+        // zero-row update would look like it worked and lose the walk.
+        assert!(engine.set_session_job(s.id.clone(), Some("nope".into())).is_err());
+        assert!(engine.set_session_job("nope".into(), None).is_err());
     }
 }

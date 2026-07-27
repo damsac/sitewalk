@@ -63,9 +63,14 @@ final class AppModel {
         let sessionId: String
         /// Mirror of `NotesModel.queued` for the reopened-notes gating banner.
         let queued: Bool
+        /// The job this walk is filed under; nil = unfiled. Set AFTER the walk
+        /// (R4: no pre-labeling), and re-settable — a walk filed to the wrong
+        /// job months ago has to be movable.
+        var jobId: String?
 
         init(time: String, docNo: String, docKind: String, sent: Bool,
-             sessionId: String, queued: Bool) {
+             sessionId: String, queued: Bool, jobId: String? = nil) {
+            self.jobId = jobId
             self.time = time
             self.docNo = docNo
             self.docKind = docKind
@@ -87,6 +92,7 @@ final class AppModel {
             self.sent = summary.hasDocument
             self.sessionId = summary.id
             self.queued = summary.queued
+            self.jobId = summary.jobId
         }
     }
     private(set) var sessionWalks: [WalkRecord] = []
@@ -648,6 +654,23 @@ final class AppModel {
         if !fetched.isEmpty || isRealCore {
             sessionWalks = fetched.map(WalkRecord.init)
         }
+    }
+
+    /// Files a walk under a job (or unfiles it with nil), then refreshes.
+    ///
+    /// Updates the in-memory record BEFORE re-reading, because the demo engine's
+    /// `listSessions()` returns `[]` by design (its log is in-memory) and
+    /// `hydrateWalkLog` deliberately declines to let that empty result wipe the
+    /// log. Without the optimistic update, filing would persist in the demo
+    /// engine and never appear — which would make the whole feature undemoable.
+    /// On real core the subsequent hydrate re-reads authoritative state, so the
+    /// optimistic value is immediately replaced by the stored one.
+    func setWalkJob(sessionId: String, jobId: String?) throws {
+        try engine.setSessionJob(sessionId: sessionId, jobId: jobId)
+        if let index = sessionWalks.firstIndex(where: { $0.sessionId == sessionId }) {
+            sessionWalks[index].jobId = jobId
+        }
+        hydrateWalkLog()
     }
 
     /// Reopen a finished walk from the board into the EXISTING NotesView

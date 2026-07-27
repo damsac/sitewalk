@@ -483,6 +483,28 @@ final class DemoWalkEngine: WalkEngine {
 
     // MARK: Jobs — in-memory demo conformance.
 
+    /// Session -> job filings, the demo mirror of `sessions.job_id`.
+    private var sessionJobs: [String: String] = [:]
+
+    func setSessionJob(sessionId: String, jobId: String?) throws {
+        // Mirror core's rejection so the UI's error path is exercised without
+        // a backend: filing to a job that doesn't exist must fail loudly
+        // rather than silently losing the walk.
+        if let jobId {
+            guard jobs.contains(where: { $0.id == jobId }) else {
+                throw DemoEngineError.invalidInput("no such job")
+            }
+            sessionJobs[sessionId] = jobId
+        } else {
+            sessionJobs.removeValue(forKey: sessionId)
+        }
+    }
+
+    /// Demo-only read so the board can group its in-memory walks by job.
+    func demoJobId(forSession sessionId: String) -> String? {
+        sessionJobs[sessionId]
+    }
+
     /// Seeded so the board has something to show in a clean checkout. Names
     /// deliberately span the three ways contractors actually name work — a
     /// place, a customer, an address — which is the argument for a single

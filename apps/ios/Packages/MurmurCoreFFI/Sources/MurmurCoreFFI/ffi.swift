@@ -606,11 +606,6 @@ public protocol MurmurEngineProtocol : AnyObject {
      */
     func listPhotos(sessionId: String) throws  -> [PhotoRef]
     
-    /**
-     * The board walk log (D2/D3): every reopenable walk, newest first —
-     * never a transcript (Plan 04 lesson), never a Recording or tombstoned
-     * row. Read-only: safe at app-open alongside the sweeps (R4).
-     */
     func listSessions() throws  -> [WalkSummary]
     
     /**
@@ -703,6 +698,19 @@ public protocol MurmurEngineProtocol : AnyObject {
      * Move a job between active / done / archived. Returns the updated job.
      */
     func setJobStatus(id: String, status: String) throws  -> Job
+    
+    /**
+     * The board walk log (D2/D3): every reopenable walk, newest first —
+     * never a transcript (Plan 04 lesson), never a Recording or tombstoned
+     * row. Read-only: safe at app-open alongside the sweeps (R4).
+     * Files a walk under a job, or unfiles it with `None`.
+     *
+     * R4 ("no pre-labeling — the user corrects on the report") means this
+     * happens AFTER the walk, so it is deliberately allowed at any status.
+     * Re-filing is normal rather than exceptional: a walk misfiled months ago
+     * has to be movable.
+     */
+    func setSessionJob(sessionId: String, jobId: String?) throws 
     
     /**
      * App-open zombie sweep (carry-note, Plan 04): a `Recording` session left
@@ -961,11 +969,6 @@ open func listPhotos(sessionId: String)throws  -> [PhotoRef] {
 })
 }
     
-    /**
-     * The board walk log (D2/D3): every reopenable walk, newest first —
-     * never a transcript (Plan 04 lesson), never a Recording or tombstoned
-     * row. Read-only: safe at app-open alongside the sweeps (R4).
-     */
 open func listSessions()throws  -> [WalkSummary] {
     return try  FfiConverterSequenceTypeWalkSummary.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
     uniffi_ffi_fn_method_murmurengine_list_sessions(self.uniffiClonePointer(),$0
@@ -1131,6 +1134,25 @@ open func setJobStatus(id: String, status: String)throws  -> Job {
         FfiConverterString.lower(status),$0
     )
 })
+}
+    
+    /**
+     * The board walk log (D2/D3): every reopenable walk, newest first —
+     * never a transcript (Plan 04 lesson), never a Recording or tombstoned
+     * row. Read-only: safe at app-open alongside the sweeps (R4).
+     * Files a walk under a job, or unfiles it with `None`.
+     *
+     * R4 ("no pre-labeling — the user corrects on the report") means this
+     * happens AFTER the walk, so it is deliberately allowed at any status.
+     * Re-filing is normal rather than exceptional: a walk misfiled months ago
+     * has to be movable.
+     */
+open func setSessionJob(sessionId: String, jobId: String?)throws  {try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_set_session_job(self.uniffiClonePointer(),
+        FfiConverterString.lower(sessionId),
+        FfiConverterOptionString.lower(jobId),$0
+    )
+}
 }
     
     /**
@@ -3440,6 +3462,15 @@ public func FfiConverterTypeSeedReport_lower(_ value: SeedReport) -> RustBuffer 
 public struct WalkSummary {
     public var id: String
     /**
+     * The job this walk is filed under; `None` = unfiled.
+     *
+     * Core has always carried this (`sessions.job_id`); the FFI mirror
+     * simply dropped it, which is why the board could never group walks
+     * by job. Multiple walks per job is the common case — a property
+     * gets walked in March and again in June.
+     */
+    public var jobId: String?
+    /**
      * `doc_kind_for_template(template)` — advisory, for row labeling.
      */
     public var docKind: String
@@ -3464,6 +3495,14 @@ public struct WalkSummary {
     // declare one manually.
     public init(id: String, 
         /**
+         * The job this walk is filed under; `None` = unfiled.
+         *
+         * Core has always carried this (`sessions.job_id`); the FFI mirror
+         * simply dropped it, which is why the board could never group walks
+         * by job. Multiple walks per job is the common case — a property
+         * gets walked in March and again in June.
+         */jobId: String?, 
+        /**
          * `doc_kind_for_template(template)` — advisory, for row labeling.
          */docKind: String, status: WalkStatus, 
         /**
@@ -3477,6 +3516,7 @@ public struct WalkSummary {
          * Live items only.
          */itemCount: UInt32, hasDocument: Bool, queued: Bool) {
         self.id = id
+        self.jobId = jobId
         self.docKind = docKind
         self.status = status
         self.summary = summary
@@ -3492,6 +3532,9 @@ public struct WalkSummary {
 extension WalkSummary: Equatable, Hashable {
     public static func ==(lhs: WalkSummary, rhs: WalkSummary) -> Bool {
         if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.jobId != rhs.jobId {
             return false
         }
         if lhs.docKind != rhs.docKind {
@@ -3520,6 +3563,7 @@ extension WalkSummary: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(jobId)
         hasher.combine(docKind)
         hasher.combine(status)
         hasher.combine(summary)
@@ -3539,6 +3583,7 @@ public struct FfiConverterTypeWalkSummary: FfiConverterRustBuffer {
         return
             try WalkSummary(
                 id: FfiConverterString.read(from: &buf), 
+                jobId: FfiConverterOptionString.read(from: &buf), 
                 docKind: FfiConverterString.read(from: &buf), 
                 status: FfiConverterTypeWalkStatus.read(from: &buf), 
                 summary: FfiConverterString.read(from: &buf), 
@@ -3551,6 +3596,7 @@ public struct FfiConverterTypeWalkSummary: FfiConverterRustBuffer {
 
     public static func write(_ value: WalkSummary, into buf: inout [UInt8]) {
         FfiConverterString.write(value.id, into: &buf)
+        FfiConverterOptionString.write(value.jobId, into: &buf)
         FfiConverterString.write(value.docKind, into: &buf)
         FfiConverterTypeWalkStatus.write(value.status, into: &buf)
         FfiConverterString.write(value.summary, into: &buf)
@@ -4473,7 +4519,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_murmurengine_list_photos() != 9711) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_ffi_checksum_method_murmurengine_list_sessions() != 19041) {
+    if (uniffi_ffi_checksum_method_murmurengine_list_sessions() != 23419) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_list_vocabulary() != 10809) {
@@ -4504,6 +4550,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_set_job_status() != 52076) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_set_session_job() != 33033) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_sweep_zombie_sessions() != 29924) {

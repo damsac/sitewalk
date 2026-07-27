@@ -127,6 +127,10 @@ enum WalkStatus {
 /// session (a built walk).
 struct WalkSummary: Identifiable, Equatable {
     var id: String
+    /// The job this walk is filed under; nil = unfiled. Multiple walks
+    /// per job is the common case — a property walked in March and again
+    /// in June.
+    var jobId: String?
     var docKind: String
     var status: WalkStatus
     var summary: String
@@ -285,6 +289,13 @@ protocol WalkEngine: AnyObject {
     //
     // Returns the created/updated job so the board picks up core's minted id
     // and timestamps in one round-trip (the saveDocumentSchema precedent).
+    /// File a walk under a job, or unfile it with nil.
+    ///
+    /// R4 ("no pre-labeling — the user corrects on the report"): this runs
+    /// AFTER the walk, never before it. Re-filing is normal rather than
+    /// exceptional — a walk misfiled months ago has to be movable.
+    func setSessionJob(sessionId: String, jobId: String?) throws
+
     func listJobs() throws -> [JobModel]
     func createJob(name: String) throws -> JobModel
     func setJobStatus(id: String, status: JobStatusModel) throws -> JobModel

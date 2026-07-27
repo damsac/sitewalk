@@ -174,6 +174,7 @@ extension MurmurEngine {
     static func walkSummary(_ summary: FFIWalkSummary) -> WalkSummary {
         WalkSummary(
             id: summary.id,
+            jobId: summary.jobId,
             docKind: summary.docKind,
             status: walkStatus(summary.status),
             summary: summary.summary,

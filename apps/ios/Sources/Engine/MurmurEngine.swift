@@ -373,6 +373,10 @@ final class MurmurEngine: WalkEngine {
 
     // MARK: Jobs — passthrough + conversion.
 
+    func setSessionJob(sessionId: String, jobId: String?) throws {
+        try engine.setSessionJob(sessionId: sessionId, jobId: jobId)
+    }
+
     func listJobs() throws -> [JobModel] {
         try engine.listJobs().map(Self.job)
     }
