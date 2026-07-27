@@ -156,39 +156,11 @@ struct BoardView: View {
                     // // sac: the reopen affordance visuals (chevron? row
                     // // sac: press state?) + the reopened banner are yours.
                     ForEach(model.sessionWalks) { walk in
-                        Button {
+                        WalkLogRow(walk: walk) {
                             model.reopenWalk(sessionId: walk.sessionId)
-                        } label: {
-                            WalkLogRow(walk: walk)
-                        }
-                        .buttonStyle(.plain)
-                        // Filing lives in a context menu rather than a visible
-                        // control: the row's PRIMARY job is reopening the walk,
-                        // and a second button on every row would clutter the
-                        // one screen that has to stay scannable in sunlight.
-                        // A long-press secondary action is the iOS idiom for
-                        // exactly this. (Worth revisiting if it proves
-                        // undiscoverable — filing also belongs on the notes
-                        // screen, which is where R4 says correction happens.)
-                        .contextMenu {
-                            if activeJobs.isEmpty {
-                                Text("No jobs yet")
-                            } else {
-                                ForEach(activeJobs) { job in
-                                    Button {
-                                        fileWalk(walk, to: job.id)
-                                    } label: {
-                                        Label(job.name, systemImage:
-                                            walk.jobId == job.id ? "checkmark" : "folder")
-                                    }
-                                }
-                                if walk.jobId != nil {
-                                    Button(role: .destructive) {
-                                        fileWalk(walk, to: nil)
-                                    } label: {
-                                        Label("Unfile", systemImage: "xmark")
-                                    }
-                                }
+                        } trailing: {
+                            FileChip(walk: walk, jobs: activeJobs) { jobId in
+                                fileWalk(walk, to: jobId)
                             }
                         }
                     }
@@ -615,33 +587,117 @@ struct CoachCallout: View {
 
 // MARK: - Session walk row (airport-board discipline, JobRow's bones)
 
-private struct WalkLogRow: View {
+/// One walk in the log.
+///
+/// Two independent targets, deliberately siblings rather than nested: tapping
+/// the row reopens the walk's notes, and the trailing chip files it under a
+/// job. A `Menu` inside the row's `Button` would fight it for taps.
+private struct WalkLogRow<Trailing: View>: View {
     let walk: AppModel.WalkRecord
+    let onOpen: () -> Void
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(walk.time)
-                .font(Theme.F.mono(11, .medium))
-                .foregroundStyle(Theme.C.ink)
-                .frame(width: 46, alignment: .leading)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(walk.docNo)
-                    .font(Theme.F.ui(14.5, .semibold))
-                    .lineLimit(1)
-                Text(walk.docKind.capitalized)
-                    .font(Theme.F.cond(11.5, .medium))
-                    .foregroundStyle(Theme.C.ink60)
-                    .lineLimit(1)
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                HStack(spacing: 12) {
+                    Text(walk.time)
+                        .font(Theme.F.mono(11, .medium))
+                        .foregroundStyle(Theme.C.ink)
+                        .frame(width: 46, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(walk.docNo)
+                            .font(Theme.F.ui(14.5, .semibold))
+                            .lineLimit(1)
+                        Text(walk.docKind.capitalized)
+                            .font(Theme.F.cond(11.5, .medium))
+                            .foregroundStyle(Theme.C.ink60)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    FieldTag(tag: TagFixture(
+                        kind: walk.sent ? .green : .plain,
+                        label: walk.sent ? "SENT" : "DISCARDED"
+                    ))
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 8)
-            FieldTag(tag: TagFixture(
-                kind: walk.sent ? .green : .plain,
-                label: walk.sent ? "SENT" : "DISCARDED"
-            ))
+            .buttonStyle(.plain)
+
+            trailing
         }
-        .padding(.horizontal, Theme.S.screenPad)
+        .padding(.leading, Theme.S.screenPad)
+        .padding(.trailing, Theme.S.screenPad - 6)
         .padding(.vertical, 13)
         .opacity(walk.sent ? 1 : 0.55)
         .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
+    }
+}
+
+/// The filing affordance: a visible, tap-activated chip that also DISPLAYS the
+/// current filing.
+///
+/// Doing double duty is the point. A bare "FILE" button would say nothing about
+/// where a walk already sits, so the operator would have to open the menu to
+/// find out. Showing the job name instead means the common case — "which job is
+/// this under?" — is answered without any interaction at all.
+private struct FileChip: View {
+    let walk: AppModel.WalkRecord
+    let jobs: [JobModel]
+    let onFile: (String?) -> Void
+
+    private var filedJob: JobModel? { jobs.first { $0.id == walk.jobId } }
+
+    var body: some View {
+        Menu {
+            if jobs.isEmpty {
+                Text("No jobs yet — add one below")
+            } else {
+                ForEach(jobs) { job in
+                    Button {
+                        onFile(job.id)
+                    } label: {
+                        Label(job.name, systemImage:
+                            walk.jobId == job.id ? "checkmark" : "folder")
+                    }
+                }
+                if walk.jobId != nil {
+                    Divider()
+                    Button(role: .destructive) { onFile(nil) } label: {
+                        Label("Unfile", systemImage: "xmark")
+                    }
+                }
+            }
+        } label: {
+            if let filedJob {
+                Text(filedJob.name.uppercased())
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.orangeDeep)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 88, alignment: .trailing)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 8)
+                    .background(Theme.C.orangeTint)
+                    .contentShape(Rectangle())
+            } else {
+                // Unfiled reads as an invitation, not an error — most walks
+                // will sit unfiled for a while and that's fine.
+                Text("FILE")
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.ink35)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 2)
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                            .foregroundStyle(Theme.C.ink35)
+                    )
+                    .contentShape(Rectangle())
+            }
+        }
+        .accessibilityLabel(filedJob.map { "Filed under \($0.name). Change." } ?? "File this walk")
     }
 }
