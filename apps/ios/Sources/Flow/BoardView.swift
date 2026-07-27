@@ -252,17 +252,30 @@ extension BoardView {
                 SectionLabel("JOBS")
                 Spacer()
                 SectionLabel("\(activeJobs.count) OPEN", color: Theme.C.orangeDeep)
+                // Labeled, not a bare glyph: Isaac's field report was "the plus
+                // sign to add a new job isn't apparent enough." A lone + next
+                // to a count reads as decoration. Words and a border make it
+                // read as a control — the same grammar the Document Builder's
+                // "NEW DOCUMENT TYPE" already uses.
                 Button { showNewJob = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Theme.C.orangeDeep)
-                        // Widen the tap target without moving the glyph — this
-                        // is a gloved-hands product.
-                        .frame(width: 30, height: 30)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("ADD JOB")
+                            .font(Theme.F.mono(9, .semibold))
+                            .tracking(0.8)
+                    }
+                    .foregroundStyle(Theme.C.orangeDeep)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Theme.C.orangeDeep.opacity(0.45), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("New job")
+                .accessibilityLabel("Add a new job")
             }
             .padding(.leading, Theme.S.screenPad)
             .padding(.trailing, Theme.S.screenPad - 8)
