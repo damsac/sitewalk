@@ -631,7 +631,84 @@ final class AppModel {
             let notes = await engine.finish()
             self.notes = notes
             self.notesLoading = false
+            // A FINISHED walk is a walk, whether or not a document was ever
+            // built from it. Previously a walk only entered the log via
+            // `completeSend()` — so finishing and then just filing it left it
+            // invisible on the board (Isaac's field report: "I didn't export
+            // the notes or create a document... it should save regardless").
+            // Core already persisted it at finish; the log simply never
+            // re-read.
+            self.refreshWalkLog()
+            // R4's inference half, client-side: if the operator said the job's
+            // name during the walk, file it there and SHOW that we did.
+            self.autoFileFromTranscript()
         }
+    }
+
+    /// Files the just-finished walk under a job whose name the operator spoke.
+    ///
+    /// Isaac: "The AI should also auto file it if it hears the name of the site
+    /// in the walk." It doesn't need the model to do it — the job names are
+    /// already on the device and the transcript is right here, so this is a
+    /// deterministic string match: no token cost, no latency, no chance of a
+    /// hallucinated job.
+    ///
+    /// It auto-files rather than merely suggesting, which is what was asked
+    /// for. The safety condition is that the result is always VISIBLE and
+    /// one tap from changeable on the notes screen — a silent mis-file would
+    /// bury the walk somewhere the operator never looks, which is the one
+    /// outcome worse than not filing at all. Hence: match only on an
+    /// unambiguous, whole-name hit, and never overwrite an existing filing.
+    func autoFileFromTranscript() {
+        guard let sessionId = currentSessionId,
+              !isPracticeWalk,
+              let match = Self.jobMatching(transcript: transcript, jobs: activeJobsForMatching())
+        else { return }
+        // Never clobber a deliberate choice.
+        if let existing = sessionWalks.first(where: { $0.sessionId == sessionId }), existing.jobId != nil {
+            return
+        }
+        try? setWalkJob(sessionId: sessionId, jobId: match.id)
+        autoFiledJobName = match.name
+    }
+
+    /// Set when the last finish auto-filed, so the notes screen can say so
+    /// rather than silently changing state under the operator.
+    var autoFiledJobName: String?
+
+    private func activeJobsForMatching() -> [JobModel] {
+        ((try? engine.listJobs()) ?? []).filter { $0.status == .active }
+    }
+
+    /// The single job whose name the transcript clearly contains, if any.
+    ///
+    /// Normalizes both sides (case, punctuation, whitespace) so "117 Lexington"
+    /// matches "117 lexington." mid-sentence. Requires a whole-name hit and
+    /// UNIQUENESS — if two jobs both match, we don't guess; picking one would
+    /// be a coin flip that hides the walk from the other. Very short names are
+    /// skipped because a 2-3 character name matches almost any transcript by
+    /// accident.
+    /// `nonisolated` because it is pure — no state, no side effects. Binding a
+    /// string comparison to the main actor would be noise, and it makes the
+    /// matcher directly unit-testable off the main thread.
+    nonisolated static func jobMatching(transcript: String, jobs: [JobModel]) -> JobModel? {
+        func normalize(_ s: String) -> String {
+            let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            let cleaned = folded.map { $0.isLetter || $0.isNumber ? $0 : " " }
+            return String(cleaned).split(separator: " ").joined(separator: " ")
+        }
+        let haystack = normalize(transcript)
+        guard !haystack.isEmpty else { return nil }
+        let hits = jobs.filter { job in
+            let needle = normalize(job.name)
+            // 4 chars is the floor: shorter names ("A", "12") collide with
+            // ordinary speech and would file walks essentially at random.
+            guard needle.count >= 4 else { return false }
+            return haystack.contains(needle)
+        }
+        // Ambiguity means don't guess. One clear hit, or nothing.
+        guard hits.count == 1 else { return nil }
+        return hits.first
     }
 
     // MARK: Walk reopen (Plan 20 Half A) — read-only re-entry into NotesView.
@@ -649,6 +726,22 @@ final class AppModel {
     func hydrateWalkLog() {
         guard !isHydratingWalkLog else { return }
         isHydratingWalkLog = true
+        refreshWalkLog()
+    }
+
+    /// Re-read the walk log NOW, bypassing the once-per-process latch.
+    ///
+    /// `isHydratingWalkLog` is set once and never cleared — deliberately, to
+    /// stop `.task` re-fires from re-hydrating. But that made every LATER
+    /// refresh a silent no-op, which is the bug Isaac hit: filing a walk under
+    /// a job wrote through to core correctly and the board never showed it,
+    /// because the only refresh path was latched off for the life of the
+    /// process.
+    ///
+    /// Guard 2 is preserved: `DemoWalkEngine.listSessions()` returns `[]`
+    /// SUCCESSFULLY, and that empty success must not wipe the demo's in-memory
+    /// log. Real-core's `[]` is a legitimate "no sessions yet".
+    func refreshWalkLog() {
         let fetched = (try? engine.listSessions()) ?? []
         let isRealCore = !(engine is DemoWalkEngine)
         if !fetched.isEmpty || isRealCore {
@@ -670,7 +763,7 @@ final class AppModel {
         if let index = sessionWalks.firstIndex(where: { $0.sessionId == sessionId }) {
             sessionWalks[index].jobId = jobId
         }
-        hydrateWalkLog()
+        refreshWalkLog()
     }
 
     /// Reopen a finished walk from the board into the EXISTING NotesView
