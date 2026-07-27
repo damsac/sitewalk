@@ -12,6 +12,14 @@ struct BoardView: View {
     // First-run coach mark, one-shot (survives relaunch). Cleared by resetcoach=1.
     @AppStorage(CoachMarks.startWalkKey) private var coachStartShown = false
 
+    // Jobs. Held here rather than on AppModel because nothing outside the board
+    // reads them yet; promote when walk-attachment lands and the notes screen
+    // needs the list too.
+    @State private var operatorJobs: [JobModel] = []
+    @State private var jobsError: String?
+    @State private var showNewJob = false
+    @State private var newJobName = ""
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
@@ -165,6 +173,12 @@ struct BoardView: View {
                             .padding(.top, 8)
                     }
                 }
+
+                // JOBS — the board's organizing unit, below TODAY on purpose.
+                // Walk-first (Isaac, 07-26): START WALK stays instant and
+                // unblocked at the truck door; jobs are where work accumulates,
+                // not a gate in front of recording it.
+                jobsSection
             } else {
                 MetaStrip(left: model.trade.boardMeta, right: "SYNCED 07:58")
 
@@ -218,6 +232,145 @@ struct BoardView: View {
 }
 
 // MARK: - Raised chip (clickable header buttons)
+
+// MARK: - Jobs section
+
+extension BoardView {
+    /// The jobs list plus its create affordance.
+    ///
+    /// Only ACTIVE jobs show. A contractor juggling ten live jobs does not want
+    /// last spring's finished work in the way; done/archived stay in the model
+    /// (and sync) but are out of the daily view.
+    var jobsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // SectionHead's grammar, composed inline rather than used directly:
+            // SectionHead draws its own full-width bottom rule, so putting the
+            // + beside it as a sibling shrinks the head and truncates the rule.
+            // Same padding, same labels, same heavy rule — one row.
+            HStack(spacing: 10) {
+                SectionLabel("JOBS")
+                Spacer()
+                SectionLabel("\(activeJobs.count) OPEN", color: Theme.C.orangeDeep)
+                Button { showNewJob = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.C.orangeDeep)
+                        // Widen the tap target without moving the glyph — this
+                        // is a gloved-hands product.
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New job")
+            }
+            .padding(.leading, Theme.S.screenPad)
+            .padding(.trailing, Theme.S.screenPad - 8)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .overlay(alignment: .bottom) {
+                Theme.C.ink.frame(height: 1.5)
+            }
+
+            if let jobsError {
+                Text(jobsError.uppercased())
+                    .font(Theme.F.mono(8.5))
+                    .tracking(0.4)
+                    .foregroundStyle(Theme.C.redTag)
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.top, 8)
+            }
+
+            if activeJobs.isEmpty {
+                Text("NO JOBS YET — TAP + TO ADD ONE")
+                    .font(Theme.F.mono(8.5))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.ink35)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 22)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(Theme.C.ink35)
+                    )
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.top, 12)
+            } else {
+                ForEach(activeJobs) { job in
+                    OperatorJobCard(job: job)
+                }
+            }
+        }
+        .onAppear(perform: loadJobs)
+        .alert("New job", isPresented: $showNewJob) {
+            TextField("Name", text: $newJobName)
+            Button("Cancel", role: .cancel) { newJobName = "" }
+            Button("Add") { createJob() }
+        } message: {
+            Text("Call it whatever you call it on site.")
+        }
+    }
+
+    var activeJobs: [JobModel] { operatorJobs.filter { $0.status == .active } }
+
+    func loadJobs() {
+        do {
+            operatorJobs = try model.engine.listJobs()
+            jobsError = nil
+        } catch {
+            // Leave whatever is on screen rather than blanking the list — the
+            // vocabulary/schema editors' posture.
+            jobsError = "Couldn't load jobs: \(error.localizedDescription)"
+        }
+    }
+
+    func createJob() {
+        let name = newJobName
+        newJobName = ""
+        do {
+            // Core rejects an empty name rather than coercing it (R6), so the
+            // error path is real and worth surfacing rather than pre-guarding
+            // into silence.
+            let created = try model.engine.createJob(name: name)
+            operatorJobs.insert(created, at: 0)
+            jobsError = nil
+        } catch {
+            jobsError = "Couldn't add job: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// One job on the board. Deliberately quiet for now: this is where walks,
+/// documents, and notes will hang once walk-attachment and document
+/// persistence land, so it's built as a card rather than a row.
+private struct OperatorJobCard: View {
+    let job: JobModel
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(job.name)
+                    .font(Theme.F.serif(17, .semibold))
+                    .foregroundStyle(Theme.C.ink)
+                    .lineLimit(2)
+                // Placeholder until walks attach to jobs — stated honestly
+                // rather than faking a count we don't have yet.
+                Text("NO WALKS YET")
+                    .font(Theme.F.mono(8.5))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.ink35)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, Theme.S.screenPad)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
+        }
+    }
+}
 
 /// A compact "pressed block" — the START WALK button's raised look, chip-sized:
 /// a `face` cap sitting on a darker `edge` lip (3pt) so it reads as a button, not

@@ -11,6 +11,7 @@ pub mod document_build;
 pub mod engine;
 pub mod events;
 pub mod items;
+pub mod jobs;
 pub mod notes;
 pub mod photos;
 pub mod schemas;

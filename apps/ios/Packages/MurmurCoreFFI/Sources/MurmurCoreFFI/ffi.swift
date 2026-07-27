@@ -571,11 +571,28 @@ public protocol MurmurEngineProtocol : AnyObject {
     func buildDocument(sessionId: String, kind: String) async throws  -> DocumentPayload
     
     /**
+     * Create a job from a name. Returns the created job so the board picks up
+     * the minted id and timestamps in one round-trip (the
+     * `save_document_schema` precedent).
+     *
+     * An empty or whitespace-only name is REJECTED rather than coerced to a
+     * placeholder (R6): a job called "Untitled" is worse than an error,
+     * because it looks deliberate and the operator has no idea which one it
+     * was meant to be.
+     */
+    func createJob(name: String) throws  -> Job
+    
+    /**
      * Live schemas, id order (built-ins first). `Some(trade)` filters to
      * that trade plus template-agnostic (NULL-trade) schemas; `None`
      * returns everything live.
      */
     func listDocumentSchemas(tradeKey: String?) throws  -> [DocumentSchema]
+    
+    /**
+     * Live jobs, newest first.
+     */
+    func listJobs() throws  -> [Job]
     
     /**
      * Core's entire file contract (Plan 11 D4): every live photo filename,
@@ -681,6 +698,11 @@ public protocol MurmurEngineProtocol : AnyObject {
      * thrown (R7). Trade change is a union — nothing is removed (D6-15).
      */
     func seedVocabulary(trade: String, version: UInt32, terms: [String]) throws  -> SeedReport
+    
+    /**
+     * Move a job between active / done / archived. Returns the updated job.
+     */
+    func setJobStatus(id: String, status: String) throws  -> Job
     
     /**
      * App-open zombie sweep (carry-note, Plan 04): a `Recording` session left
@@ -876,6 +898,24 @@ open func buildDocument(sessionId: String, kind: String)async throws  -> Documen
 }
     
     /**
+     * Create a job from a name. Returns the created job so the board picks up
+     * the minted id and timestamps in one round-trip (the
+     * `save_document_schema` precedent).
+     *
+     * An empty or whitespace-only name is REJECTED rather than coerced to a
+     * placeholder (R6): a job called "Untitled" is worse than an error,
+     * because it looks deliberate and the operator has no idea which one it
+     * was meant to be.
+     */
+open func createJob(name: String)throws  -> Job {
+    return try  FfiConverterTypeJob.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_create_job(self.uniffiClonePointer(),
+        FfiConverterString.lower(name),$0
+    )
+})
+}
+    
+    /**
      * Live schemas, id order (built-ins first). `Some(trade)` filters to
      * that trade plus template-agnostic (NULL-trade) schemas; `None`
      * returns everything live.
@@ -884,6 +924,16 @@ open func listDocumentSchemas(tradeKey: String?)throws  -> [DocumentSchema] {
     return try  FfiConverterSequenceTypeDocumentSchema.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
     uniffi_ffi_fn_method_murmurengine_list_document_schemas(self.uniffiClonePointer(),
         FfiConverterOptionString.lower(tradeKey),$0
+    )
+})
+}
+    
+    /**
+     * Live jobs, newest first.
+     */
+open func listJobs()throws  -> [Job] {
+    return try  FfiConverterSequenceTypeJob.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_list_jobs(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1067,6 +1117,18 @@ open func seedVocabulary(trade: String, version: UInt32, terms: [String])throws 
         FfiConverterString.lower(trade),
         FfiConverterUInt32.lower(version),
         FfiConverterSequenceString.lower(terms),$0
+    )
+})
+}
+    
+    /**
+     * Move a job between active / done / archived. Returns the updated job.
+     */
+open func setJobStatus(id: String, status: String)throws  -> Job {
+    return try  FfiConverterTypeJob.lift(try rustCallWithError(FfiConverterTypeEngineError.lift) {
+    uniffi_ffi_fn_method_murmurengine_set_job_status(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(status),$0
     )
 })
 }
@@ -2611,6 +2673,164 @@ public func FfiConverterTypeEngineConfig_lower(_ value: EngineConfig) -> RustBuf
 }
 
 
+/**
+ * FFI mirror of `murmur_core::Job` (murmur-core stays UniFFI-free — every
+ * record lives on this side of the boundary, the `NotesEntry` precedent).
+ */
+public struct Job {
+    public var id: String
+    /**
+     * What the operator calls it. The ONLY field the create UI collects —
+     * contractors name jobs however they think of them ("Alder Court",
+     * "the Hendersons", "412 Alder Ct"), and forcing that into separate
+     * client/site fields would impose a taxonomy they didn't ask for.
+     */
+    public var name: String
+    /**
+     * Reserved: the model carries these and sync round-trips them, but the
+     * app doesn't collect them yet.
+     */
+    public var client: String?
+    public var site: String?
+    /**
+     * Unix seconds; `None` = unscheduled/backlog.
+     */
+    public var scheduledAt: UInt64?
+    /**
+     * One of `VALID_JOB_STATUSES`.
+     */
+    public var status: String
+    public var createdAt: UInt64
+    public var updatedAt: UInt64
+    public var deviceId: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, 
+        /**
+         * What the operator calls it. The ONLY field the create UI collects —
+         * contractors name jobs however they think of them ("Alder Court",
+         * "the Hendersons", "412 Alder Ct"), and forcing that into separate
+         * client/site fields would impose a taxonomy they didn't ask for.
+         */name: String, 
+        /**
+         * Reserved: the model carries these and sync round-trips them, but the
+         * app doesn't collect them yet.
+         */client: String?, site: String?, 
+        /**
+         * Unix seconds; `None` = unscheduled/backlog.
+         */scheduledAt: UInt64?, 
+        /**
+         * One of `VALID_JOB_STATUSES`.
+         */status: String, createdAt: UInt64, updatedAt: UInt64, deviceId: String) {
+        self.id = id
+        self.name = name
+        self.client = client
+        self.site = site
+        self.scheduledAt = scheduledAt
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deviceId = deviceId
+    }
+}
+
+
+
+extension Job: Equatable, Hashable {
+    public static func ==(lhs: Job, rhs: Job) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.client != rhs.client {
+            return false
+        }
+        if lhs.site != rhs.site {
+            return false
+        }
+        if lhs.scheduledAt != rhs.scheduledAt {
+            return false
+        }
+        if lhs.status != rhs.status {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return false
+        }
+        if lhs.deviceId != rhs.deviceId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(client)
+        hasher.combine(site)
+        hasher.combine(scheduledAt)
+        hasher.combine(status)
+        hasher.combine(createdAt)
+        hasher.combine(updatedAt)
+        hasher.combine(deviceId)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeJob: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Job {
+        return
+            try Job(
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                client: FfiConverterOptionString.read(from: &buf), 
+                site: FfiConverterOptionString.read(from: &buf), 
+                scheduledAt: FfiConverterOptionUInt64.read(from: &buf), 
+                status: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                updatedAt: FfiConverterUInt64.read(from: &buf), 
+                deviceId: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Job, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.client, into: &buf)
+        FfiConverterOptionString.write(value.site, into: &buf)
+        FfiConverterOptionUInt64.write(value.scheduledAt, into: &buf)
+        FfiConverterString.write(value.status, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterUInt64.write(value.updatedAt, into: &buf)
+        FfiConverterString.write(value.deviceId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeJob_lift(_ buf: RustBuffer) throws -> Job {
+    return try FfiConverterTypeJob.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeJob_lower(_ value: Job) -> RustBuffer {
+    return FfiConverterTypeJob.lower(value)
+}
+
+
 public struct NotesEntry {
     public var bucket: NotesBucket
     public var label: String
@@ -3436,6 +3656,13 @@ public enum EngineError {
      */
     case Schema(message: String)
     
+    /**
+     * A job operation failed — an empty name, an unknown status, a
+     * missing/deleted id, a poisoned lock, or a store error. Recoverable —
+     * surface, don't crash. Contains store/validation strings only.
+     */
+    case Job(message: String)
+    
 }
 
 
@@ -3488,6 +3715,10 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
         
+        case 10: return .Job(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -3517,6 +3748,8 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(8))
         case .Schema(_ /* message is ignored*/):
             writeInt(&buf, Int32(9))
+        case .Job(_ /* message is ignored*/):
+            writeInt(&buf, Int32(10))
 
         
         }
@@ -4002,6 +4235,31 @@ fileprivate struct FfiConverterSequenceTypeDocumentSchema: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeJob: FfiConverterRustBuffer {
+    typealias SwiftType = [Job]
+
+    public static func write(_ value: [Job], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeJob.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Job] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Job]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeJob.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeNotesEntry: FfiConverterRustBuffer {
     typealias SwiftType = [NotesEntry]
 
@@ -4200,7 +4458,13 @@ private var initializationResult: InitializationResult = {
     if (uniffi_ffi_checksum_method_murmurengine_build_document() != 48464) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ffi_checksum_method_murmurengine_create_job() != 53936) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ffi_checksum_method_murmurengine_list_document_schemas() != 57223) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_list_jobs() != 47967) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_list_live_photo_filenames() != 39240) {
@@ -4237,6 +4501,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_seed_vocabulary() != 18954) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ffi_checksum_method_murmurengine_set_job_status() != 52076) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ffi_checksum_method_murmurengine_sweep_zombie_sessions() != 29924) {
