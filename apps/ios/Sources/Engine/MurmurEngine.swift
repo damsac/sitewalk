@@ -371,6 +371,40 @@ final class MurmurEngine: WalkEngine {
         )
     }
 
+    // MARK: Jobs — passthrough + conversion.
+
+    func setSessionJob(sessionId: String, jobId: String?) throws {
+        try engine.setSessionJob(sessionId: sessionId, jobId: jobId)
+    }
+
+    func listJobs() throws -> [JobModel] {
+        try engine.listJobs().map(Self.job)
+    }
+
+    func createJob(name: String) throws -> JobModel {
+        Self.job(try engine.createJob(name: name))
+    }
+
+    @discardableResult
+    func setJobStatus(id: String, status: JobStatusModel) throws -> JobModel {
+        // rawValue is the wire contract: core validates against its own
+        // allowlist and returns the exact error for anything else (R6).
+        Self.job(try engine.setJobStatus(id: id, status: status.rawValue))
+    }
+
+    private nonisolated static func job(_ j: MurmurCoreFFI.Job) -> JobModel {
+        JobModel(
+            id: j.id,
+            name: j.name,
+            client: j.client,
+            site: j.site,
+            scheduledAt: j.scheduledAt,
+            status: JobStatusModel(fromCore: j.status),
+            createdAt: j.createdAt,
+            updatedAt: j.updatedAt
+        )
+    }
+
     // MARK: Document schemas (Plan 19) — passthrough + conversion.
 
     func listDocumentSchemas(tradeKey: String?) throws -> [DocumentSchemaModel] {

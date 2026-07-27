@@ -12,6 +12,14 @@ struct BoardView: View {
     // First-run coach mark, one-shot (survives relaunch). Cleared by resetcoach=1.
     @AppStorage(CoachMarks.startWalkKey) private var coachStartShown = false
 
+    // Jobs. Held here rather than on AppModel because nothing outside the board
+    // reads them yet; promote when walk-attachment lands and the notes screen
+    // needs the list too.
+    @State private var operatorJobs: [JobModel] = []
+    @State private var jobsError: String?
+    @State private var showNewJob = false
+    @State private var newJobName = ""
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
@@ -148,12 +156,13 @@ struct BoardView: View {
                     // // sac: the reopen affordance visuals (chevron? row
                     // // sac: press state?) + the reopened banner are yours.
                     ForEach(model.sessionWalks) { walk in
-                        Button {
+                        WalkLogRow(walk: walk) {
                             model.reopenWalk(sessionId: walk.sessionId)
-                        } label: {
-                            WalkLogRow(walk: walk)
+                        } trailing: {
+                            FileChip(walk: walk, jobs: activeJobs) { jobId in
+                                fileWalk(walk, to: jobId)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
                     if let reopenError = model.reopenError {
                         // F4 floor: the breadcrumb surfaces; chrome is sac's.
@@ -165,6 +174,12 @@ struct BoardView: View {
                             .padding(.top, 8)
                     }
                 }
+
+                // JOBS — the board's organizing unit, below TODAY on purpose.
+                // Walk-first (Isaac, 07-26): START WALK stays instant and
+                // unblocked at the truck door; jobs are where work accumulates,
+                // not a gate in front of recording it.
+                jobsSection
             } else {
                 MetaStrip(left: model.trade.boardMeta, right: "SYNCED 07:58")
 
@@ -218,6 +233,208 @@ struct BoardView: View {
 }
 
 // MARK: - Raised chip (clickable header buttons)
+
+// MARK: - Jobs section
+
+extension BoardView {
+    /// The jobs list plus its create affordance.
+    ///
+    /// Only ACTIVE jobs show. A contractor juggling ten live jobs does not want
+    /// last spring's finished work in the way; done/archived stay in the model
+    /// (and sync) but are out of the daily view.
+    var jobsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // SectionHead's grammar, composed inline rather than used directly:
+            // SectionHead draws its own full-width bottom rule, so putting the
+            // + beside it as a sibling shrinks the head and truncates the rule.
+            // Same padding, same labels, same heavy rule — one row.
+            HStack(spacing: 10) {
+                SectionLabel("JOBS")
+                Spacer()
+                SectionLabel("\(activeJobs.count) OPEN", color: Theme.C.orangeDeep)
+                Button { showNewJob = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.C.orangeDeep)
+                        // Widen the tap target without moving the glyph — this
+                        // is a gloved-hands product.
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New job")
+            }
+            .padding(.leading, Theme.S.screenPad)
+            .padding(.trailing, Theme.S.screenPad - 8)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .overlay(alignment: .bottom) {
+                Theme.C.ink.frame(height: 1.5)
+            }
+
+            if let jobsError {
+                Text(jobsError.uppercased())
+                    .font(Theme.F.mono(8.5))
+                    .tracking(0.4)
+                    .foregroundStyle(Theme.C.redTag)
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.top, 8)
+            }
+
+            if activeJobs.isEmpty {
+                Text("NO JOBS YET — TAP + TO ADD ONE")
+                    .font(Theme.F.mono(8.5))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.ink35)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 22)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(Theme.C.ink35)
+                    )
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.top, 12)
+            } else {
+                ForEach(activeJobs) { job in
+                    OperatorJobCard(job: job, walks: walks(for: job.id)) { walk in
+                        model.reopenWalk(sessionId: walk.sessionId)
+                    }
+                }
+            }
+        }
+        .onAppear(perform: loadJobs)
+        .alert("New job", isPresented: $showNewJob) {
+            TextField("Name", text: $newJobName)
+            Button("Cancel", role: .cancel) { newJobName = "" }
+            Button("Add") { createJob() }
+        } message: {
+            Text("Call it whatever you call it on site.")
+        }
+    }
+
+    var activeJobs: [JobModel] { operatorJobs.filter { $0.status == .active } }
+
+    func loadJobs() {
+        do {
+            operatorJobs = try model.engine.listJobs()
+            jobsError = nil
+        } catch {
+            // Leave whatever is on screen rather than blanking the list — the
+            // vocabulary/schema editors' posture.
+            jobsError = "Couldn't load jobs: \(error.localizedDescription)"
+        }
+    }
+
+    /// Files (or unfiles) a walk, then re-reads the log so the job cards
+    /// reflect it. Re-reading rather than mutating in place keeps core as the
+    /// single source of truth for what is filed where.
+    func fileWalk(_ walk: AppModel.WalkRecord, to jobId: String?) {
+        guard !walk.sessionId.isEmpty else { return }  // legacy/demo row
+        do {
+            try model.setWalkJob(sessionId: walk.sessionId, jobId: jobId)
+            jobsError = nil
+        } catch {
+            jobsError = "Couldn't file walk: \(error.localizedDescription)"
+        }
+    }
+
+    /// The walks filed under a job, newest first — the "months later, what
+    /// happened on this job?" surface.
+    func walks(for jobId: String) -> [AppModel.WalkRecord] {
+        model.sessionWalks.filter { $0.jobId == jobId }
+    }
+
+    func createJob() {
+        let name = newJobName
+        newJobName = ""
+        do {
+            // Core rejects an empty name rather than coercing it (R6), so the
+            // error path is real and worth surfacing rather than pre-guarding
+            // into silence.
+            let created = try model.engine.createJob(name: name)
+            operatorJobs.insert(created, at: 0)
+            jobsError = nil
+        } catch {
+            jobsError = "Couldn't add job: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// One job on the board. Deliberately quiet for now: this is where walks,
+/// documents, and notes will hang once walk-attachment and document
+/// persistence land, so it's built as a card rather than a row.
+private struct OperatorJobCard: View {
+    let job: JobModel
+    let walks: [AppModel.WalkRecord]
+    let onOpenWalk: (AppModel.WalkRecord) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(job.name)
+                    .font(Theme.F.serif(17, .semibold))
+                    .foregroundStyle(Theme.C.ink)
+                    .lineLimit(2)
+                Spacer()
+                Text(walkCountLabel)
+                    .font(Theme.F.mono(8.5))
+                    .tracking(0.8)
+                    .foregroundStyle(walks.isEmpty ? Theme.C.ink35 : Theme.C.orangeDeep)
+            }
+            .padding(.horizontal, Theme.S.screenPad)
+            .padding(.top, 13)
+            .padding(.bottom, walks.isEmpty ? 13 : 8)
+
+            // The walks themselves — the "an email lands months later asking
+            // about this job" surface. Tapping reopens that walk's notes,
+            // which are the durable record; the document is regenerated from
+            // them on demand rather than stored.
+            ForEach(walks) { walk in
+                Button { onOpenWalk(walk) } label: {
+                    HStack(spacing: 10) {
+                        Rectangle()
+                            .fill(Theme.C.hairline)
+                            .frame(width: 1, height: 13)
+                        Text(walk.time)
+                            .font(Theme.F.mono(9.5))
+                            .foregroundStyle(Theme.C.ink60)
+                        Text(walk.docKind)
+                            .font(Theme.F.mono(9.5))
+                            .tracking(0.6)
+                            .foregroundStyle(Theme.C.ink35)
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.C.ink35)
+                    }
+                    .padding(.leading, Theme.S.screenPad + 2)
+                    .padding(.trailing, Theme.S.screenPad)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, walks.isEmpty ? 0 : 8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
+        }
+    }
+
+    private var walkCountLabel: String {
+        switch walks.count {
+        // Honest rather than a fake zero-state: an unfiled job genuinely has
+        // no walks, and long-pressing a walk is how one gets here.
+        case 0: return "NO WALKS YET"
+        case 1: return "1 WALK"
+        default: return "\(walks.count) WALKS"
+        }
+    }
+}
 
 /// A compact "pressed block" — the START WALK button's raised look, chip-sized:
 /// a `face` cap sitting on a darker `edge` lip (3pt) so it reads as a button, not
@@ -370,33 +587,117 @@ struct CoachCallout: View {
 
 // MARK: - Session walk row (airport-board discipline, JobRow's bones)
 
-private struct WalkLogRow: View {
+/// One walk in the log.
+///
+/// Two independent targets, deliberately siblings rather than nested: tapping
+/// the row reopens the walk's notes, and the trailing chip files it under a
+/// job. A `Menu` inside the row's `Button` would fight it for taps.
+private struct WalkLogRow<Trailing: View>: View {
     let walk: AppModel.WalkRecord
+    let onOpen: () -> Void
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(walk.time)
-                .font(Theme.F.mono(11, .medium))
-                .foregroundStyle(Theme.C.ink)
-                .frame(width: 46, alignment: .leading)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(walk.docNo)
-                    .font(Theme.F.ui(14.5, .semibold))
-                    .lineLimit(1)
-                Text(walk.docKind.capitalized)
-                    .font(Theme.F.cond(11.5, .medium))
-                    .foregroundStyle(Theme.C.ink60)
-                    .lineLimit(1)
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                HStack(spacing: 12) {
+                    Text(walk.time)
+                        .font(Theme.F.mono(11, .medium))
+                        .foregroundStyle(Theme.C.ink)
+                        .frame(width: 46, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(walk.docNo)
+                            .font(Theme.F.ui(14.5, .semibold))
+                            .lineLimit(1)
+                        Text(walk.docKind.capitalized)
+                            .font(Theme.F.cond(11.5, .medium))
+                            .foregroundStyle(Theme.C.ink60)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    FieldTag(tag: TagFixture(
+                        kind: walk.sent ? .green : .plain,
+                        label: walk.sent ? "SENT" : "DISCARDED"
+                    ))
+                }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 8)
-            FieldTag(tag: TagFixture(
-                kind: walk.sent ? .green : .plain,
-                label: walk.sent ? "SENT" : "DISCARDED"
-            ))
+            .buttonStyle(.plain)
+
+            trailing
         }
-        .padding(.horizontal, Theme.S.screenPad)
+        .padding(.leading, Theme.S.screenPad)
+        .padding(.trailing, Theme.S.screenPad - 6)
         .padding(.vertical, 13)
         .opacity(walk.sent ? 1 : 0.55)
         .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
+    }
+}
+
+/// The filing affordance: a visible, tap-activated chip that also DISPLAYS the
+/// current filing.
+///
+/// Doing double duty is the point. A bare "FILE" button would say nothing about
+/// where a walk already sits, so the operator would have to open the menu to
+/// find out. Showing the job name instead means the common case — "which job is
+/// this under?" — is answered without any interaction at all.
+private struct FileChip: View {
+    let walk: AppModel.WalkRecord
+    let jobs: [JobModel]
+    let onFile: (String?) -> Void
+
+    private var filedJob: JobModel? { jobs.first { $0.id == walk.jobId } }
+
+    var body: some View {
+        Menu {
+            if jobs.isEmpty {
+                Text("No jobs yet — add one below")
+            } else {
+                ForEach(jobs) { job in
+                    Button {
+                        onFile(job.id)
+                    } label: {
+                        Label(job.name, systemImage:
+                            walk.jobId == job.id ? "checkmark" : "folder")
+                    }
+                }
+                if walk.jobId != nil {
+                    Divider()
+                    Button(role: .destructive) { onFile(nil) } label: {
+                        Label("Unfile", systemImage: "xmark")
+                    }
+                }
+            }
+        } label: {
+            if let filedJob {
+                Text(filedJob.name.uppercased())
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.orangeDeep)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 88, alignment: .trailing)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 8)
+                    .background(Theme.C.orangeTint)
+                    .contentShape(Rectangle())
+            } else {
+                // Unfiled reads as an invitation, not an error — most walks
+                // will sit unfiled for a while and that's fine.
+                Text("FILE")
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.C.ink35)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 2)
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                            .foregroundStyle(Theme.C.ink35)
+                    )
+                    .contentShape(Rectangle())
+            }
+        }
+        .accessibilityLabel(filedJob.map { "Filed under \($0.name). Change." } ?? "File this walk")
     }
 }

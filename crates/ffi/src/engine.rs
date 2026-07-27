@@ -66,6 +66,11 @@ pub enum EngineError {
     /// only (never an api key).
     #[error("schema error: {0}")]
     Schema(String),
+    /// A job operation failed — an empty name, an unknown status, a
+    /// missing/deleted id, a poisoned lock, or a store error. Recoverable —
+    /// surface, don't crash. Contains store/validation strings only.
+    #[error("job error: {0}")]
+    Job(String),
 }
 
 /// Config crossing the FFI boundary. `api_key` is an opaque `String` from the

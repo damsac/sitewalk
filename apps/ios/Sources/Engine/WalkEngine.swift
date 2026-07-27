@@ -127,6 +127,10 @@ enum WalkStatus {
 /// session (a built walk).
 struct WalkSummary: Identifiable, Equatable {
     var id: String
+    /// The job this walk is filed under; nil = unfiled. Multiple walks
+    /// per job is the common case — a property walked in March and again
+    /// in June.
+    var jobId: String?
     var docKind: String
     var status: WalkStatus
     var summary: String
@@ -273,6 +277,28 @@ protocol WalkEngine: AnyObject {
     func listDocumentSchemas(tradeKey: String?) throws -> [DocumentSchemaModel]
     func saveDocumentSchema(_ schema: DocumentSchemaModel) throws -> DocumentSchemaModel
     func removeDocumentSchema(id: String) throws
+
+    // Jobs — the board's organizing unit. Jobs have existed in murmur-core
+    // since v1 (`sessions.job_id` is a foreign key to them); nothing was ever
+    // exposed to the app, which is why the board is session-flat today.
+    //
+    // `create` takes only a name, deliberately: contractors name jobs however
+    // they think of them, and core REJECTS an empty name rather than coercing
+    // it to a placeholder (R6) — a job called "Untitled" looks deliberate and
+    // leaves the operator unable to tell which one it was meant to be.
+    //
+    // Returns the created/updated job so the board picks up core's minted id
+    // and timestamps in one round-trip (the saveDocumentSchema precedent).
+    /// File a walk under a job, or unfile it with nil.
+    ///
+    /// R4 ("no pre-labeling — the user corrects on the report"): this runs
+    /// AFTER the walk, never before it. Re-filing is normal rather than
+    /// exceptional — a walk misfiled months ago has to be movable.
+    func setSessionJob(sessionId: String, jobId: String?) throws
+
+    func listJobs() throws -> [JobModel]
+    func createJob(name: String) throws -> JobModel
+    func setJobStatus(id: String, status: JobStatusModel) throws -> JobModel
     func liveLivePhotoFilenames() throws -> [String]   // for the sweep
 
     /// App-open zombie sweep: a `Recording` session left behind by a crash or

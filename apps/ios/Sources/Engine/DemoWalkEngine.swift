@@ -480,4 +480,84 @@ final class DemoWalkEngine: WalkEngine {
     func removeDocumentSchema(id: String) {
         schemas.removeAll { $0.id == id }
     }
+
+    // MARK: Jobs — in-memory demo conformance.
+
+    /// Session -> job filings, the demo mirror of `sessions.job_id`.
+    private var sessionJobs: [String: String] = [:]
+
+    func setSessionJob(sessionId: String, jobId: String?) throws {
+        // Mirror core's rejection so the UI's error path is exercised without
+        // a backend: filing to a job that doesn't exist must fail loudly
+        // rather than silently losing the walk.
+        if let jobId {
+            guard jobs.contains(where: { $0.id == jobId }) else {
+                throw DemoEngineError.invalidInput("no such job")
+            }
+            sessionJobs[sessionId] = jobId
+        } else {
+            sessionJobs.removeValue(forKey: sessionId)
+        }
+    }
+
+    /// Demo-only read so the board can group its in-memory walks by job.
+    func demoJobId(forSession sessionId: String) -> String? {
+        sessionJobs[sessionId]
+    }
+
+    /// Seeded so the board has something to show in a clean checkout. Names
+    /// deliberately span the three ways contractors actually name work — a
+    /// place, a customer, an address — which is the argument for a single
+    /// free-text name field rather than structured client/site inputs.
+    private var jobs: [JobModel] = [
+        JobModel(id: "job-1", name: "Alder Court Lawn", client: nil, site: nil,
+                 scheduledAt: nil, status: .active, createdAt: 3, updatedAt: 3),
+        JobModel(id: "job-2", name: "The Hendersons", client: nil, site: nil,
+                 scheduledAt: nil, status: .active, createdAt: 2, updatedAt: 2),
+        JobModel(id: "job-3", name: "412 Maple — retaining wall", client: nil, site: nil,
+                 scheduledAt: nil, status: .done, createdAt: 1, updatedAt: 1),
+    ]
+    private var nextJobOrdinal = 4
+
+    func listJobs() -> [JobModel] {
+        // Newest first, matching the core query's ordering.
+        jobs.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func createJob(name: String) throws -> JobModel {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Mirror core's rejection rather than silently accepting: the demo
+        // engine exists to exercise the SAME error paths the editor will hit.
+        guard !trimmed.isEmpty else {
+            throw DemoEngineError.invalidInput("job name is empty")
+        }
+        let job = JobModel(
+            id: "job-\(nextJobOrdinal)", name: trimmed, client: nil, site: nil,
+            scheduledAt: nil, status: .active,
+            createdAt: UInt64(nextJobOrdinal), updatedAt: UInt64(nextJobOrdinal)
+        )
+        nextJobOrdinal += 1
+        jobs.append(job)
+        return job
+    }
+
+    @discardableResult
+    func setJobStatus(id: String, status: JobStatusModel) throws -> JobModel {
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else {
+            throw DemoEngineError.invalidInput("no such job")
+        }
+        jobs[index].status = status
+        return jobs[index]
+    }
+}
+
+/// Errors the demo engine raises so the UI's error paths are exercised without
+/// a backend. The real engine surfaces `EngineError` from Rust.
+enum DemoEngineError: LocalizedError {
+    case invalidInput(String)
+    var errorDescription: String? {
+        switch self {
+        case .invalidInput(let message): return message
+        }
+    }
 }
