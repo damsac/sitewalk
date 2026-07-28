@@ -175,6 +175,22 @@ The sequencing is deliberate, and the reasoning is worth keeping: **a spend cap 
 
 ---
 
+## 5b. Jobs — added 07-26/27, after the doc was written
+
+Jobs weren't in the original plan. They came out of a direct ask ("organize the home page by job") and turned out to be mostly a **surfacing** problem: `Job` (name / client / site / scheduled_at / `JobStatus` of Active|Done|Archived) and `sessions.job_id` have existed in core since v1. Nothing was ever exposed to the app, which is the only reason the board was session-flat.
+
+**5b.1 Jobs organize walks, and the job card is a RETRIEVAL surface.** The stated use case is not document generation — it's "a property gets walked in March and again in June, then an email arrives months later asking what happened." Multiple walks per job is the common case, and findability is the value.
+
+**5b.2 Documents are NOT stored; notes are the durable record.** Decided against persisting rendered PDFs. Notes are the source of truth (which matches the notes-first CANON of 2026-07-10), and a document is regenerated on demand. The correctness worry — "regenerating after an edit produces something different from what the customer received" — is largely already handled: `mint_document_number_and_add_artifact` persists the full document payload as an artifact at build time, so the *data* of every document ever built is frozen with its number. Only branding could drift. **If a job card ever lists past documents, it must render from that stored artifact, not re-derive from current notes** — and viewing must not re-mint, since `buildDocument` burns a fresh number per call by design (D7).
+
+**5b.3 Walk-first, because R4 already said so.** R4: *"No pre-labeling. Users won't label a session before recording. The agent infers the project/context from content; the user corrects on the report."* START WALK stays instant and unblocked; filing happens after, on the notes screen — which is literally "the report."
+
+**5b.4 Auto-filing is a local string match, not a model call.** Job names are on the device and the transcript is in hand, so matching them needs no LLM: no token cost, no latency, no hallucinated job. It **auto-files** (as asked) but always says so on the notes screen, because silent auto-filing is indistinguishable from a bug the first time it guesses wrong. It declines rather than guesses — whole-name hits only, unique matches only, nothing under 4 characters, never overwrites a deliberate choice. A walk buried under the *wrong* job is worse than an unfiled one, because nobody goes looking for it there. Issue #265 remains open for the harder case: inferring a job that doesn't exist yet.
+
+**5b.5 Two bugs worth remembering, both found only by real use.** Neither was reachable by building or by on-sim rendering, because both need a *second* action after the first paint:
+- `hydrateWalkLog` was latched off for the life of the process (`isHydratingWalkLog` set once, never cleared), so filing wrote to core and the board never re-read it.
+- A walk only entered the log via `completeSend()`, so finishing without building a document left it invisible — and once fixed, it then rendered as "DISCARDED", because that label was a two-state guess off `hasDocument` and nothing records a discard.
+
 ## 6. Phasing
 
 Ordered so nothing is blocked on dam's return, and so the launch blocker clears early. Steps 1–3 are the cost levers and must run in this order — §2.2 explains why the meter has to be able to see cache tokens before caching is switched on.
