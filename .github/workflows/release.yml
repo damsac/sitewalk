@@ -254,6 +254,8 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           PPQ_API_KEY: ${{ secrets.PPQ_API_KEY }}
+          JEFE_PROXY_URL: ${{ vars.JEFE_PROXY_URL }}
+          JEFE_APP_SECRET: ${{ secrets.JEFE_APP_SECRET }}
           MARKETING_VERSION_OVERRIDE: ${{ steps.version.outputs.marketing_version }}
         run: |
           if [ -z "$APPLE_TEAM_ID" ]; then
@@ -273,6 +275,21 @@ jobs:
             "DEVELOPMENT_TEAM=$APPLE_TEAM_ID"
             "CURRENT_PROJECT_VERSION=${{ github.run_number }}"
             "PPQ_API_KEY=$PPQ_API_KEY"
+            # The proxy (services/proxy). When BOTH are non-empty the app
+            # routes through it and NO Anthropic key is present in the build —
+            # which is the point: a key in Info.plist is extractable from any
+            # downloaded IPA (EngineResolution.swift resolveCredential()).
+            #
+            # SAFE WHEN UNSET: absent secrets expand to empty strings, the app
+            # falls through to the direct-key path, and the build behaves
+            # exactly as it does today. So this can land before the secrets
+            # exist without changing a single shipped build.
+            #
+            # JEFE_PROXY_URL is a plain var (a URL is not a secret); the app
+            # secret is a repo secret. Both must be set together — a URL
+            # without the secret is rejected by the proxy on every call.
+            "JEFE_PROXY_URL=$JEFE_PROXY_URL"
+            "JEFE_APP_SECRET=$JEFE_APP_SECRET"
             # NO ANTHROPIC_BASE_URL override: the key in the PPQ_API_KEY secret
             # is a direct Anthropic key (sk-ant-…), verified live against
             # api.anthropic.com and REJECTED (401) by api.ppq.ai. Builds #24–#32
