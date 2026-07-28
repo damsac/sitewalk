@@ -443,12 +443,14 @@ struct NotesView: View {
             if let fileError {
                 Text(fileError)
                     .font(Theme.F.mono(8.5)).foregroundStyle(Theme.C.redTag)
-            } else if let auto = model.autoFiledJobName, filedJob?.name == auto {
+            } else if let auto = model.autoFiled,
+                      auto.sessionId == model.currentSessionId,
+                      filedJob?.name == auto.jobName {
                 // Say it out loud. Auto-filing that happens silently is
                 // indistinguishable from a bug the first time it guesses
                 // wrong — and the operator needs to know a choice was made
                 // on their behalf so they can correct it.
-                Text("HEARD “\(auto.uppercased())” IN THE WALK — FILED THERE. TAP TO CHANGE.")
+                Text("HEARD “\(auto.jobName.uppercased())” IN THE WALK — FILED THERE. TAP TO CHANGE.")
                     .font(Theme.F.mono(8)).tracking(0.4)
                     .foregroundStyle(Theme.C.orangeDeep)
                     .fixedSize(horizontal: false, vertical: true)
