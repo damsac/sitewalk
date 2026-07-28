@@ -63,6 +63,29 @@ final class AppModel {
         let sessionId: String
         /// Mirror of `NotesModel.queued` for the reopened-notes gating banner.
         let queued: Bool
+        /// What actually happened to this walk, for the board label.
+        ///
+        /// `sent` alone was a two-state guess derived from `hasDocument`, so a
+        /// walk that was finished but never turned into a document rendered as
+        /// "DISCARDED" at 55% opacity — actively alarming, and wrong: NOTHING
+        /// in WalkSummary records a discard. Now that a finished walk enters
+        /// the log immediately (it used to appear only on send), that mislabel
+        /// would have been the first thing an operator saw after every walk.
+        enum Disposition {
+            /// Processing hasn't finished — notes aren't readable yet.
+            case saving
+            /// Notes are saved. No document was built, which is a perfectly
+            /// ordinary end state, not a failure.
+            case saved
+            /// A document exists for this walk.
+            case documented
+        }
+
+        var disposition: Disposition {
+            if queued { return .saving }
+            return sent ? .documented : .saved
+        }
+
         /// The job this walk is filed under; nil = unfiled. Set AFTER the walk
         /// (R4: no pre-labeling), and re-settable — a walk filed to the wrong
         /// job months ago has to be movable.

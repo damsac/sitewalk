@@ -628,10 +628,7 @@ private struct WalkLogRow<Trailing: View>: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
-                    FieldTag(tag: TagFixture(
-                        kind: walk.sent ? .green : .plain,
-                        label: walk.sent ? "SENT" : "DISCARDED"
-                    ))
+                    FieldTag(tag: walkTag(walk))
                 }
                 .contentShape(Rectangle())
             }
@@ -642,8 +639,20 @@ private struct WalkLogRow<Trailing: View>: View {
         .padding(.leading, Theme.S.screenPad)
         .padding(.trailing, Theme.S.screenPad - 6)
         .padding(.vertical, 13)
-        .opacity(walk.sent ? 1 : 0.55)
+        // No dimming. A walk with no document is a normal, complete walk —
+        // fading it implied "lesser" or "dead" and made a saved walk look lost.
         .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
+    }
+}
+
+/// Honest disposition label. "DISCARDED" is deliberately gone: nothing in
+/// WalkSummary records a discard, so it was always a guess — and the guess was
+/// wrong for the common case of finishing a walk without building a document.
+private func walkTag(_ walk: AppModel.WalkRecord) -> TagFixture {
+    switch walk.disposition {
+    case .saving:     return TagFixture(kind: .yellow, label: "SAVING")
+    case .saved:      return TagFixture(kind: .plain, label: "NOTES SAVED")
+    case .documented: return TagFixture(kind: .green, label: "SENT")
     }
 }
 
