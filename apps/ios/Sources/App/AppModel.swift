@@ -692,12 +692,20 @@ final class AppModel {
             return
         }
         try? setWalkJob(sessionId: sessionId, jobId: match.id)
-        autoFiledJobName = match.name
+        autoFiled = (sessionId: sessionId, jobName: match.name)
     }
 
-    /// Set when the last finish auto-filed, so the notes screen can say so
-    /// rather than silently changing state under the operator.
-    var autoFiledJobName: String?
+    /// Set when a finish auto-filed, so the notes screen can say so rather
+    /// than silently changing state under the operator.
+    ///
+    /// SESSION-SCOPED, not a bare name. A bare name never went stale on its
+    /// own and the view's "does it match the current filing?" check let a
+    /// false positive through: auto-file walk A to a job, then MANUALLY file
+    /// walk B to that same job, and the notes screen would claim it heard the
+    /// name in walk B. Claiming to have heard something we didn't is exactly
+    /// the failure this message exists to prevent, so the id is carried and
+    /// compared instead of hoping a reset fires everywhere.
+    var autoFiled: (sessionId: String, jobName: String)?
 
     private func activeJobsForMatching() -> [JobModel] {
         ((try? engine.listJobs()) ?? []).filter { $0.status == .active }
