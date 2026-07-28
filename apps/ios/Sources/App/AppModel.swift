@@ -86,14 +86,22 @@ final class AppModel {
             return sent ? .documented : .saved
         }
 
+        /// Raw start time. Kept alongside the formatted `time` because the
+        /// TODAY list wants a clock ("9:41") while a job card spanning months
+        /// needs a date — and "9:41" on a walk from March is useless for the
+        /// case jobs exist to serve.
+        let startedAt: UInt64
+
         /// The job this walk is filed under; nil = unfiled. Set AFTER the walk
         /// (R4: no pre-labeling), and re-settable — a walk filed to the wrong
         /// job months ago has to be movable.
         var jobId: String?
 
         init(time: String, docNo: String, docKind: String, sent: Bool,
-             sessionId: String, queued: Bool, jobId: String? = nil) {
+             sessionId: String, queued: Bool, jobId: String? = nil,
+             startedAt: UInt64 = 0) {
             self.jobId = jobId
+            self.startedAt = startedAt
             self.time = time
             self.docNo = docNo
             self.docKind = docKind
@@ -116,6 +124,7 @@ final class AppModel {
             self.sessionId = summary.id
             self.queued = summary.queued
             self.jobId = summary.jobId
+            self.startedAt = summary.startedAt
         }
     }
     private(set) var sessionWalks: [WalkRecord] = []
@@ -1087,6 +1096,26 @@ final class AppModel {
     /// path's counterpart of `clockNow()` (Plan 20 F7 mapping). `nonisolated`:
     /// pure value formatting, callable from `WalkRecord.init` (a nonisolated
     /// struct initializer).
+    /// Date-aware label for a walk in a job card, where the list can span
+    /// months. Today collapses to a clock time (a date would be noise for
+    /// something that just happened); this year drops the year; anything older
+    /// carries it.
+    nonisolated static func walkDateLabel(epochSeconds: UInt64, now: Date = Date()) -> String {
+        guard epochSeconds > 0 else { return "" }
+        let date = Date(timeIntervalSince1970: TimeInterval(epochSeconds))
+        let cal = Calendar.current
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        if cal.isDate(date, inSameDayAs: now) {
+            formatter.dateFormat = "h:mm a"
+        } else if cal.component(.year, from: date) == cal.component(.year, from: now) {
+            formatter.dateFormat = "MMM d"
+        } else {
+            formatter.dateFormat = "MMM d yyyy"
+        }
+        return formatter.string(from: date).uppercased()
+    }
+
     fileprivate nonisolated static func clockTime(epochSeconds: UInt64) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

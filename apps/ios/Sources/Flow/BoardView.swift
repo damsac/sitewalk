@@ -410,7 +410,7 @@ private struct OperatorJobCard: View {
                         Rectangle()
                             .fill(Theme.C.hairline)
                             .frame(width: 1, height: 13)
-                        Text(walk.time)
+                        Text(AppModel.walkDateLabel(epochSeconds: walk.startedAt))
                             .font(Theme.F.mono(9.5))
                             .foregroundStyle(Theme.C.ink60)
                         Text(walk.docKind)

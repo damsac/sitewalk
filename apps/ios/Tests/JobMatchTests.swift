@@ -71,3 +71,74 @@ final class JobMatchTests: XCTestCase {
         XCTAssertNil(AppModel.jobMatching(transcript: transcript, jobs: jobs))
     }
 }
+
+/// Gates on `AppModel.walkDateLabel` — the job-card timestamp.
+///
+/// Jobs exist so an operator can answer "what happened here?" months later, so
+/// a walk from March showing a bare "9:41" defeats the feature. These pin the
+/// three branches and the boundaries between them.
+final class WalkDateLabelTests: XCTestCase {
+    private func epoch(_ iso: String) -> UInt64 {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return UInt64(f.date(from: iso)!.timeIntervalSince1970)
+    }
+    private func date(_ iso: String) -> Date {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: iso)!
+    }
+
+    func testTodayShowsAClockTime() {
+        // A date on something that happened an hour ago is noise.
+        let label = AppModel.walkDateLabel(
+            epochSeconds: epoch("2026-07-27T09:41:00Z"),
+            now: date("2026-07-27T18:00:00Z")
+        )
+        XCTAssertTrue(label.contains(":"), "expected a clock time, got \(label)")
+    }
+
+    func testEarlierThisYearShowsMonthAndDayWithoutYear() {
+        let label = AppModel.walkDateLabel(
+            epochSeconds: epoch("2026-03-14T09:41:00Z"),
+            now: date("2026-07-27T18:00:00Z")
+        )
+        XCTAssertTrue(label.contains("MAR"), "expected a month, got \(label)")
+        XCTAssertFalse(label.contains("2026"), "same year shouldn't repeat the year: \(label)")
+    }
+
+    func testPriorYearCarriesTheYear() {
+        // The "email months later" case — without a year this is ambiguous.
+        let label = AppModel.walkDateLabel(
+            epochSeconds: epoch("2025-11-02T09:41:00Z"),
+            now: date("2026-07-27T18:00:00Z")
+        )
+        XCTAssertTrue(label.contains("2025"), "expected the year, got \(label)")
+    }
+
+    func testYesterdayIsNotTreatedAsToday() {
+        // Guards the same-day check against being a naive 24-hour window.
+        //
+        // Built through Calendar rather than fixed UTC instants: the label uses
+        // `isDate(_:inSameDayAs:)`, which is LOCAL-time based, so a UTC pair
+        // straddling midnight-Z can still be the same local day. An earlier
+        // version of this test asserted exactly that and failed against
+        // correct code.
+        let cal = Calendar.current
+        let now = date("2026-07-27T18:00:00Z")
+        let yesterdayEvening = cal.date(byAdding: .hour, value: -6, to: cal.startOfDay(for: now))!
+        let label = AppModel.walkDateLabel(
+            epochSeconds: UInt64(yesterdayEvening.timeIntervalSince1970),
+            now: now
+        )
+        XCTAssertFalse(
+            label.contains(":"),
+            "yesterday must render as a date, not a clock time — got \(label)"
+        )
+    }
+
+    func testMissingTimestampRendersEmptyNotEpochZero() {
+        // Legacy/demo rows carry 0; "JAN 1 1970" would be worse than nothing.
+        XCTAssertEqual(AppModel.walkDateLabel(epochSeconds: 0), "")
+    }
+}
