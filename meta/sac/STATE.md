@@ -6,9 +6,93 @@ What sac is working on right now. Updated with every PR.
 
 ## Headline for dam (what needs you)
 
-*(freshened 2026-07-23.)*
+*(freshened 2026-07-27.)*
 
-### 0. WE'RE LIVE — first external beta out; two field fixes just merged
+### 0. TWO ISSUES ARE WAITING ON YOU — #263 and #265
+
+**#263 — `ContentBlock` has no image/document variant, so the harness cannot
+send a PDF to the model at all.** This is the ONLY thing blocking
+"upload your own template". Everything app-side for it is built and merged: the
+Document Builder (#260) doubles as the confirm-once screen, so inference just
+needs to hand it a draft schema. Proposed additive `Image`/`Document` variants
+in the issue — your call on shape, and happy to implement if you'd rather review
+a diff than write one.
+
+**#265 — inferring a job from the walk (R4's other half).** Not blocking. R4
+says "the agent infers the project/context from content; the user corrects on
+the report" — we now have the correction half. Local string matching against
+EXISTING job names already ships (no model call, deterministic); the open part
+is suggesting a job that doesn't exist yet.
+
+### 0b. What landed 2026-07-25..27 (a lot — skim the headers)
+
+**App Store readiness**
+- **Proxy is LIVE** (`services/proxy/`, Cloudflare Worker,
+  `https://jefe-proxy.damsac-app.workers.dev`). Holds the real `sk-ant-` key,
+  meters spend per install from the response's own usage, refuses BEFORE
+  forwarding once a daily cap is hit ($25 global / $2 per install). Verified
+  end-to-end: real call round-tripped, bad credential 401s, misconfiguration
+  fails CLOSED, counters matched a hand calculation exactly.
+- **App routes through it** (#262) with NO core or FFI change — the provider
+  already sent `config.api_key` as both headers and `EngineConfig` already
+  carried `base_url`, so the install credential rides that field and the proxy
+  swaps it. Keychain-backed install id (survives reinstall; `UserDefaults`
+  would have made the free-tier allowance a one-tap reset).
+- **CI now passes the proxy settings** (#270) — safe with the secrets unset
+  (empty -> falls through to the direct key, no behavior change). Until Isaac
+  sets `JEFE_PROXY_URL` + `JEFE_APP_SECRET`, every shipped build still uses the
+  baked key.
+- ⚠️ **App Attest (Phase 2) is REQUIRED before the listing goes public.** Phase
+  1 authenticates with a secret extractable from any IPA; the spend cap is what
+  actually bounds the loss. `authenticate()` in `src/auth.ts` is the seam.
+
+**Cost (your domain — numbers, not vibes)**
+- **Migration v8** (#255): `llm_usage` gains the two prompt-cache token
+  columns, `Usage` gains the fields plus `total_input_tokens()`. Had to land
+  BEFORE caching or R9 would have reported a huge saving that never happened —
+  the API moves most of the prompt into the cache fields and collapses
+  `input_tokens` to the remainder.
+- **Prompt caching** (#259): opt-in per request, set ONLY by `Agent::run`,
+  because that's the one place a byte-identical `system` + `tools` prefix gets
+  re-sent. Modeled ~70% off the processing-extraction leg (a long walk ~$0.43
+  -> ~$0.25). Single-shot calls stay off — a cache write bills ~1.25x and
+  they'd never read it back.
+- **Two things worth knowing**: live extraction sends a SLIDING WINDOW, not a
+  growing transcript, and its prefix is under Haiku's 4096-token cache
+  minimum — caching there is a silent no-op, not a win. And `summarize` carries
+  the same transcript the extraction agent just cached but CANNOT read that
+  cache: different system prompt and tool set, and tools render at position 0.
+  Sharing it means reshaping the two-phase split — your call, left alone.
+- **Sonnet 5 was evaluated and parked.** Its intro pricing expires 2026-08-31,
+  so the durable gain is zero, and adaptive thinking is ON by default there —
+  thinking bills at output rates and can exceed the caching win outright.
+
+**Product**
+- **Document Builder** (#260) — authors `DocumentSchema`s on your #244 seam.
+  Also the confirm-once screen for upload. Note it exposed a dead end: the
+  notes screen's document buttons came from a HARDCODED per-trade switch that
+  predates the seam, so an authored doc type could never be used. Now reads
+  live schemas (#266).
+- **Jobs** (#264) — turned out to be a pure SURFACING job: `Job` and
+  `sessions.job_id` have existed in core since v1 and were simply never on the
+  FFI. Added `list_jobs`/`create_job`/`set_job_status` + `set_session_job`, and
+  `WalkSummary` now carries the `job_id` it always had core-side.
+- **Walk filing** (#268, #272, #273) — walks file under jobs, auto-file when
+  the operator says the site name (local string match, no model call), and job
+  cards date their walks.
+
+**Two bugs real use found that building and on-sim rendering structurally
+could not** — both need a SECOND action after the first paint:
+- `hydrateWalkLog` was latched off for the life of the process
+  (`isHydratingWalkLog` set once, never cleared), so filing wrote to core and
+  the board never re-read it. Split into a latched auto path and an explicit
+  `refreshWalkLog()`.
+- A walk entered the log only via `completeSend()`, so finishing without
+  building a document left it invisible — and once fixed it rendered
+  "DISCARDED", because that label was a two-state guess off `hasDocument` and
+  nothing records a discard.
+
+### 0c. Previously (2026-07-23) — first external beta out
 
 **Build 2.0.0 (54) is APPROVED on external TestFlight** (Isaac promoted it to the
 "Jefe Beta" external group; public link + getjefe.netlify.app site are live).
