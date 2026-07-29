@@ -106,7 +106,7 @@ struct OnboardingFlow: View {
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
-            SectionLabel("TALK YOUR WALK", color: Theme.C.orangeDeep)
+            SectionLabel("TALK YOUR WALK", color: Theme.C.amberInk)
             Text("Say it out loud.\nGet the paperwork.")
                 .font(Theme.F.ui(30, .bold))
                 .lineSpacing(2)
@@ -150,7 +150,7 @@ struct OnboardingFlow: View {
         @ViewBuilder preview: () -> Preview
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel(kick, color: Theme.C.orangeDeep).padding(.top, 20)
+            SectionLabel(kick, color: Theme.C.amberInk).padding(.top, 20)
             Text(title).font(Theme.F.ui(28, .bold)).padding(.top, 6)
             Text(lede)
                 .font(Theme.F.serif(15)).foregroundStyle(Theme.C.ink60)
@@ -183,7 +183,7 @@ struct OnboardingFlow: View {
                 Text("Alder Court Lawn").font(Theme.F.serif(13, .bold))
                 Spacer()
                 Text("ESTIMATE").font(Theme.F.mono(7, .semibold)).tracking(1.4)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
             }
             miniRow("Bark mulch — front beds", right: "$285")
             sendStamp
@@ -194,7 +194,7 @@ struct OnboardingFlow: View {
             HStack(spacing: 7) {
                 Circle().fill(Theme.C.orangeDeep).frame(width: 7, height: 7)
                 Text("LISTENING · 0:14").font(Theme.F.mono(8.5, .semibold)).tracking(1.2)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
             }
             miniRow("Mulch — front beds", sub: "JUST HEARD")
             miniRow("Trim the boxwoods", sub: "JUST HEARD")
@@ -213,7 +213,7 @@ struct OnboardingFlow: View {
                 Text("Alder Court Lawn").font(Theme.F.serif(13, .bold))
                 Spacer()
                 Text("EST-0047").font(Theme.F.mono(7, .semibold)).tracking(1.0)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
             }
             miniRow("Bark mulch — front beds", right: "$285")
             miniRow("TOTAL", right: "$680")
@@ -248,7 +248,7 @@ struct OnboardingFlow: View {
             }
             Spacer(minLength: 6)
             if let right {
-                Text(right).font(Theme.F.mono(11, .semibold)).foregroundStyle(Theme.C.orangeDeep)
+                Text(right).font(Theme.F.mono(11, .semibold)).foregroundStyle(Theme.C.amberInk)
             }
         }
         .padding(9)
@@ -268,7 +268,7 @@ struct OnboardingFlow: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    SectionLabel("YOUR BUSINESS", color: Theme.C.orangeDeep)
+                    SectionLabel("YOUR BUSINESS", color: Theme.C.amberInk)
                     Text("The name on the paperwork")
                         .font(Theme.F.ui(23, .bold))
                         .padding(.top, 6)
@@ -362,7 +362,7 @@ struct OnboardingFlow: View {
                 Text(stamp)
                     .font(Theme.F.mono(8, .semibold))
                     .tracking(1.0)
-                    .foregroundStyle(selected ? Theme.C.orangeDeep : Theme.C.ink60)
+                    .foregroundStyle(selected ? Theme.C.amberInk : Theme.C.ink60)
                     .padding(.horizontal, 6)
                     .padding(.top, 3)
                     .padding(.bottom, 2)
@@ -382,7 +382,7 @@ struct OnboardingFlow: View {
 
     private var mic: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel("MIC CHECK", color: Theme.C.orangeDeep)
+            SectionLabel("MIC CHECK", color: Theme.C.amberInk)
                 .padding(.top, 18)
             // The heading itself confirms the grant — no jarring banner.
             Text(micState == .granted ? "You’re ready to walk." : "Let Jefe hear your walk.")
@@ -443,7 +443,7 @@ struct OnboardingFlow: View {
                 Button { onComplete(true) } label: {
                     Text("New to this?  Try a practice walk first ›")
                         .font(Theme.F.cond(14, .semibold))
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                         .frame(maxWidth: .infinity)
                         .padding(.bottom, 14)
                         .contentShape(Rectangle())
@@ -460,7 +460,7 @@ struct OnboardingFlow: View {
         HStack(spacing: 14) {
             Text(index)
                 .font(Theme.F.mono(10, .semibold))
-                .foregroundStyle(Theme.C.orangeDeep)
+                .foregroundStyle(Theme.C.amberInk)
             Text(label)
                 .font(Theme.F.mono(11, .semibold))
                 .tracking(1.6)

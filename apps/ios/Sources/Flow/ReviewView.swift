@@ -29,7 +29,7 @@ struct ReviewView: View {
             Text(model.reviewKind.map { DocKinds.label(for: $0).uppercased() } ?? "REVIEW")
                 .font(Theme.F.mono(9, .semibold))
                 .tracking(2.0)
-                .foregroundStyle(Theme.C.orangeDeep)
+                .foregroundStyle(Theme.C.amberInk)
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 12)
@@ -186,7 +186,7 @@ struct ReviewView: View {
                     Text("+ ADD")
                         .font(Theme.F.mono(9, .semibold))
                         .tracking(1.2)
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .overlay(
@@ -272,7 +272,7 @@ struct ReviewView: View {
                     // pinned to a spoken item during the walk
                     Image(systemName: "link")
                         .font(.system(size: 6, weight: .bold))
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                 }
             }
         }

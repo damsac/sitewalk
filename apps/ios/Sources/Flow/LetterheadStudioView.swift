@@ -100,7 +100,7 @@ struct LetterheadStudioView: View {
             Spacer()
             Text("LETTERHEAD")
                 .font(Theme.F.mono(9, .semibold)).tracking(2.0)
-                .foregroundStyle(Theme.C.orangeDeep)
+                .foregroundStyle(Theme.C.amberInk)
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 16)

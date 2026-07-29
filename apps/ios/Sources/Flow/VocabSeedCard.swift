@@ -26,7 +26,7 @@ struct VocabSeedCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel("TEACH THE MIC", color: Theme.C.orangeDeep)
+            SectionLabel("TEACH THE MIC", color: Theme.C.amberInk)
                 .padding(.top, 18)
             Text("Words your trade actually says")
                 .font(Theme.F.ui(22, .bold))

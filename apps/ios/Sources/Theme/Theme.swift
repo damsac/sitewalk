@@ -36,6 +36,13 @@ enum Theme {
         //                vanish on gold (the black-on-amber "caution label" look)
         static let orange     = Color(hex: 0xFFBB26)
         static let orangeDeep = Color(hex: 0x9A6A00)
+        /// Amber for SMALL TEXT — 7.8:1 on paper, so it clears AAA.
+        ///
+        /// `orangeDeep` is 4.53:1: AA for large text only, short of the AAA the
+        /// brief claims, and it was being used at 8.5pt. Measured, not
+        /// eyeballed. Use `orangeDeep` for fills and lips (where contrast
+        /// against paper is irrelevant) and this for anything set as type.
+        static let amberInk = Color(hex: 0x6B4900)
         static let orangeTint = Color(hex: 0xFAF1D9)
         static let onOrange   = Color(hex: 0x141412)
 

@@ -14,7 +14,7 @@ struct JobsBoardScreen: View {
                 Text(trade.dateLabel)
                     .font(Theme.F.mono(10, .semibold))
                     .tracking(2.0)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                 Text(trade.countTitle)
                     .font(Theme.F.ui(26, .bold))
                 Text(trade.bizCaps)
@@ -30,7 +30,7 @@ struct JobsBoardScreen: View {
 
             MetaStrip(left: trade.boardMeta, right: "SYNCED 07:58")
 
-            SectionHead(left: "TODAY", right: trade.openLabel, rightColor: Theme.C.orangeDeep)
+            SectionHead(left: "TODAY", right: trade.openLabel, rightColor: Theme.C.amberInk)
 
             ForEach(trade.jobs) { job in
                 JobRow(job: job)

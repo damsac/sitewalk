@@ -38,7 +38,7 @@ struct VocabularyView: View {
             // Header (dropped when embedded — the My Business sheet supplies one)
             if !embedded {
                 VStack(alignment: .leading, spacing: 4) {
-                    SectionLabel("FIELD VOCABULARY", color: Theme.C.orangeDeep)
+                    SectionLabel("FIELD VOCABULARY", color: Theme.C.amberInk)
                     Text("Teach the mic your jargon")
                         .font(Theme.F.ui(22, .bold))
                     Text("NAMES, PLANTS, PART NUMBERS — WALKS HEAR THEM BETTER")

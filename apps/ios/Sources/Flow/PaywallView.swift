@@ -157,7 +157,7 @@ struct PaywallView: View {
             }
             .font(Theme.F.mono(9, .semibold))
             .tracking(0.8)
-            .foregroundStyle(Theme.C.orangeDeep)
+            .foregroundStyle(Theme.C.amberInk)
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 24)

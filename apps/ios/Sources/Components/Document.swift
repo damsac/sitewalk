@@ -82,7 +82,7 @@ struct DocRowView: View {
                     Text(hint)
                         .font(Theme.F.mono(8))
                         .tracking(0.3)
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -103,7 +103,7 @@ struct DocRowView: View {
             HStack(spacing: 1) {
                 Text(row.amount)
                     .font(Theme.F.mono(12, .semibold))
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                 Caret()
             }
             .padding(.bottom, 2)
