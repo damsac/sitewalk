@@ -38,7 +38,8 @@ struct JobsBoardScreen: View {
 
             Spacer(minLength: 0)
 
-            WalkButton()
+            Button {} label: { BlockLabel("START WALK") }
+                .buttonStyle(.primaryBlock)
                 .padding(.horizontal, Theme.S.screenPad)
                 .padding(.bottom, 10)
         }

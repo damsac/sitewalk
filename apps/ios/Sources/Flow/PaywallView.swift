@@ -188,29 +188,28 @@ struct PaywallView: View {
             Button {
                 Task { await entitlement.purchase() }
             } label: {
-                WalkButton(title: entitlement.isWorking ? "…" : "GET JEFE PRO")
+                BlockLabel(entitlement.isWorking ? "…" : "GET JEFE PRO")
             }
-            .buttonStyle(.plain)
             // No product means no purchase is possible; a live button would
-            // just fail silently.
+            // just fail silently. `.disabled` now carries the whole visual —
+            // the style drops the lip and goes flat, so the control reads as
+            // physically unpressable instead of merely faded.
+            .buttonStyle(.primaryBlock)
             .disabled(entitlement.isWorking || entitlement.proProduct == nil)
-            .opacity(entitlement.proProduct == nil ? 0.4 : 1)
 
             // Restore is not optional garnish: Apple requires the path, and
             // with no accounts it is the ONLY way an operator recovers a
             // subscription on a new phone.
+            // Tier 3: a real 44pt target. Apple requires this path to exist,
+            // so it must not be 9pt text with no bounds.
             Button {
                 Task { await entitlement.restore() }
             } label: {
-                Text("RESTORE PURCHASE")
-                    .font(Theme.F.mono(9.5, .semibold))
-                    .tracking(1.0)
-                    .foregroundStyle(Theme.C.ink60)
+                Text("Restore purchase")
+                    .font(Theme.F.ui(13, .semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.wellChip)
             .disabled(entitlement.isWorking)
         }
         .padding(.horizontal, Theme.S.screenPad)
