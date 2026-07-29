@@ -19,6 +19,11 @@ struct BoardView: View {
     @State private var jobsError: String?
     @State private var showNewJob = false
     @State private var newJobName = ""
+    /// TODAY collapses so JOBS clears the fold. Expanding shows the rest.
+    @State private var showAllWalks = false
+    /// Enough to see today's work at a glance without pushing jobs off
+    /// screen — the complaint that prompted this.
+    private static let collapsedWalkCount = 3
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,7 +130,14 @@ struct BoardView: View {
                 .padding(.bottom, 10)
             }
 
-            if model.profile != nil {
+            // The board had NO ScrollView: a plain VStack that simply ran out
+            // of room, which is why jobs ended up crammed against the bottom
+            // (Isaac). Header and START WALK stay pinned — the button is the
+            // one control that must never require scrolling to reach — and
+            // everything between them scrolls.
+            ScrollView {
+              VStack(spacing: 0) {
+                if model.profile != nil {
                 // Operator mode: no fixture crew/sync strip, no fixture jobs.
                 // The board logs the walks actually finished this session.
                 SectionHead(
@@ -155,7 +167,7 @@ struct BoardView: View {
                     // Plan 20 D5: rows are tappable — reopen the walk's notes.
                     // // sac: the reopen affordance visuals (chevron? row
                     // // sac: press state?) + the reopened banner are yours.
-                    ForEach(model.sessionWalks) { walk in
+                    ForEach(visibleWalks) { walk in
                         WalkLogRow(walk: walk) {
                             model.reopenWalk(sessionId: walk.sessionId)
                         } trailing: {
@@ -164,6 +176,25 @@ struct BoardView: View {
                             }
                         }
                     }
+                    if model.sessionWalks.count > Self.collapsedWalkCount {
+                        Button { showAllWalks.toggle() } label: {
+                            Text(showAllWalks
+                                 ? "SHOW LESS"
+                                 : "SHOW ALL \(model.sessionWalks.count) WALKS")
+                                .font(Theme.F.mono(8.5, .semibold))
+                                .tracking(1.0)
+                                .foregroundStyle(Theme.C.orangeDeep)
+                                .padding(.horizontal, Theme.S.screenPad)
+                                .padding(.vertical, 9)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
+                        }
+                    }
+
                     if let reopenError = model.reopenError {
                         // F4 floor: the breadcrumb surfaces; chrome is sac's.
                         Text(reopenError.uppercased())
@@ -194,7 +225,9 @@ struct BoardView: View {
                 }
             }
 
-            Spacer(minLength: 0)
+              }
+            }
+            .scrollBounceBehavior(.basedOnSize)
 
             // First-run coach mark: point a brand-new operator at the one thing
             // to do. Only on a fresh board (profile set, no walks yet); the
@@ -328,6 +361,13 @@ extension BoardView {
     }
 
     var activeJobs: [JobModel] { operatorJobs.filter { $0.status == .active } }
+
+    /// Today's walks, capped until expanded.
+    var visibleWalks: [AppModel.WalkRecord] {
+        showAllWalks
+            ? model.sessionWalks
+            : Array(model.sessionWalks.prefix(Self.collapsedWalkCount))
+    }
 
     func loadJobs() {
         do {

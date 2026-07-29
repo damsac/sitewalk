@@ -69,9 +69,21 @@ struct NotesView: View {
                 DocChoice(kind: $0, label: DocKinds.label(for: $0), stamp: DocKinds.stamp(for: $0))
             }
         } else {
-            // The schema's own label/prefix, so a custom type reads as the
-            // operator named it rather than falling through to "Report".
-            docChoices = schemas.map {
+            // ONE button per KIND, choosing the same schema core will.
+            //
+            // `buildDocument(kind:)` resolves with ORDER BY updated_at DESC
+            // LIMIT 1, so when two schemas share a kind — which happens the
+            // moment someone customizes a built-in — exactly one of them gets
+            // built. Showing both would put two buttons on screen where one is
+            // dead, and (before this) they collided as ForEach ids, which is
+            // undefined behaviour in SwiftUI and can swallow taps outright.
+            //
+            // Mirroring the resolver here means the button's label always
+            // describes the document that will actually come out.
+            let winners = Dictionary(grouping: schemas, by: \.kind)
+                .compactMap { _, group in group.max(by: { $0.updatedAt < $1.updatedAt }) }
+                .sorted { $0.label < $1.label }
+            docChoices = winners.map {
                 DocChoice(kind: $0.kind, label: $0.label, stamp: $0.numberPrefix.uppercased())
             }
         }

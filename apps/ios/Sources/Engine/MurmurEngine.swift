@@ -450,6 +450,7 @@ final class MurmurEngine: WalkEngine {
                 )
             },
             schemaVersion: s.schemaVersion,
+            updatedAt: s.updatedAt,
             isBuiltin: s.deviceId == builtinDeviceId
         )
     }

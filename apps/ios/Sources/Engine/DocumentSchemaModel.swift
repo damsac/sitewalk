@@ -97,6 +97,11 @@ struct DocumentSchemaModel: Identifiable, Hashable {
     var totalLabelKey: String
     var sections: [SchemaSectionModel]
     var schemaVersion: UInt32
+    /// Core stamps this on every save. Needed app-side because core resolves
+    /// `buildDocument(kind:)` with `ORDER BY updated_at DESC LIMIT 1` — so when
+    /// two schemas share a kind, this is what decides which one actually gets
+    /// built, and the UI has to agree or it lies about what a button will do.
+    var updatedAt: UInt64
 
     /// Built-ins ship seeded from core and carry the sentinel device id.
     /// Surfaced so the editor can steer toward "duplicate" rather than
@@ -113,8 +118,10 @@ struct DocumentSchemaModel: Identifiable, Hashable {
         totalLabelKey: String = "total",
         sections: [SchemaSectionModel] = [],
         schemaVersion: UInt32 = 1,
+        updatedAt: UInt64 = 0,
         isBuiltin: Bool = false
     ) {
+        self.updatedAt = updatedAt
         self.id = id
         self.kind = kind
         self.label = label
