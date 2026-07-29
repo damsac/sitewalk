@@ -166,7 +166,7 @@ struct BoardView: View {
                         // language; a quiet filled panel reads "nothing here
                         // yet", which is what this actually is.
                         .background(Theme.C.paperDeep)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else if model.looseWalks.isEmpty {
@@ -186,7 +186,7 @@ struct BoardView: View {
                         // language; a quiet filled panel reads "nothing here
                         // yet", which is what this actually is.
                         .background(Theme.C.paperDeep)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else {
@@ -354,7 +354,7 @@ extension BoardView {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 3)
+                        RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                             .stroke(Theme.C.orangeDeep.opacity(0.45), lineWidth: 1)
                     )
                     .contentShape(Rectangle())
@@ -371,37 +371,53 @@ extension BoardView {
             }
 
             if let jobsError {
-                Text(jobsError.uppercased())
-                    .font(Theme.F.mono(8.5))
-                    .tracking(0.4)
+                // Sentence case. Caps for a stamped LABEL is correct; caps for
+                // a whole sentence costs 10–20% reading speed because it
+                // destroys word shapes — and this is a message that has to land.
+                Text(jobsError)
+                    .font(Theme.F.ui(13, .medium))
                     .foregroundStyle(Theme.C.redTag)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.S.screenPad)
                     .padding(.top, 8)
             }
 
             if activeJobs.isEmpty {
-                Text("NO JOBS YET — TAP + TO ADD ONE")
-                    .font(Theme.F.mono(8.5))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.C.ink35)
+                Text("No jobs yet. Add one and your walks will file under it.")
+                    .font(Theme.F.ui(14, .medium))
+                    .foregroundStyle(Theme.C.ink60)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 18)
                     .padding(.vertical, 22)
+                    .background(Theme.C.sheet)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                            .foregroundStyle(Theme.C.ink35)
+                        RoundedRectangle(cornerRadius: Theme.S.radiusCard)
+                            .stroke(Theme.C.hairline, lineWidth: 1)
                     )
                     .padding(.horizontal, Theme.S.screenPad)
                     .padding(.top, 12)
             } else {
-                ForEach(activeJobs) { job in
-                    OperatorJobCard(job: job, walks: walks(for: job.id)) { walk in
-                        model.reopenWalk(sessionId: walk.sessionId)
+                // Spaced, inset cards on a paperDeep bed — the container is
+                // what does the grouping now, so the cards need air between
+                // them and a darker ground to read as sheets ON something.
+                VStack(spacing: 10) {
+                    ForEach(activeJobs) { job in
+                        OperatorJobCard(job: job, walks: walks(for: job.id)) { walk in
+                            model.reopenWalk(sessionId: walk.sessionId)
+                        }
                     }
                 }
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.top, 12)
+                .padding(.bottom, 14)
             }
         }
+        // The bed the cards sit on. Without it, sheet-white cards on paper-white
+        // are invisible as containers and the grouping does nothing.
+        .background(Theme.C.paperDeep)
         .onAppear(perform: loadJobs)
         .alert("New job", isPresented: $showNewJob) {
             TextField("Name", text: $newJobName)
@@ -530,21 +546,33 @@ private struct OperatorJobCard: View {
     let onOpenWalk: (AppModel.WalkRecord) -> Void
 
     var body: some View {
+        // An actual CARD. The type's own comment used to say "built as a card"
+        // while drawing a hairline underline — and a rule cannot group a job
+        // with its walks, so the board read as one undifferentiated ledger. A
+        // ledger rules its lines because ink can't be raised; an app builds
+        // containers because things can be touched.
+        //
+        // Sheet white on paperDeep with a 4pt radius and a hairline: exactly the
+        // move the document preview already makes, applied one level up. The
+        // design review calls this the single biggest "now it's an app" change
+        // on this screen.
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(job.name)
                     .font(Theme.F.serif(17, .semibold))
                     .foregroundStyle(Theme.C.ink)
                     .lineLimit(2)
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
                 Text(walkCountLabel)
-                    .font(Theme.F.mono(8.5))
-                    .tracking(0.8)
+                    .font(Theme.F.ui(12, .medium))
                     .foregroundStyle(walks.isEmpty ? Theme.C.ink60 : Theme.C.amberInk)
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            .padding(.horizontal, Theme.S.screenPad)
+            .padding(.horizontal, 14)
             .padding(.top, 13)
-            .padding(.bottom, walks.isEmpty ? 13 : 8)
+            .padding(.bottom, walks.isEmpty ? 13 : 9)
 
             // The walks themselves — the "an email lands months later asking
             // about this job" surface. Tapping reopens that walk's notes,
@@ -553,44 +581,52 @@ private struct OperatorJobCard: View {
             ForEach(walks) { walk in
                 Button { onOpenWalk(walk) } label: {
                     HStack(spacing: 10) {
-                        Rectangle()
-                            .fill(Theme.C.hairline)
-                            .frame(width: 1, height: 13)
                         Text(AppModel.walkDateLabel(epochSeconds: walk.startedAt))
                             .font(Theme.F.mono(9.5))
-                            .foregroundStyle(Theme.C.ink60)
-                        Text(walk.docKind)
-                            .font(Theme.F.mono(9.5))
-                            .tracking(0.6)
-                            .foregroundStyle(Theme.C.ink35)
+                            .foregroundStyle(Theme.C.ink)
                             .lineLimit(1)
-                        Spacer()
+                            .fixedSize()
+                        Text(walk.subtitle)
+                            .font(Theme.F.cond(11.5, .medium))
+                            .foregroundStyle(Theme.C.ink60)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.C.ink35)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.C.ink60)
                     }
-                    .padding(.leading, Theme.S.screenPad + 2)
-                    .padding(.trailing, Theme.S.screenPad)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                 }
-                .buttonStyle(FieldRowStyle(minHeight: 56))
-                .buttonStyle(.plain)
+                // ONE style. This carried `.buttonStyle(FieldRowStyle(...))`
+                // followed by `.buttonStyle(.plain)`, and the second silently
+                // won — so these rows never got the press fill the first one
+                // was added for.
+                .buttonStyle(FieldRowStyle(minHeight: 48))
+                .overlay(alignment: .top) {
+                    Theme.C.hairlineSoft.frame(height: 1)
+                }
             }
-            .padding(.bottom, walks.isEmpty ? 0 : 8)
+            .padding(.bottom, walks.isEmpty ? 0 : 5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
-        }
+        .background(Theme.C.sheet)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.S.radiusCard)
+                .stroke(Theme.C.hairline, lineWidth: 1)
+        )
     }
 
+    /// Sentence case, not caps. Caps for a stamped LABEL is correct; this is a
+    /// phrase, and caps sentences cost reading speed by destroying word shapes.
     private var walkCountLabel: String {
         switch walks.count {
         // Honest rather than a fake zero-state: an unfiled job genuinely has
-        // no walks, and long-pressing a walk is how one gets here.
-        case 0: return "NO WALKS YET"
-        case 1: return "1 WALK"
-        default: return "\(walks.count) WALKS"
+        // no walks, and filing one from the board is how it gets any.
+        case 0: return "No walks yet"
+        case 1: return "1 walk"
+        default: return "\(walks.count) walks"
         }
     }
 }
@@ -606,7 +642,7 @@ private func raisedChip<L: View>(face: Color, edge: Color, @ViewBuilder _ label:
         .background(face)
         .padding(.bottom, 3)      // reveal the darker edge as a bottom lip
         .background(edge)
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
 }
 
 // MARK: - My Business (customization sheet)
@@ -781,9 +817,11 @@ private struct WalkLogRow<Trailing: View>: View {
                     Text(walk.title)
                         .font(Theme.F.ui(14.5, .semibold))
                         .foregroundStyle(Theme.C.ink)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                        // ONE line. The title is now a single condensed
+                        // sentence (`AppModel.firstSentence`), so two lines is
+                        // room the row does not need — and Isaac's report was
+                        // that the extra height read as cramped, not generous.
+                        .lineLimit(1)
 
                     HStack(spacing: 8) {
                         Text(walk.subtitle)

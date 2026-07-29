@@ -94,7 +94,7 @@ final class AppModel {
         /// then to a plain, honest label. Never blank: an untitled row is
         /// unreadable and looks broken.
         var title: String {
-            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = AppModel.firstSentence(of: summary)
             if !trimmed.isEmpty { return trimmed }
             if !docNo.isEmpty { return docNo }
             return queued ? "Walk still processing" : "Walk notes"
@@ -905,14 +905,17 @@ final class AppModel {
                 time: "9:41", docNo: "", docKind: "ESTIMATE", sent: true,
                 sessionId: "seed-1", queued: false, jobId: nil,
                 startedAt: base - 3_600,
-                summary: "1418 Alder Ct — mulch, trim, zone-2 head",
+                summary: "Field session at 1418 Alder Ct to scope mulch and trim work. "
+                    + "The operator noted three yards of hardwood mulch, four boxwoods "
+                    + "along the walkway, and a broken zone-2 irrigation head.",
                 itemCount: 5
             ),
             WalkRecord(
                 time: "8:05", docNo: "", docKind: "", sent: false,
                 sessionId: "seed-2", queued: false, jobId: nil,
                 startedAt: base - 5_400,
-                summary: "Hollis Residence — spring cleanup",
+                summary: "No actionable session content was captured. The transcript "
+                    + "contained only ambient noise with no discernible speech.",
                 itemCount: 3
             ),
             WalkRecord(
@@ -1338,6 +1341,97 @@ final class AppModel {
     /// months. Today collapses to a clock time (a date would be noise for
     /// something that just happened); this year drops the year; anything older
     /// carries it.
+    /// The first sentence of a walk summary, for a one-line board row.
+    ///
+    /// Isaac, on device 2026-07-29: *"Is there a way to make the walk
+    /// description be more condensed? Max one sentence?"* The rows were showing
+    /// things like *"Field session to discuss mulch work. Only the word 'mulch'
+    /// was clearly audible in the recording, with no additional context provided
+    /// about scope, timing, or constraints."* — three clauses of the model
+    /// narrating its own difficulty, wrapping to two lines and crowding the
+    /// board.
+    ///
+    /// The first sentence is almost always the one that says what the walk WAS;
+    /// everything after it is elaboration that belongs on the notes screen, and
+    /// the full summary is still there when the walk is opened. Nothing is lost,
+    /// only deferred.
+    ///
+    /// A period alone is not a sentence end — `3 yd. of mulch` and `Alder Ct.`
+    /// would both split wrongly. It has to be followed by whitespace and a
+    /// capital (or end the string), and leave something long enough to be worth
+    /// showing.
+    nonisolated static func firstSentence(of summary: String, limit: Int = 56) -> String {
+        let text = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+
+        let sentence = Self.withoutLeadIn(Self.upToFirstTerminator(text))
+        guard sentence.count > limit else { return sentence }
+
+        // Still too long for one line: cut on a word boundary rather than
+        // mid-word, so the ellipsis reads as "there's more" and not as damage.
+        let head = sentence.prefix(limit)
+        guard let lastSpace = head.lastIndex(of: " ") else {
+            return String(head) + "…"
+        }
+        return sentence[sentence.startIndex..<lastSpace]
+            .trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// Drops the boilerplate opener the summariser puts on almost every walk.
+    ///
+    /// Every summary in Isaac's on-device screenshots began the same way —
+    /// "Field session to discuss mulch work", "Field session to procure
+    /// materials", "A field session…". On a one-line row that prefix spends a
+    /// third of the width before saying anything specific, and the operator
+    /// already knows it was a field session; that is what the app is.
+    ///
+    /// A display-side trim, and knowingly a workaround: the real fix is the
+    /// summariser not writing the phrase (filed for core). Kept deliberately
+    /// short and anchored to the START of the string so it cannot eat content
+    /// from the middle of a sentence.
+    private nonisolated static func withoutLeadIn(_ sentence: String) -> String {
+        let leadIns = [
+            "Field session at ", "Field session to ", "Field session ",
+            "A field session at ", "A field session to ", "A field session ",
+            "This field session ", "The field session ",
+            "Walk at ", "Site walk at ", "Site visit at ",
+        ]
+        for leadIn in leadIns where sentence.lowercased().hasPrefix(leadIn.lowercased()) {
+            let trimmed = String(sentence.dropFirst(leadIn.count))
+            // Never trim down to nothing, and never to a fragment too short to
+            // mean anything — a summary that IS just the boilerplate keeps it.
+            guard trimmed.count >= 12 else { return sentence }
+            // Re-capitalise: the remainder was mid-sentence.
+            return trimmed.prefix(1).uppercased() + trimmed.dropFirst()
+        }
+        return sentence
+    }
+
+    /// Everything up to the first real sentence terminator.
+    private nonisolated static func upToFirstTerminator(_ text: String) -> String {
+        /// Below this, a "sentence" is almost certainly an abbreviation we split
+        /// on by mistake, so keep scanning.
+        let minimumSentence = 16
+        let characters = Array(text)
+        for (index, character) in characters.enumerated() {
+            guard character == "." || character == "!" || character == "?" else { continue }
+            guard index + 1 >= minimumSentence else { continue }
+            // End of string — the whole thing is one sentence.
+            if index == characters.count - 1 {
+                return String(characters[0...index])
+            }
+            // Needs whitespace then a capital to count as a break; that is what
+            // keeps "3 yd. of mulch" and "Alder Ct. beds" intact.
+            let next = characters[index + 1]
+            guard next == " " || next == "\n" else { continue }
+            let after = characters[(index + 2)...].first { $0 != " " }
+            if let after, after.isUppercase || after.isNumber {
+                return String(characters[0...index])
+            }
+        }
+        return text
+    }
+
     nonisolated static func walkDateLabel(epochSeconds: UInt64, now: Date = Date()) -> String {
         guard epochSeconds > 0 else { return "" }
         let date = Date(timeIntervalSince1970: TimeInterval(epochSeconds))

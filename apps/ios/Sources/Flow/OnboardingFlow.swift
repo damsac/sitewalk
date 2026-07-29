@@ -255,7 +255,7 @@ struct OnboardingFlow: View {
         .background(Theme.C.sheet)
         .overlay {
             if highlight {
-                RoundedRectangle(cornerRadius: 2).stroke(Theme.C.orange, lineWidth: 2)
+                RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.orange, lineWidth: 2)
             }
         }
     }

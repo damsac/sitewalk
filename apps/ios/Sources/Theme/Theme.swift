@@ -57,6 +57,15 @@ enum Theme {
     // MARK: - Spacing / metrics
     enum S {
         static let screenPad: CGFloat = 20
+        // THREE radii, not five. 2, 3, 4, 5 and 14 were all in use, which
+        // reads as accident rather than system (design review P1 #7). Named so
+        // no call site invents a sixth.
+        //
+        /// Stamps and tags — deliberately square, and on-idiom for a work order.
+        static let radiusStamp: CGFloat = 0
+        /// Chips, cards and fields.
+        static let radiusCard: CGFloat = 4
+        /// Buttons and sheets.
         static let radius: CGFloat = 14
         static let buttonHeight: CGFloat = 62   // glove-sized; never below minTarget
         static let minTarget: CGFloat = 56

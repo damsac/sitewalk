@@ -99,8 +99,8 @@ struct WellChipStyle: ButtonStyle {
             // The "cut in" cue: a hairline across the TOP edge only, reading as
             // the shadow the sheet casts into the well.
             .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1.5) }
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.C.hairline))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
             // Invisible hit slop — the chip reads small but catches a glove.
             .contentShape(Rectangle().inset(by: -8))
             .animation(.easeOut(duration: 0.09), value: down)
@@ -190,8 +190,8 @@ struct WellChrome: ViewModifier {
             .padding(.horizontal, 12)
             .background(tint)
             .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1.5) }
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.C.hairline))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
             .contentShape(Rectangle().inset(by: -8))
     }
 }
