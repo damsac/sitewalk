@@ -85,6 +85,16 @@ targets:
     scheme:
       testTargets:
         - SitewalkGalleryTests
+      # Local StoreKit testing (Jefe.storekit): lets the paywall load a real
+      # Product, show a real localized price, and complete a real purchase flow
+      # in the simulator without App Store Connect.
+      #
+      # This lives in the scheme's LAUNCH action only. `xcodebuild archive`
+      # doesn't read the launch action, so TestFlight and App Store builds
+      # transact against the real App Store — a local config can't leak into a
+      # shipped build. The file is deliberately OUTSIDE Sources/ so it is never
+      # copied into the app bundle.
+      storeKitConfiguration: Jefe.storekit
   # Plan 15: hosted unit tests for app-side contracts that need no simulator
   # UI — today just VocabPackTests (every bundled vocab pack decodes and obeys
   # the seeding schema: version >= 1, <= 60 terms, no ci-dupes, 1-6 words).

@@ -134,6 +134,26 @@ final class AppModel {
     }
     private(set) var sessionWalks: [WalkRecord] = []
 
+    // MARK: Billing
+
+    /// Jefe Pro entitlement. Owned by the model so every gate reads one answer;
+    /// `GalleryApp` kicks off `start()` at launch.
+    let entitlement = Entitlement()
+
+    /// Drives the paywall sheet. Set only by `startWalk()` refusing, and by the
+    /// explicit "upgrade" affordances — never by a background event, so the
+    /// paywall can't appear over a walk in progress.
+    var showPaywall = false
+
+    /// Usage at the moment the gate refused, so the paywall can say "you've used
+    /// all 5 of this month's walks" instead of a generic upsell. Nil until a
+    /// refusal.
+    var blockedUsage: (used: Int, limit: Int)?
+
+    /// Free walks left AFTER the one just started; nil for Pro. Read by the
+    /// notes screen to nudge at the end of a walk rather than the start.
+    var walksRemainingAfterThis: Int?
+
     // Walk state
     var transcript = ""
     /// Volatile greyed preview tail from the Rust STT pump (Plan 08 D4) — the
@@ -385,7 +405,34 @@ final class AppModel {
     /// that can't hear must never begin (same posture as throwing begin()).
     /// Returns immediately when already authorized; first-ever tap shows the
     /// system prompt. Denied → `micDenied` surfaces on the board.
+    ///
+    /// The free-tier meter gates here too, and for the same reason: both are
+    /// conditions that must be settled BEFORE the operator starts talking.
+    /// Refusing at finish would destroy a recording they had already made.
     func startWalk() {
+        // Two exemptions, both principled rather than convenient.
+        //
+        // Practice walks: they run on a throwaway engine, are never saved, and
+        // are part of onboarding. Charging someone a walk to learn how the app
+        // works — or blocking the tutorial at the limit — would be indefensible.
+        //
+        // Demo mode: the scripted DemoWalkEngine makes no model calls at all, so
+        // it costs nothing, and the free tier exists to bound cost. It is also
+        // dev-only (`demo=1`), and metering it would break the multi-round
+        // autoflow QA runs at walk six.
+        if !isPracticeWalk && walkMode != .demo {
+            switch WalkAllowance.decide(isPro: entitlement.isPro, record: WalkMeter.load(), now: Date()) {
+            case .blocked(let used, let limit):
+                blockedUsage = (used: used, limit: limit)
+                showPaywall = true
+                return
+            case .allowed(let remaining):
+                // Surfaced on the notes screen after the walk, not now: a
+                // countdown on the START button would make every walk feel
+                // rationed. `nil` = Pro, never counted.
+                walksRemainingAfterThis = remaining
+            }
+        }
         if walkMode == .voice && !wavFixture && !isPracticeWalk {
             Task { [weak self] in
                 guard let self else { return }
@@ -647,6 +694,9 @@ final class AppModel {
     var notesLoading = false
 
     func finishWalk() {
+        // Captured BEFORE the async work: a practice walk must never be metered,
+        // and `isPracticeWalk` is cleared by the exit paths that may run first.
+        let metered = !isPracticeWalk && walkMode != .demo
         keepScreenAwake(false)   // recording's done — let the phone sleep normally
         source?.stop()
         audioSource?.stop()
@@ -668,6 +718,14 @@ final class AppModel {
             let notes = await engine.finish()
             self.notes = notes
             self.notesLoading = false
+            // Metered on OUTPUT, not on tapping START: the count moves only
+            // once a walk has actually produced notes. Someone who starts a
+            // walk, realizes they're at the wrong address, and discards it has
+            // received nothing and must not be charged for it. Pro is unmetered
+            // — no reason to keep a count nobody reads.
+            if metered && !self.entitlement.isPro {
+                WalkMeter.recordFinishedWalk()
+            }
             // A FINISHED walk is a walk, whether or not a document was ever
             // built from it. Previously a walk only entered the log via
             // `completeSend()` — so finishing and then just filing it left it

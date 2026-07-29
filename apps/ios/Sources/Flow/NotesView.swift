@@ -44,6 +44,8 @@ struct NotesView: View {
     @State private var jobs: [JobModel] = []
     @State private var fileError: String?
     @State private var showNewJob = false
+    /// The photo open in the full-size viewer, if any (#224).
+    @State private var zoomedPhoto: PhotoModel?
     @State private var newJobName = ""
 
     /// One offerable document type.
@@ -149,6 +151,11 @@ struct NotesView: View {
                         if notes.items.isEmpty && notes.notes.isEmpty {
                             emptyState
                             if !notes.queued { addLineButton }
+                            // A walk can capture nothing but photos — someone
+                            // documenting damage without narrating it. Without
+                            // this the empty state would claim the walk was
+                            // empty while their photos sat invisible.
+                            photoStrip
                         } else {
                             if !notes.items.isEmpty {
                                 ForEach(grouped, id: \.0) { kind, items in
@@ -168,6 +175,7 @@ struct NotesView: View {
                                 }
                             }
                             if !notes.queued { addLineButton }
+                            photoStrip
                             transcriptRow
                         }
                         if let message = model.notesEditError {
@@ -191,6 +199,9 @@ struct NotesView: View {
         .sheet(isPresented: Binding(get: { exportURL != nil }, set: { if !$0 { exportURL = nil } })) {
             if let url = exportURL { ShareSheet(url: url) { _ in exportURL = nil } }
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { zoomedPhoto != nil }, set: { if !$0 { zoomedPhoto = nil } }
+        )) { photoViewer }
         .task {
             // Rehydrate the photo gallery from the store whenever the notes
             // screen appears (field fix, jefe-2026-07-24). `model.photos` is an
@@ -234,6 +245,92 @@ struct NotesView: View {
     }
 
     // Add a manual line — dashed, in the tag grammar, distinct from a captured row.
+    /// The photos taken on this walk.
+    ///
+    /// Issue #224. Capture, persistence and rehydration all worked; the photos
+    /// simply had no surface here — `model.photos` rendered only in
+    /// `ReviewView`, which is reachable only after a document builds. So an
+    /// operator who finished a walk and saved notes (Isaac: "they get an email
+    /// months after the fact asking for details about a job") never saw the
+    /// photos they took, on the walk or on reopen. The bytes were always safe.
+    ///
+    /// Renders nothing when there are no photos — no dashed empty box. This
+    /// screen already has an empty state, and a second one saying "no photos"
+    /// on every walk that didn't need photos is noise.
+    @ViewBuilder
+    private var photoStrip: some View {
+        if !model.photos.isEmpty {
+            SectionHead(left: "PHOTOS", right: "\(model.photos.count)", heavyRule: false)
+                .padding(.top, 4)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(model.photos) { photo in
+                        Button { zoomedPhoto = photo } label: {
+                            photoThumb(photo)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.vertical, 10)
+            }
+        }
+    }
+
+    private func photoThumb(_ photo: PhotoModel) -> some View {
+        let url = AppModel.photoURL(filename: photo.filename)
+        return Group {
+            if let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                // The row exists but the bytes don't — a sweep race, or a
+                // restore that dropped the container. Say so quietly rather
+                // than render a blank tile that looks like a broken layout.
+                Text("MISSING")
+                    .font(Theme.F.mono(7, .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.C.ink35)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.C.paperDeep)
+            }
+        }
+        .frame(width: 78, height: 78)
+        .clipped()
+        .overlay(Rectangle().stroke(Theme.C.hairline, lineWidth: 1))
+    }
+
+    /// Full-size viewer. A 78pt thumbnail answers "did I take a photo?" but not
+    /// "what did that crack look like?", which is the question someone opening a
+    /// months-old walk actually has.
+    @ViewBuilder
+    private var photoViewer: some View {
+        if let photo = zoomedPhoto {
+            ZStack(alignment: .topTrailing) {
+                Color.black.ignoresSafeArea()
+                if let image = UIImage(contentsOfFile: AppModel.photoURL(filename: photo.filename).path) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                Button { zoomedPhoto = nil } label: {
+                    Text("CLOSE")
+                        .font(Theme.F.mono(10, .semibold))
+                        .tracking(1.0)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+                .padding(.trailing, 8)
+            }
+        }
+    }
+
     private var addLineButton: some View {
         Button { itemEdit = .add } label: {
             Text("＋ ADD LINE")
