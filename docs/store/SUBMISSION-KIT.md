@@ -140,34 +140,50 @@ There is no sign-up and no login. Nothing to provide credentials for.
 
 ## 4. App Privacy answers — MUST match `PrivacyInfo.xcprivacy`
 
-Apple compares these against the bundled manifest. Answer exactly:
+Apple compares these against the bundled manifest. Answer exactly.
 
-**Does this app collect data?** → **Yes**
+**"Do you or your third-party partners collect data from this app?"** → **Yes**
 
-| Data type | Collected | Linked to identity | Used for tracking | Purpose |
-|---|---|---|---|---|
-| **Other User Content** (walk transcripts) | Yes | **No** | **No** | App Functionality |
-| **Photos or Videos** | Yes | **No** | **No** | App Functionality |
+Then check exactly **two** data types and nothing else:
 
-Everything else: **not collected.** No contact info, no identifiers, no usage
-data, no diagnostics, no location, no purchases.
+| Data type | Used for | Linked to identity | Used for tracking |
+|---|---|---|---|
+| **User Content → Other User Content** (walk transcripts) | App Functionality | **No** | **No** |
+| **Identifiers → Device ID** (the per-install UUID) | App Functionality | **No** | **No** |
 
-**Why "not linked to identity":** there are no accounts. The only identifier that
-exists is a random UUID minted on the device to meter usage, with nothing
-attached to it.
+Everything else: **not collected.** No contact info, no financial info, no
+location, no contacts, no browsing or search history, no purchases, no usage
+data, no diagnostics.
 
-**Why transcripts are declared at all**, given our proxy is forbidden to log,
-store or forward request bodies: the model provider is still a third party
-receiving operator content. Apple rejects for under-declaration and never for
-over-declaration, and on a product where contractors discuss client property all
-day, the conservative answer is also the honest one.
+### Why each answer is what it is
 
-**Photos are declared but never sent to the model** — the harness has no image
-content block (#263), so today that's enforced by the plumbing not existing. **If
-#263 lands and photos start being sent, this table and the manifest both have to
-be revisited.**
+**Transcripts are collected.** They leave the device for the model provider.
+Our proxy is forbidden to log, store or forward request bodies — but the
+provider is still a third party receiving operator content, so it's declared.
 
----
+**The install ID is collected.** It leaves the device on every request and the
+proxy stores it in daily spend counters (`spend:install:<id>:<day>`), which
+outlives the request it served. That's collection under Apple's definition.
+
+**Photos are NOT collected — this corrects an earlier over-declaration.** Apple
+defines "collect" as *transmitting off the device*. Photos never leave:
+`ContentBlock` has no image variant (#263), so the harness cannot send one, and
+nothing else uploads them. Declaring them would be inaccurate and would make the
+privacy story look worse than it truthfully is. **If #263 lands and photos start
+being sent, this table and the manifest both have to change.**
+
+**Audio is NOT collected.** Whisper runs on device; that claim holds literally.
+
+### The one genuine judgement call
+
+**"Linked to identity" on Other User Content.** Apple sometimes treats data
+collected alongside a persistent identifier as linked. **No** is the
+recommendation here: the install ID is randomly generated on device, never tied
+to a name, email or account, and cannot be resolved to a person — Apple's
+description of not-linked.
+
+Answering **Yes / Linked** to both is also defensible and costs only a
+worse-looking label. Prefer **No**; it's the accurate one.
 
 ## 5. Age rating
 
