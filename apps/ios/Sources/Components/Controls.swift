@@ -183,7 +183,10 @@ struct WellChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .frame(minHeight: minHeight)
+            // EXACT height, not a minimum. `minHeight` let an inline chip
+            // stretch to fill whatever row it sat in — on the walk row's
+            // metadata line that rendered a ~130pt tall FILE button.
+            .frame(height: minHeight)
             .padding(.horizontal, 12)
             .background(tint)
             .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1.5) }
