@@ -421,7 +421,14 @@ final class AppModel {
         // dev-only (`demo=1`), and metering it would break the multi-round
         // autoflow QA runs at walk six.
         if !isPracticeWalk && walkMode != .demo {
-            switch WalkAllowance.decide(isPro: entitlement.isPro, record: WalkMeter.load(), now: Date()) {
+            switch WalkAllowance.decide(
+                isPro: entitlement.isPro,
+                record: WalkMeter.load(),
+                now: Date(),
+                // No purchasable product means no way out of the limit — so the
+                // limit does not apply. See WalkAllowance.decide.
+                canSubscribe: entitlement.canSubscribe
+            ) {
             case .blocked(let used, let limit):
                 blockedUsage = (used: used, limit: limit)
                 showPaywall = true

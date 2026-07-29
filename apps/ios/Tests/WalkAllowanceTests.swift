@@ -137,6 +137,45 @@ final class WalkAllowanceTests: XCTestCase {
         XCTAssertEqual(decision, .allowed(remaining: 4))
     }
 
+    // MARK: Never block someone we can't sell to
+
+    func testExhaustedButNoProductAvailableIsAllowed() {
+        // The defect this exists to prevent: until the App Store Connect
+        // product exists, NO install can subscribe. A hard gate would brick
+        // every TestFlight tester at walk six with no way to pay and no
+        // recourse until the 1st. Refusing someone's money and their work at
+        // the same time is indefensible.
+        let decision = WalkAllowance.decide(
+            isPro: false, record: record("2026-07", 5),
+            now: date("2026-07-28T12:00:00Z"), calendar: calendar, limit: 5,
+            canSubscribe: false
+        )
+        XCTAssertEqual(decision, .allowed(remaining: nil))
+    }
+
+    func testTheLimitStillAppliesOnceAProductExists() {
+        // The other half — failing open must be conditional, not a hole. The
+        // same exhausted record blocks the moment a product is purchasable.
+        let decision = WalkAllowance.decide(
+            isPro: false, record: record("2026-07", 5),
+            now: date("2026-07-28T12:00:00Z"), calendar: calendar, limit: 5,
+            canSubscribe: true
+        )
+        XCTAssertEqual(decision, .blocked(used: 5, limit: 5))
+    }
+
+    func testNoProductDoesNotDisturbSomeoneUnderTheLimit() {
+        // Failing open must not change what an under-limit user sees; it is a
+        // release valve at the boundary, not a separate mode.
+        let decision = WalkAllowance.decide(
+            isPro: false, record: record("2026-07", 1),
+            now: date("2026-07-28T12:00:00Z"), calendar: calendar, limit: 5,
+            canSubscribe: false
+        )
+        // `nil` remaining, same as Pro: nothing is being counted down toward.
+        XCTAssertEqual(decision, .allowed(remaining: nil))
+    }
+
     // MARK: Recording a finish
 
     func testFinishIncrementsWithinTheSameMonth() {
