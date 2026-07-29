@@ -69,9 +69,18 @@ struct MetaStrip: View {
                 .foregroundStyle(warn ? Theme.C.yellowTag : Theme.C.ink60)
         }
         .font(Theme.F.mono(8.5))
-        .tracking(0.8)
+        // Tracking eased from 0.8 as the type grew. Heavy tracking is a print
+        // device that helps at 8.5pt and actively hurts once the glyphs are big
+        // enough to hold their own shape.
+        .tracking(0.4)
         .foregroundStyle(Theme.C.ink60)
         .lineLimit(1)
+        // Dynamic Type is now honoured everywhere (Theme.F `relativeTo:`), but
+        // this strip is two labels sharing one line with `lineLimit(1)` — at
+        // accessibility sizes one of them would simply truncate away. Capping
+        // growth keeps both readable; the review calls this out as the pattern
+        // for any strip that must stay on one line.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.vertical, 7)
         .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1) }
