@@ -21,6 +21,8 @@ struct BoardView: View {
     @State private var newJobName = ""
     /// TODAY collapses so JOBS clears the fold. Expanding shows the rest.
     @State private var showAllWalks = false
+    /// Apple's own manage-subscriptions sheet, raised by the PRO chip.
+    @State private var showManageSubscription = false
     /// Enough to see today's work at a glance without pushing jobs off
     /// screen — the complaint that prompted this.
     private static let collapsedWalkCount = 3
@@ -57,6 +59,7 @@ struct BoardView: View {
                     // cryptic chips (VOCAB + PAPER). A raised amber block (same
                     // pressed-block grammar as START WALK) so it reads as a
                     // button; opens the two-tab PAPERWORK / WORDS sheet.
+                    planChip
                     Button { showCustomize = true } label: {
                         raisedChip(face: Theme.C.orange, edge: Theme.C.orangeDeep) {
                             Text("MY BUSINESS")
@@ -298,6 +301,16 @@ struct BoardView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.C.paper)
         }
+        // Raised by `startWalk()` refusing at the free-tier limit, and by the
+        // deliberate upgrade affordance in Customize. Never raised by a
+        // background event, so it can't appear over a walk in progress.
+        .sheet(isPresented: $model.showPaywall) {
+            PaywallView(model: model, blocked: model.blockedUsage)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Theme.C.paper)
+        }
+        .manageSubscriptionsSheet(isPresented: $showManageSubscription)
     }
 }
 
@@ -397,6 +410,50 @@ extension BoardView {
     }
 
     var activeJobs: [JobModel] { operatorJobs.filter { $0.status == .active } }
+
+    /// Plan status, and the only always-visible way in and out of billing.
+    ///
+    /// Free shows walks remaining rather than walks used — "2 LEFT" is what an
+    /// operator actually needs to decide whether to start a walk, and it stays
+    /// quiet (ink60, no fill) so it reads as a fact rather than a nag. Pro opens
+    /// Apple's manage-subscriptions sheet: Apple requires that a subscriber can
+    /// reach cancellation easily, and hiding it would be both a review risk and
+    /// the kind of thing that makes people distrust a subscription.
+    @ViewBuilder
+    private var planChip: some View {
+        if model.entitlement.isPro {
+            Button { showManageSubscription = true } label: {
+                Text("PRO")
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(Theme.C.greenTag)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 3)
+                    .padding(.bottom, 2)
+                    .background(Theme.C.greenTint)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            let used = WalkAllowance.usage(in: WalkMeter.load(), now: Date())
+            let left = max(0, WalkAllowance.freeMonthlyLimit - used)
+            Button {
+                model.blockedUsage = nil   // opened by choice, not refused
+                model.showPaywall = true
+            } label: {
+                Text(left == 0 ? "0 LEFT" : "\(left) LEFT")
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(left == 0 ? Theme.C.redTag : Theme.C.ink60)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 3)
+                    .padding(.bottom, 2)
+                    .background(left == 0 ? Theme.C.redTint : Theme.C.paperDeep)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
 
     /// The UNFILED walks, capped until expanded.
     ///

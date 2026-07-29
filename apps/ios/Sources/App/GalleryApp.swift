@@ -72,6 +72,16 @@ struct AppRoot: View {
                 licenseNumber: "44-1234", tradeKey: "landscape"
             ))
         }
+        // meter=N seeds the free-tier walk meter for the CURRENT month (parallel
+        // to autoprofile). The blocked-at-the-limit paywall is otherwise
+        // reachable only by finishing five real walks, which no headless
+        // screenshot run and no quick manual check can do. `meter=0` clears it.
+        if let arg = args.first(where: { $0.hasPrefix("meter=") }),
+           let count = Int(arg.dropFirst("meter=".count)) {
+            WalkMeter.save(WalkAllowance.Record(
+                month: WalkAllowance.monthKey(for: Date()), count: max(0, count)
+            ))
+        }
         // QA hooks for the Letterhead Studio (parallel to autoprofile): stamp a
         // sample branding so headless screenshots exercise a customized letterhead.
         if args.contains("resetbrand=1") { Branding.save(.default); DocumentLayout.save(.default) }
@@ -169,6 +179,23 @@ struct AppRoot: View {
             // is never re-fired while a walk is live — one suspension point
             // ahead of it would Fail a live session. See runAppOpenSweeps().
             model.runAppOpenSweeps()
+            // Entitlement + product load, off the critical path. Detached from
+            // this .task on purpose: it awaits the network, and the INVARIANT
+            // above forbids a suspension point ahead of runAppOpenSweeps().
+            // `isPro` starts false and is corrected when this lands — the
+            // free-tier gate reads it, so the worst case is a subscriber
+            // briefly seeing the free count on a cold launch, never a lapsed
+            // user briefly getting Pro.
+            Task { await model.entitlement.start() }
+            // paywall=1 raises the paywall on launch. simctl can't tap, so this
+            // is the only way to verify the sheet headlessly; pair with meter=5
+            // for the refused-at-the-limit copy.
+            if ProcessInfo.processInfo.arguments.contains("paywall=1") {
+                model.blockedUsage = ProcessInfo.processInfo.arguments.contains("meter=5")
+                    ? (used: WalkAllowance.freeMonthlyLimit, limit: WalkAllowance.freeMonthlyLimit)
+                    : nil
+                model.showPaywall = true
+            }
             // (Removed: the legacy SpeechSource permission ask for live=1.
             // STT is Rust-side whisper — Apple Speech Recognition is never
             // used on the walk path, and its system dialog carries "sent to

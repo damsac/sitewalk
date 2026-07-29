@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Apple's privacy manifest. REQUIRED: an app that calls a "required reason API"
+  without declaring it here is rejected at submission, and we call two.
+
+  This file must also AGREE with the App Privacy answers in App Store Connect —
+  they are two separate surfaces describing the same thing, and Apple compares
+  them. If you change one, change the other.
+
+  The honest summary this encodes: audio never leaves the device (whisper runs
+  locally), the TRANSCRIPT does — it goes to Anthropic through our proxy,
+  because that is how extraction and summarization work. Nothing is linked to an
+  identity, because there are no accounts; the only identifier that exists is a
+  random per-install UUID minted on device. Nothing is used for tracking, and
+  there are no tracking domains.
+-->
+<plist version="1.0">
+<dict>
+    <!-- No cross-app/website tracking, no data brokers, no ad networks. -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array>
+        <!--
+          The walk transcript and the items extracted from it.
+
+          Declared even though our proxy is forbidden to log, store, or forward
+          request bodies (see services/proxy/src/index.ts), because the model
+          provider is still a third party receiving operator content. Apple
+          rejects for under-declaration and never for over-declaration, and on a
+          product where contractors talk about client property all day the
+          conservative answer is also the right one.
+
+          NOT linked to identity: no accounts, no email, no name. NOT used for
+          tracking.
+        -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
+
+        <!--
+          Photos taken during a walk. Persisted on device and rendered in the
+          app; they are NOT sent to the model — the harness has no image
+          ContentBlock variant (issue #263), so today this is enforced by the
+          plumbing not existing. If #263 lands and photos start being sent,
+          this entry and the ASC answers both have to be revisited.
+        -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
+    </array>
+
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <!--
+          UserDefaults: business profile, branding, document layout, walk mode,
+          and the one-shot coach-mark flags. Read and written only by this app.
+        -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+
+        <!--
+          File timestamps: AppModel+Photos.photoFileAge() reads the modification
+          date of files in <Documents>/photos/ so the orphan sweep can hold back
+          anything younger than the 24h grace window. Files inside our own
+          container only — reason C617.1.
+        -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>C617.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
