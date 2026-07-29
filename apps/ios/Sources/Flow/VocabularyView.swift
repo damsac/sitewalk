@@ -14,7 +14,24 @@ struct VocabularyView: View {
     @State private var newTerm = ""
     @FocusState private var fieldFocused: Bool
 
+    /// Mirrors core's `MAX_VOCABULARY_TERMS`. Kept so the screen can degrade
+    /// gracefully AT the limit — never to advertise it in advance.
+    ///
+    /// Isaac, TestFlight 2.0.0(44): *"why do we have max 100 terms? … if there
+    /// is a real limitation, then we shouldn't show that number to the user,
+    /// they don't care until it happens."* dam's ruling on #225 split it: the
+    /// cap is a measured whisper bias-prompt budget and stays; showing it is a
+    /// UI choice and is sac's to undo.
+    ///
+    /// The number was also actively discouraging in the state where it appeared
+    /// most — "TERMS 0 / 100" on an empty list reads as a chore with 100 blanks
+    /// to fill, when the honest guidance is the opposite: a short, sharp list
+    /// biases better than a long one.
     private let cap = 100
+
+    /// True once adding another term would be refused, so the screen can say so
+    /// at the moment it becomes true and not before.
+    private var isFull: Bool { model.vocabulary.count >= cap }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -37,10 +54,31 @@ struct VocabularyView: View {
             }
 
             MetaStrip(
-                left: "TERMS \(model.vocabulary.count) / \(cap)",
-                right: model.vocabulary.count >= cap ? "FULL — REMOVE TO ADD" : "BIASES ON-DEVICE STT",
-                warn: model.vocabulary.count >= cap
+                left: model.vocabulary.count == 1 ? "1 TERM" : "\(model.vocabulary.count) TERMS",
+                right: isFull ? "LIST FULL" : "BIASES ON-DEVICE STT",
+                warn: isFull
             )
+
+            // The "why", shown only once the limit actually bites (#225). A
+            // refusal with no reason reads as an arbitrary wall; the real reason
+            // is a point in the app's favour — every term spends part of
+            // whisper's bias budget, so a tight list hears better than a long
+            // one. Same yellow-note grammar as the error bar below.
+            if isFull {
+                HStack(spacing: 0) {
+                    Theme.C.yellowTag.frame(width: 3)
+                    Text("REMOVE ONE TO ADD ANOTHER — A SHORT LIST BIASES THE MIC BETTER THAN A LONG ONE")
+                        .font(Theme.F.mono(8))
+                        .tracking(0.4)
+                        .foregroundStyle(Theme.C.ink60)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(Theme.C.yellowTint)
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.top, 10)
+            }
 
             if let error = model.vocabularyError {
                 HStack(spacing: 0) {
