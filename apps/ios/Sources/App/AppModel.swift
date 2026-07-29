@@ -1023,7 +1023,7 @@ final class AppModel {
                 // and explained nothing. Isaac tapped a custom button and got
                 // no usable signal at all.
                 self.documentBuildError =
-                    "Couldn’t build it — \(error.localizedDescription)"
+                    "Couldn’t build it — \(EngineErrorText.readable(error))"
             }
         }
     }

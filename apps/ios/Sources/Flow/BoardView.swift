@@ -485,7 +485,7 @@ extension BoardView {
         } catch {
             // Leave whatever is on screen rather than blanking the list — the
             // vocabulary/schema editors' posture.
-            jobsError = "Couldn't load jobs: \(error.localizedDescription)"
+            jobsError = "Couldn't load jobs: \(EngineErrorText.readable(error))"
         }
     }
 
@@ -498,7 +498,7 @@ extension BoardView {
             try model.setWalkJob(sessionId: walk.sessionId, jobId: jobId)
             jobsError = nil
         } catch {
-            jobsError = "Couldn't file walk: \(error.localizedDescription)"
+            jobsError = "Couldn't file walk: \(EngineErrorText.readable(error))"
         }
     }
 
@@ -519,7 +519,7 @@ extension BoardView {
             operatorJobs.insert(created, at: 0)
             jobsError = nil
         } catch {
-            jobsError = "Couldn't add job: \(error.localizedDescription)"
+            jobsError = "Couldn't add job: \(EngineErrorText.readable(error))"
         }
     }
 }
