@@ -179,6 +179,13 @@ struct AppRoot: View {
             // is never re-fired while a walk is live — one suspension point
             // ahead of it would Fail a live session. See runAppOpenSweeps().
             model.runAppOpenSweeps()
+            // seedwalks=1: fake finished walks for App Store capture and for
+            // eyeballing the #221 row labels, which are otherwise a real-core-
+            // only path. AFTER runAppOpenSweeps so the hydrate latch has
+            // already fired and can't overwrite the seed.
+            if ProcessInfo.processInfo.arguments.contains("seedwalks=1") {
+                model.seedDemoWalks()
+            }
             // Entitlement + product load, off the critical path. Detached from
             // this .task on purpose: it awaits the network, and the INVARIANT
             // above forbids a suspension point ahead of runAppOpenSweeps().

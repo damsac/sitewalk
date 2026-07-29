@@ -882,6 +882,49 @@ final class AppModel {
         refreshWalkLog()
     }
 
+    /// Seeds a few finished walks for headless capture (`seedwalks=1`), in the
+    /// established QA-hook style of `autoprofile` / `autobrand`.
+    ///
+    /// Two jobs it does, and both are real:
+    ///
+    /// 1. **App Store screenshots.** The board is the first screen a reviewer
+    ///    and a buyer see, and `DemoWalkEngine.listSessions()` returns `[]` by
+    ///    design — its log is in-memory — so an unattended run always captures
+    ///    an empty board reading "NO WALKS YET".
+    /// 2. **It makes the #221 row rendering visible at all.** Those labels are
+    ///    a real-core path, so on-sim there was no way to look at a hydrated
+    ///    row; the fix shipped unit-tested but unseen.
+    ///
+    /// Deliberately fake and deliberately obvious: a fixed date so captures are
+    /// reproducible, and summaries written as a real walk would read.
+    func seedDemoWalks(now: Date = Date()) {
+        let day: UInt64 = 86_400
+        let base = UInt64(now.timeIntervalSince1970)
+        sessionWalks = [
+            WalkRecord(
+                time: "9:41", docNo: "", docKind: "ESTIMATE", sent: true,
+                sessionId: "seed-1", queued: false, jobId: nil,
+                startedAt: base - 3_600,
+                summary: "1418 Alder Ct — mulch, trim, zone-2 head",
+                itemCount: 5
+            ),
+            WalkRecord(
+                time: "8:05", docNo: "", docKind: "", sent: false,
+                sessionId: "seed-2", queued: false, jobId: nil,
+                startedAt: base - 5_400,
+                summary: "Hollis Residence — spring cleanup",
+                itemCount: 3
+            ),
+            WalkRecord(
+                time: "16:20", docNo: "", docKind: "WORK ORDER", sent: true,
+                sessionId: "seed-3", queued: false, jobId: nil,
+                startedAt: base - (2 * day),
+                summary: "Marston HOA — irrigation check",
+                itemCount: 6
+            ),
+        ]
+    }
+
     /// Re-read the walk log NOW, bypassing the once-per-process latch.
     ///
     /// `isHydratingWalkLog` is set once and never cleared — deliberately, to
