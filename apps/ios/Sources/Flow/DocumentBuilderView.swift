@@ -152,7 +152,7 @@ struct DocumentBuilderView: View {
         } catch {
             // Leave whatever is on screen intact rather than blanking the list
             // (the vocabulary editor's posture).
-            loadError = "Couldn't load document types: \(error.localizedDescription)"
+            loadError = "Couldn't load document types: \(EngineErrorText.readable(error))"
         }
     }
 
@@ -162,7 +162,7 @@ struct DocumentBuilderView: View {
             editing = nil
             load()
         } catch {
-            loadError = "Couldn't save: \(error.localizedDescription)"
+            loadError = "Couldn't save: \(EngineErrorText.readable(error))"
             editing = nil
         }
     }
@@ -173,7 +173,7 @@ struct DocumentBuilderView: View {
             editing = nil
             load()
         } catch {
-            loadError = "Couldn't delete: \(error.localizedDescription)"
+            loadError = "Couldn't delete: \(EngineErrorText.readable(error))"
             editing = nil
         }
     }

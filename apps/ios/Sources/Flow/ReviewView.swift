@@ -46,8 +46,18 @@ struct ReviewView: View {
                         Letterhead(
                             biz: model.letterheadBiz,
                             bizSub: model.letterheadSub,
-                            docKind: model.trade.docKind,
-                            docNo: model.trade.docNo,
+                            // The kind actually being built, not the trade's
+                            // lead kind — a Work Order titled ESTIMATE with an
+                            // EST- number is the document equivalent of a typo
+                            // on company letterhead (#222). `docNo` is blank
+                            // outside the fixture estimate rather than invented:
+                            // core mints real numbers, and a fake one on a real
+                            // document would be worse than none.
+                            docKind: model.reviewKind.map { DocKinds.label(for: $0).uppercased() }
+                                ?? model.trade.docKind,
+                            docNo: model.reviewKind == nil
+                                || model.reviewKind == DocKinds.primaryKind(for: model.trade.key)
+                                ? model.trade.docNo : "",
                             docDate: model.letterheadDate,
                             branding: model.branding
                         )
@@ -58,8 +68,13 @@ struct ReviewView: View {
                         }
                         TotalRow(key: doc.totalKey, value: doc.totalValue, gaps: doc.gapCount)
                             .padding(.top, 2)
-                        RevNote(text: doc.note)
-                            .padding(.top, 10)
+                        // Empty note = no bar. An empty amber block reads as a
+                        // rendering failure, and a non-priced document has no
+                        // pricing gap to talk about (#222).
+                        if !doc.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            RevNote(text: doc.note)
+                                .padding(.top, 10)
+                        }
 
                         // Document structure basics (DocumentLayout): operator
                         // terms + a client signature line, set in the PAPER tab.

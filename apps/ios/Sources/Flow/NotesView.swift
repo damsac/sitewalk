@@ -116,7 +116,7 @@ struct NotesView: View {
             try model.setWalkJob(sessionId: sessionId, jobId: jobId)
             fileError = nil
         } catch {
-            fileError = error.localizedDescription
+            fileError = EngineErrorText.readable(error)
         }
     }
 
@@ -128,7 +128,7 @@ struct NotesView: View {
             loadJobs()
             file(under: job.id)
         } catch {
-            fileError = error.localizedDescription
+            fileError = EngineErrorText.readable(error)
         }
     }
 

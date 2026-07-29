@@ -1023,12 +1023,24 @@ final class AppModel {
                 // and explained nothing. Isaac tapped a custom button and got
                 // no usable signal at all.
                 self.documentBuildError =
-                    "Couldn’t build it — \(error.localizedDescription)"
+                    "Couldn’t build it — \(EngineErrorText.readable(error))"
             }
         }
     }
 
-    func buildPrimaryDocument() { buildDocument(kind: DocKinds.primaryKind(for: trade.key)) }
+    /// Builds the template's lead document kind.
+    ///
+    /// `doc=<kind>` overrides it — a QA hook (parallel to `autoflow`/`autopdf`)
+    /// so a headless run can reach any document type. Without it only the lead
+    /// kind was reachable unattended, which is why #222 — the demo engine
+    /// ignoring `kind` entirely — survived as long as it did: nothing that ran
+    /// without hands ever built a second kind. Store screenshots need this too.
+    func buildPrimaryDocument() {
+        let arg = ProcessInfo.processInfo.arguments.first { $0.hasPrefix("doc=") }
+        let kind = arg.map { String($0.dropFirst("doc=".count)) }
+            ?? DocKinds.primaryKind(for: trade.key)
+        buildDocument(kind: kind)
+    }
 
     // MARK: Item edits (Plan 16 CRUD) — the walk is a first draft; the operator
     // fixes it here. These go through the CORE (not app-side pixels), so a
