@@ -62,21 +62,78 @@ enum Theme {
         enum MonoW: String { case regular = "Regular", medium = "Medium", semibold = "SemiBold" }
         enum SerifW: String { case semibold = "SemiBold", bold = "Bold" }
 
+        /// The type rescale (design review 2026-07-29, P0 #1 + #2).
+        ///
+        /// `mono` was being called at 7, 7.5, 8, 8.5, 9, 9.5 and 11pt. iOS body
+        /// is 17. A carbon-copy work order can set 8pt because paper has
+        /// infinite resolution and gets held at 14 inches in good light; a phone
+        /// at hip height in noon sun does not. The brief demands "glanceable at
+        /// arm's length" and the ramp quietly contradicted it.
+        ///
+        /// Who is holding the phone settles it: the median US construction
+        /// worker is 42, one in five is 55 or older, and the median trade
+        /// supervisor — the person paying $12.99/mo — is 46 and needs reading
+        /// glasses for 8pt mono. Type size is not a polish item for this
+        /// audience; it is the product working or not working.
+        ///
+        /// Applied HERE rather than at ~100 call sites, which is what makes the
+        /// ratios between levels survive exactly: one curve, no drift, and no
+        /// call site can opt out or invent its own. The forms and the ruling
+        /// carry the aesthetic, not the smallness — it survives at 1.3×.
+        ///
+        /// Growth tapers with size: small stamped type needs the most help,
+        /// headlines are already legible and would just eat the layout.
+        /// The multiplier tapers CONTINUOUSLY from 1.30 at 12pt to 1.08 at 20pt.
+        ///
+        /// It has to be continuous, not stepped. A first attempt used flat
+        /// bands (`<12 → ×1.30`, `<20 → ×1.20`, `else ×1.08`) and the ramp
+        /// INVERTED at every boundary: 11.5pt resolved to 14.95 while 12pt
+        /// resolved to 14.4, so a 12pt call site rendered smaller than an 11.5pt
+        /// one. On screen that is a subtitle set larger than the title above it.
+        /// `TypeRampTests.testTheCurveIsMonotonic` caught it and now guards it.
+        private static func scaled(_ size: CGFloat) -> CGFloat {
+            // 11pt floor — below this nothing is reliably legible in sun, so
+            // there is no smaller size worth preserving.
+            let floor: CGFloat = 11
+            let small: CGFloat = 1.30   // stamped type needs the most help
+            let large: CGFloat = 1.08   // headlines are already legible
+            let lower: CGFloat = 12
+            let upper: CGFloat = 20
+
+            if size <= lower { return max(floor, size * small) }
+            if size >= upper { return size * large }
+            // Linear taper between the anchors. Monotonic across the whole
+            // range: the derivative stays positive up to 20pt, and both ends
+            // meet the neighbouring branches exactly (12 → 15.6, 20 → 21.6).
+            let t = (size - lower) / (upper - lower)
+            return size * (small + t * (large - small))
+        }
+
+        /// What `scaled` returns — for tests, and for layout that must reserve
+        /// space for a glyph run.
+        static func resolvedSize(_ size: CGFloat) -> CGFloat { scaled(size) }
+
+        // `relativeTo:` is what adopts Dynamic Type (P0 #2). One in five
+        // operators is 55+ and many have already set a larger system size;
+        // until now every font was a fixed `.custom(size:)` and the app ignored
+        // that setting completely. Strips that must stay on one line cap growth
+        // with `.dynamicTypeSize(...)` at their own call site rather than here.
+
         /// UI type — Barlow (highway-signage DNA)
         static func ui(_ size: CGFloat, _ w: UIW = .semibold) -> Font {
-            .custom("Barlow-\(w.rawValue)", size: size)
+            .custom("Barlow-\(w.rawValue)", size: scaled(size), relativeTo: .body)
         }
         /// Dense data rows — Barlow Semi Condensed
         static func cond(_ size: CGFloat, _ w: CondW = .semibold) -> Font {
-            .custom("BarlowSemiCondensed-\(w.rawValue)", size: size)
+            .custom("BarlowSemiCondensed-\(w.rawValue)", size: scaled(size), relativeTo: .body)
         }
         /// Stamped metadata, prices, timestamps — IBM Plex Mono
         static func mono(_ size: CGFloat, _ w: MonoW = .regular) -> Font {
-            .custom("IBMPlexMono-\(w.rawValue)", size: size)
+            .custom("IBMPlexMono-\(w.rawValue)", size: scaled(size), relativeTo: .body)
         }
         /// Document letterhead only — Source Serif 4
         static func serif(_ size: CGFloat, _ w: SerifW = .bold) -> Font {
-            .custom("SourceSerif4-\(w.rawValue)", size: size)
+            .custom("SourceSerif4-\(w.rawValue)", size: scaled(size), relativeTo: .body)
         }
     }
 }
