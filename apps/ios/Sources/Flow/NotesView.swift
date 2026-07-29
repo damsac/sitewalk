@@ -469,7 +469,7 @@ struct NotesView: View {
                         .font(Theme.F.mono(8.5, .semibold)).tracking(0.8)
                         .foregroundStyle(Theme.C.ink60)
                     Spacer()
-                    Text(showTranscript ? "▾" : "▸")
+                    Image(systemName: showTranscript ? "chevron.down" : "chevron.right")
                         .font(Theme.F.mono(9)).foregroundStyle(Theme.C.amberInk)
                 }
                 .padding(9)
@@ -543,7 +543,7 @@ struct NotesView: View {
                     }
                 } label: {
                     HStack(spacing: 5) {
-                        Text(filedJob?.name.uppercased() ?? "CHOOSE A JOB")
+                        Text(filedJob?.name ?? "Choose a job")
                             .font(Theme.F.mono(9, .semibold)).tracking(0.8)
                             .lineLimit(1).truncationMode(.tail)
                         Image(systemName: "chevron.down")
@@ -565,8 +565,8 @@ struct NotesView: View {
                 // indistinguishable from a bug the first time it guesses
                 // wrong — and the operator needs to know a choice was made
                 // on their behalf so they can correct it.
-                Text("HEARD “\(auto.jobName.uppercased())” IN THE WALK — FILED THERE. TAP TO CHANGE.")
-                    .font(Theme.F.mono(8)).tracking(0.4)
+                Text("Heard “\(auto.jobName)” in the walk — filed there. Tap to change.")
+                    .font(Theme.F.ui(13, .medium))
                     .foregroundStyle(Theme.C.amberInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -631,7 +631,7 @@ struct NotesView: View {
                     ProgressView().tint(hero ? Theme.C.onOrange : Theme.C.ink)
                 } else {
                     VStack(spacing: 2) {
-                        Text(choice.label.uppercased())
+                        Text(choice.label)
                             .font(Theme.F.ui(12, .bold)).tracking(0.04)
                             .foregroundStyle(hero ? Theme.C.onOrange : Theme.C.ink)
                             .lineLimit(1).minimumScaleFactor(0.75)

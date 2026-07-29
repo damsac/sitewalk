@@ -17,7 +17,10 @@ struct BoardView: View {
     // needs the list too.
     @State private var operatorJobs: [JobModel] = []
     @State private var jobsError: String?
-    @State private var showNewJob = false
+    // `newjob=1` opens the sheet on launch. simctl can't tap, and shipping a
+    // brand-new UI surface unseen is how the inline FILE chip ended up 130pt
+    // tall. Same precedent as `paywall=1`.
+    @State private var showNewJob = ProcessInfo.processInfo.arguments.contains("newjob=1")
     @State private var newJobName = ""
     /// TODAY collapses so JOBS clears the fold. Expanding shows the rest.
     @State private var showAllWalks = false
@@ -94,8 +97,10 @@ struct BoardView: View {
                             Text(model.trade.bizCaps)
                                 .font(Theme.F.mono(9.5))
                                 .tracking(0.8)
-                            Text("⌄")
-                                .font(Theme.F.mono(9))
+                            // SF Symbol, not a typed glyph: correct optical
+                            // alignment, free Dynamic Type, free VoiceOver.
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
                         }
                         .foregroundStyle(Theme.C.ink60)
                     }
@@ -240,9 +245,8 @@ struct BoardView: View {
 
                     if let reopenError = model.reopenError {
                         // F4 floor: the breadcrumb surfaces; chrome is sac's.
-                        Text(reopenError.uppercased())
-                            .font(Theme.F.mono(8.5))
-                            .tracking(0.4)
+                        Text(reopenError)
+                            .font(Theme.F.ui(13, .medium))
                             .foregroundStyle(Theme.C.amberInk)
                             .padding(.horizontal, Theme.S.screenPad)
                             .padding(.top, 8)
@@ -315,6 +319,85 @@ struct BoardView: View {
                 .presentationBackground(Theme.C.paper)
         }
         .manageSubscriptionsSheet(isPresented: $showManageSubscription)
+    }
+}
+
+
+// MARK: - New job
+
+/// Creating a job, as a sheet.
+///
+/// The `.alert` this replaces gave a ~30pt field and no room for a hint — the
+/// two things this screen needs most, because it is used one-handed standing at
+/// a truck. A sheet affords a 56pt field, a trade-shaped example, and a real
+/// 62pt Save.
+private struct NewJobSheet: View {
+    @Binding var name: String
+    let onCancel: () -> Void
+    let onSave: () -> Void
+    /// Focus the field on appear: this sheet exists to take one short string,
+    /// so making the operator tap again first is a wasted step.
+    @FocusState private var focused: Bool
+
+    private var trimmed: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                SectionLabel("NEW JOB")
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .font(Theme.F.ui(13, .semibold))
+                    .foregroundStyle(Theme.C.ink60)
+            }
+            .padding(.horizontal, Theme.S.screenPad)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+
+            Text("Call it whatever you call it on site.")
+                .font(Theme.F.ui(14, .medium))
+                .foregroundStyle(Theme.C.ink60)
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.bottom, 12)
+
+            // 56pt and recessed, matching the Tier 3 well: a field is something
+            // you type INTO, so it is cut into the sheet rather than raised off
+            // it.
+            TextField("", text: $name, prompt: Text("14 Oakfield — back beds")
+                .foregroundColor(Theme.C.ink35))
+                .font(Theme.F.ui(17, .medium))
+                .foregroundStyle(Theme.C.ink)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .onSubmit { if !trimmed.isEmpty { onSave() } }
+                .focused($focused)
+                .padding(.horizontal, 14)
+                .frame(height: 56)
+                .background(Theme.C.paperDeep)
+                .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1.5) }
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.S.radiusCard)
+                        .stroke(Theme.C.hairline)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
+                .padding(.horizontal, Theme.S.screenPad)
+
+            Spacer(minLength: 0)
+
+            Button(action: onSave) { BlockLabel("SAVE JOB") }
+                .buttonStyle(RaisedBlockStyle(leadingDot: false))
+                // Core rejects an empty name rather than coercing it (R6), so
+                // the button simply does not offer to send one — the style goes
+                // flat, which is now what unpressable looks like.
+                .disabled(trimmed.isEmpty)
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.bottom, 14)
+        }
+        .background(Theme.C.paper)
+        .onAppear { focused = true }
     }
 }
 
@@ -419,12 +502,17 @@ extension BoardView {
         // are invisible as containers and the grouping does nothing.
         .background(Theme.C.paperDeep)
         .onAppear(perform: loadJobs)
-        .alert("New job", isPresented: $showNewJob) {
-            TextField("Name", text: $newJobName)
-            Button("Cancel", role: .cancel) { newJobName = "" }
-            Button("Add") { createJob() }
-        } message: {
-            Text("Call it whatever you call it on site.")
+        // A SHEET, not an `.alert` (design review P1 #9). A TextField inside an
+        // alert is a ~30pt target with no room for a real placeholder — the two
+        // things this needs most, since it is used one-handed on a job site.
+        .sheet(isPresented: $showNewJob) {
+            NewJobSheet(
+                name: $newJobName,
+                onCancel: { newJobName = ""; showNewJob = false },
+                onSave: { createJob(); showNewJob = false }
+            )
+            .presentationDetents([.height(300)])
+            .presentationBackground(Theme.C.paper)
         }
     }
 
@@ -770,7 +858,7 @@ struct CoachCallout: View {
             .background(Theme.C.orangeTint)
             .overlay(Rectangle().stroke(Theme.C.orange, lineWidth: 1.5))
 
-            Text("▾")
+            Image(systemName: "arrowtriangle.down.fill")
                 .font(Theme.F.ui(15, .bold))
                 .foregroundStyle(Theme.C.orange)
                 .frame(maxWidth: .infinity, alignment: pointer)
