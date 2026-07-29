@@ -52,15 +52,27 @@
         </dict>
 
         <!--
-          Photos taken during a walk. Persisted on device and rendered in the
-          app; they are NOT sent to the model — the harness has no image
-          ContentBlock variant (issue #263), so today this is enforced by the
-          plumbing not existing. If #263 lands and photos start being sent,
-          this entry and the ASC answers both have to be revisited.
+          The per-install identifier (InstallIdentity): a random UUID minted on
+          device, sent to our proxy so usage can be metered and rate-limited.
+
+          Declared because it genuinely IS collected under Apple's definition —
+          it leaves the device and the proxy stores it in daily spend counters
+          (`spend:install:<id>:<day>`), which outlives the request it served.
+
+          NOT linked to identity: it is random, it is never tied to a name,
+          email or account, and there is no way to resolve it to a person. NOT
+          used for tracking.
+
+          Photos are deliberately NOT declared. Apple defines "collect" as
+          transmitting off the device, and photos never leave: `ContentBlock`
+          has no image variant (issue #263), so the harness cannot send one, and
+          nothing else uploads them. Declaring them would be inaccurate. If #263
+          lands and photos start being sent, this file AND the App Store Connect
+          answers both have to change.
         -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypePhotosorVideos</string>
+            <string>NSPrivacyCollectedDataTypeDeviceID</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
             <false/>
             <key>NSPrivacyCollectedDataTypeTracking</key>
