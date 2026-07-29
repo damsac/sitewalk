@@ -152,12 +152,26 @@ rule is that nothing may log, store, or forward a request or response body, and
 it forwards bodies byte-identically. We can truthfully say we do not retain
 walk content.
 
-### 4.3 Listing prerequisites
+### 4.3 Subscription disclosure — guideline 3.1.2 (FIXED, #279)
 
-- **Privacy policy URL** and **support URL** are required. `getjefe.netlify.app`
-  can host both; it currently hosts neither.
-- **Version reconciliation**: `Info.plist` says `CFBundleShortVersionString 1.0`;
-  dam's notes say TestFlight is on 2.0.0. Resolve before submitting.
+An auto-renewable subscription must state, **in the binary** and on the purchase
+screen: title, period length, price per period, and functional **Terms of Use**
+and **Privacy Policy** links. The first three were present in #277; the renewal
+terms and both links were not. Fixed in #279 and verified — both URLs return 200.
+
+### 4.4 Listing prerequisites — two of these were my error
+
+- **Privacy policy + support URL already exist** and are already accurate.
+  `getjefe.netlify.app/privacy.html` and `/terms.html` are live, and the policy
+  already says audio never leaves the device *and* that transcript text goes to a
+  third-party processing provider that does not retain it. §4.2's "site copy"
+  half was never a gap — I hadn't read the pages. What remains is the ASC
+  answers, which need Isaac's login.
+- **Version reconciliation was also not a real problem.** The `1.0` I found is
+  the demo `Info.plist`; `project-release.yml` sets `MARKETING_VERSION 2.0.0` and
+  CI overrides it from the tag. The only genuine note: ASC already holds 2.0.0
+  builds, so the first public release must be **≥ 2.0.0** — `v1.0.0` will be
+  rejected as a duplicate/older version.
 - **App Review demo path**: reviewers get a device with no crew and no site. The
   practice walk (#238) is exactly the right asset — a scripted, never-saved dry
   run. Name it in the review notes.
@@ -192,28 +206,31 @@ Ordered by what blocks what, not by size.
 
 ### Tier 0 — cannot submit without these
 
-| # | Item | Owner | Notes |
-|---|------|-------|-------|
-| 0.1 | `PrivacyInfo.xcprivacy` with CA92.1 + C617.1 | sac | §4.1 |
-| 0.2 | App Privacy label + honest transcript disclosure | sac + Isaac | §4.2 |
-| 0.3 | Privacy policy + support URL on getjefe | sac | §4.3 |
-| 0.4 | Version reconciliation | sac | §4.3 |
-| 0.5 | Review notes naming the practice walk | sac | §4.3 |
+| # | Item | Owner | Status |
+|---|------|-------|--------|
+| 0.1 | `PrivacyInfo.xcprivacy` with CA92.1 + C617.1 | sac | **done (#277)** — verified at the built bundle's root |
+| 0.2 | Guideline 3.1.2 subscription disclosure | sac | **done (#279)** |
+| 0.3 | Privacy policy + support URL | — | **already existed** (§4.4) |
+| 0.4 | Version reconciliation | — | **not a real issue** (§4.4); first public release must be ≥ 2.0.0 |
+| 0.5 | App Privacy answers in ASC | **Isaac** | needs ASC login; must match `PrivacyInfo.xcprivacy` |
+| 0.6 | Review notes naming the practice walk | Isaac | at submission |
 
 ### Tier 1 — cannot take money without these
 
-| # | Item | Owner | Notes |
-|---|------|-------|-------|
-| 1.1 | StoreKit 2 products + purchase + **restore** | sac | Restore is an Apple requirement, not a nicety |
-| 1.2 | Entitlement state the app and proxy agree on | sac | Proxy needs to know subscriber vs free |
-| 1.3 | 5-walks/month meter, proxy-side by install id | sac | Keychain install id survives reinstall, so the meter is durable |
-| 1.4 | Paywall at the limit that explains the value | sac | R6 posture: refuse clearly, never degrade silently |
+| # | Item | Owner | Status |
+|---|------|-------|--------|
+| 1.1 | StoreKit 2 products + purchase + **restore** | sac | **done (#277)** |
+| 1.2 | 5-walks/month meter | sac | **done (#277)** — keychain-backed, 16 tests |
+| 1.3 | Paywall at the limit | sac | **done (#277, #279)** |
+| 1.4 | Create the ASC subscription product | **Isaac** | `com.damsac.jefe.pro.monthly`, $12.99/mo, + Paid Apps agreements. Until this exists the paywall shows no price |
+| 1.5 | Sandbox purchase on a device | **Isaac** | the one path no simulator can prove |
+| 1.6 | Proxy-side entitlement enforcement | sac/dam | **deliberately deferred** — v1 gates on-device. Pairs with App Attest (§5); the dollar caps bound the abuse until then |
 
 ### Tier 2 — ships feeling unfinished without these
 
 | # | Item | Owner | Notes |
 |---|------|-------|-------|
-| 2.1 | Photo strip on the notes screen (#224) | sac | §2.2 — the primary use case |
+| 2.1 | Photo strip on the notes screen (#224) | sac | **done (#278)** — strip + full-size viewer |
 | 2.2 | Demo engine honors doc kind (#222) | sac | Before screenshots |
 | 2.3 | A field session on the next build | Isaac | Has out-yielded every audit |
 
