@@ -344,7 +344,7 @@ struct NotesView: View {
                 .foregroundStyle(Theme.C.amberInk)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 11)
-                .overlay(RoundedRectangle(cornerRadius: 4)
+                .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                     .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     .foregroundStyle(Theme.C.orangeDeep.opacity(0.6)))
                 .contentShape(Rectangle())
@@ -429,15 +429,15 @@ struct NotesView: View {
     // content so the swap-in doesn't move anything.
     private var skeleton: some View {
         VStack(alignment: .leading, spacing: 0) {
-            RoundedRectangle(cornerRadius: 2).fill(Theme.C.paperDeep)
+            RoundedRectangle(cornerRadius: Theme.S.radiusCard).fill(Theme.C.paperDeep)
                 .frame(height: 78)
                 .padding(.horizontal, Theme.S.screenPad).padding(.top, 14)
             ForEach(0..<3, id: \.self) { _ in
                 HStack(spacing: 10) {
-                    RoundedRectangle(cornerRadius: 2).fill(Theme.C.paperDeep).frame(width: 44, height: 16)
+                    RoundedRectangle(cornerRadius: Theme.S.radiusCard).fill(Theme.C.paperDeep).frame(width: 44, height: 16)
                     VStack(alignment: .leading, spacing: 5) {
-                        RoundedRectangle(cornerRadius: 2).fill(Theme.C.paperDeep).frame(height: 12).frame(maxWidth: .infinity)
-                        RoundedRectangle(cornerRadius: 2).fill(Theme.C.paperDeep).frame(height: 9).frame(maxWidth: 180)
+                        RoundedRectangle(cornerRadius: Theme.S.radiusCard).fill(Theme.C.paperDeep).frame(height: 12).frame(maxWidth: .infinity)
+                        RoundedRectangle(cornerRadius: Theme.S.radiusCard).fill(Theme.C.paperDeep).frame(height: 9).frame(maxWidth: 180)
                     }
                 }
                 .padding(.horizontal, Theme.S.screenPad).padding(.vertical, 12)
@@ -453,7 +453,7 @@ struct NotesView: View {
             .foregroundStyle(Theme.C.ink35)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 22)
-            .overlay(RoundedRectangle(cornerRadius: 4)
+            .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                 .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 .foregroundStyle(Theme.C.ink35))
             .padding(Theme.S.screenPad)
@@ -473,7 +473,7 @@ struct NotesView: View {
                         .font(Theme.F.mono(9)).foregroundStyle(Theme.C.amberInk)
                 }
                 .padding(9)
-                .overlay(RoundedRectangle(cornerRadius: 3)
+                .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                     .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                     .foregroundStyle(Theme.C.hairline))
                 .contentShape(Rectangle())
@@ -605,7 +605,7 @@ struct NotesView: View {
                     .font(Theme.F.mono(9, .semibold)).tracking(1.0)
                     .foregroundStyle(Theme.C.ink60)
                     .frame(maxWidth: .infinity).frame(height: 40)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.C.hairline, lineWidth: 1.5))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
             }
             .buttonStyle(.plain)
         }

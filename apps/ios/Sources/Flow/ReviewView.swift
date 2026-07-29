@@ -190,7 +190,7 @@ struct ReviewView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 6)
+                            RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                                 .stroke(Theme.C.orangeDeep, lineWidth: 1.5)
                         )
                 }
@@ -221,7 +221,7 @@ struct ReviewView: View {
                     .padding(.vertical, 18)
                     .padding(.horizontal, 10)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                             .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                             .foregroundStyle(Theme.C.ink35)
                     )

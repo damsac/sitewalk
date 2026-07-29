@@ -224,7 +224,7 @@ struct LetterheadStudioView: View {
                 .autocorrectionDisabled()
         }
         .padding(.horizontal, 11).padding(.vertical, 10)
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
     }
 
     // Trade — changes the document types (estimate vs inspection) and the board,
@@ -247,7 +247,7 @@ struct LetterheadStudioView: View {
                     Text("⌄").font(Theme.F.mono(12)).foregroundStyle(Theme.C.ink60)
                 }
                 .padding(.horizontal, 11).padding(.vertical, 11)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+                .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
             }
         }
         .padding(.horizontal, Theme.S.screenPad).padding(.top, 18)
@@ -258,7 +258,7 @@ struct LetterheadStudioView: View {
             sectionLabel("LOGO")
             HStack(spacing: 11) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 4).stroke(Theme.C.hairline, lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5)
                     if let logo = previewLogo {
                         Image(uiImage: logo).resizable().scaledToFit().padding(6)
                     } else {
@@ -271,7 +271,7 @@ struct LetterheadStudioView: View {
                         .font(Theme.F.mono(9, .semibold)).tracking(1.0)
                         .foregroundStyle(Theme.C.paper)
                         .padding(.horizontal, 14).frame(height: 40)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.C.ink))
+                        .background(RoundedRectangle(cornerRadius: Theme.S.radiusCard).fill(Theme.C.ink))
                 }
                 .buttonStyle(.plain)
                 if hasLogo {
@@ -283,7 +283,7 @@ struct LetterheadStudioView: View {
                             .font(Theme.F.mono(9, .semibold)).tracking(1.0)
                             .foregroundStyle(Theme.C.ink60)
                             .padding(.horizontal, 12).frame(height: 40)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.C.hairline, lineWidth: 1.5))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
                 }
@@ -322,7 +322,7 @@ struct LetterheadStudioView: View {
                             .font(Theme.F.mono(9, .semibold)).tracking(0.6)
                             .foregroundStyle(draft.fontKey == font.key ? Theme.C.ink : Theme.C.ink60)
                             .padding(.horizontal, 12).frame(height: 38)
-                            .overlay(RoundedRectangle(cornerRadius: 6)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                                 .stroke(draft.fontKey == font.key ? Theme.C.ink : Theme.C.hairline, lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
@@ -356,7 +356,7 @@ struct LetterheadStudioView: View {
                 .textInputAutocapitalization(.never)
         }
         .padding(.horizontal, 11).padding(.vertical, 10)
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
     }
 
     // Document structure basics (app-side): operator terms + a signature line.
@@ -374,7 +374,7 @@ struct LetterheadStudioView: View {
                     .lineLimit(3...6)
                     .textInputAutocapitalization(.sentences)
                     .padding(.horizontal, 11).padding(.vertical, 10)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.C.hairline, lineWidth: 1.5))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
             }
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -389,7 +389,7 @@ struct LetterheadStudioView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 11)
             .background(Theme.C.sheet)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.C.hairline, lineWidth: 1.5))
+            .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
         }
         .padding(.horizontal, Theme.S.screenPad).padding(.top, 18)
     }
@@ -408,7 +408,7 @@ struct LetterheadStudioView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 12)
         .background(Theme.C.sheet)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.C.hairline, lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
         .padding(.horizontal, Theme.S.screenPad).padding(.top, 18)
     }
 
