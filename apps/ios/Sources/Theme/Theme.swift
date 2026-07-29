@@ -24,7 +24,17 @@ enum Theme {
         static let sheet      = Color(hex: 0xFFFFFE)
         static let ink        = Color(hex: 0x141412)
         static let ink60      = Color(hex: 0x5E5C54)
+        /// Decoration ONLY — hairline strokes, dashes, disabled fills.
+        ///
+        /// 2.39:1 on paper, which fails every WCAG threshold. That is fine for a
+        /// rule or a border, and was not fine for the 23 places it was being
+        /// used as TEXT. Disabled-control text is the one exemption (WCAG 1.4.3
+        /// excludes it), which is why `RaisedBlockStyle` still uses it there.
         static let ink35      = Color(hex: 0xA7A49A)
+        /// Quiet TEXT — 5.1:1 on paper, 4.7:1 on paperDeep, so it clears AA on
+        /// both grounds the app actually uses. The level between `ink60` and
+        /// decoration: still visibly secondary, still legible in sun.
+        static let ink45      = Color(hex: 0x6E6B62)
         static let hairline     = Color(hex: 0x141412).opacity(0.16)
         static let hairlineSoft = Color(hex: 0x141412).opacity(0.09)
 

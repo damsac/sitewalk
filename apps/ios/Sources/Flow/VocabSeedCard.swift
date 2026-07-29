@@ -140,7 +140,7 @@ private struct WrapChips: View {
                 } label: {
                     Text(term)
                         .font(Theme.F.mono(11, .semibold))
-                        .foregroundStyle(on ? Theme.C.ink : Theme.C.ink35)
+                        .foregroundStyle(on ? Theme.C.ink : Theme.C.ink45)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
                         .background(on ? Theme.C.orangeTint : Theme.C.paperDeep)

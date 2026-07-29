@@ -183,7 +183,7 @@ struct BoardView: View {
                     Text("ALL WALKS FILED — SEE JOBS BELOW")
                         .font(Theme.F.mono(8.5))
                         .tracking(0.8)
-                        .foregroundStyle(Theme.C.ink35)
+                        .foregroundStyle(Theme.C.ink45)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 22)
@@ -366,7 +366,7 @@ private struct NewJobSheet: View {
             // you type INTO, so it is cut into the sheet rather than raised off
             // it.
             TextField("", text: $name, prompt: Text("14 Oakfield — back beds")
-                .foregroundColor(Theme.C.ink35))
+                .foregroundColor(Theme.C.ink45))
                 .font(Theme.F.ui(17, .medium))
                 .foregroundStyle(Theme.C.ink)
                 .textInputAutocapitalization(.words)
@@ -800,7 +800,7 @@ struct CustomizeView: View {
         return Button { tab = t } label: {
             Text(label)
                 .font(Theme.F.ui(13.5, .bold)).tracking(0.8)
-                .foregroundStyle(on ? Theme.C.ink : Theme.C.ink35)
+                .foregroundStyle(on ? Theme.C.ink : Theme.C.ink45)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
                 // Each tab draws its own bottom rule so the bar reads as one
