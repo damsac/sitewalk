@@ -99,27 +99,21 @@ struct WalkView: View {
                     // One tap, zero confirm: camera on device, picker on sim.
                     // The shot pins to the item being spoken (see addPhoto).
                     if CameraCapture.isAvailable {
-                        Button { showCamera = true } label: { PhotoSquareButton() }
-                            .buttonStyle(.plain)
+                        Button { showCamera = true } label: { PhotoLabel() }
+                            .buttonStyle(.secondaryBlock)
+                            .frame(width: Theme.S.buttonHeight)
                     } else {
                         PhotosPicker(selection: $pickerItem, matching: .images) {
-                            PhotoSquareButton()
+                            PhotoLabel()
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.secondaryBlock)
+                        .frame(width: Theme.S.buttonHeight)
                     }
                     Button { model.togglePause() } label: {
-                        Text(model.isPaused ? "RESUME" : "PAUSE")
-                            .font(Theme.F.ui(13.5, .bold))
-                            .tracking(1.1)
-                            .foregroundStyle(Theme.C.ink)
-                            .frame(width: 96)
-                            .frame(height: Theme.S.buttonHeight)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Theme.S.radius)
-                                    .stroke(Theme.C.ink, lineWidth: 2)
-                            )
+                        BlockLabel(model.isPaused ? "RESUME" : "PAUSE", size: 13.5)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.secondaryBlock)
+                    .frame(width: 96)
                     // DONE is finishable once ANYTHING has been captured —
                     // transcript OR extracted items (issue #168). On a voice
                     // walk the live board lags the speech (batched extraction),
@@ -127,11 +121,15 @@ struct WalkView: View {
                     // gating on items alone stranded the user on a stuck screen
                     // whenever items hadn't landed yet. Transcript-or-items.
                     let nothingCaptured = model.transcript.isEmpty && model.items.isEmpty
-                    Button { coachDoneShown = true; model.finishWalk() } label: { DoneButton() }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity)
-                        .disabled(nothingCaptured)
-                        .opacity(nothingCaptured ? 0.4 : 1)
+                    // No manual `.opacity` any more: the style drops the lip and
+                    // goes flat when disabled, so DONE reads as physically
+                    // unpressable rather than as a faded live button.
+                    Button { coachDoneShown = true; model.finishWalk() } label: {
+                        BlockLabel("DONE")
+                    }
+                    .buttonStyle(.inkBlock)
+                    .frame(maxWidth: .infinity)
+                    .disabled(nothingCaptured)
                 }
             }
             .padding(.horizontal, Theme.S.screenPad)

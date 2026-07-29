@@ -64,7 +64,8 @@ struct ComponentsPage: View {
 
                 section("CONTROLS — 62PT GLOVE TARGETS")
                 VStack(spacing: 10) {
-                    WalkButton()
+                    Button {} label: { BlockLabel("START WALK") }
+                        .buttonStyle(.primaryBlock)
                     CaptureControls()
                     ReviewBar(sendTitle: land.send)
                 }

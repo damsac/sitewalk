@@ -60,16 +60,16 @@ struct BoardView: View {
                     // pressed-block grammar as START WALK) so it reads as a
                     // button; opens the two-tab PAPERWORK / WORDS sheet.
                     planChip
+                    // Demoted from a raised GOLD chip to Tier 2 ink. The brief
+                    // reserves amber for the live state and the primary action;
+                    // a gold "MY BUSINESS" read as important as START WALK.
+                    // Still obviously a button — which was the real complaint —
+                    // and now 44pt instead of ~29.
                     Button { showCustomize = true } label: {
-                        raisedChip(face: Theme.C.orange, edge: Theme.C.orangeDeep) {
-                            Text("MY BUSINESS")
-                                .font(Theme.F.ui(11, .bold))
-                                .tracking(0.5)
-                                .foregroundStyle(Theme.C.onOrange)
-                        }
-                        .contentShape(Rectangle())
+                        Text("My business")
+                            .font(Theme.F.ui(13, .semibold))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.secondaryChip)
                 }
                 if let profile = model.profile {
                     // Operator mode: the board carries THEIR business. Trade
@@ -216,19 +216,19 @@ struct BoardView: View {
                         }
                     }
                     if model.looseWalks.count > Self.collapsedWalkCount {
+                        // Tier 3: was 8.5pt amber text with no bounds at all
+                        // (~27pt tall). Amber also goes — a disclosure toggle
+                        // is not the screen's primary action.
                         Button { showAllWalks.toggle() } label: {
                             Text(showAllWalks
-                                 ? "SHOW LESS"
-                                 : "SHOW ALL \(model.looseWalks.count) WALKS")
-                                .font(Theme.F.mono(8.5, .semibold))
-                                .tracking(1.0)
-                                .foregroundStyle(Theme.C.orangeDeep)
-                                .padding(.horizontal, Theme.S.screenPad)
-                                .padding(.vertical, 9)
+                                 ? "Show less"
+                                 : "Show all \(model.looseWalks.count) walks")
+                                .font(Theme.F.ui(13, .semibold))
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.wellChip)
+                        .padding(.horizontal, Theme.S.screenPad)
+                        .padding(.vertical, 6)
                         .overlay(alignment: .bottom) {
                             Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
                         }
@@ -286,9 +286,9 @@ struct BoardView: View {
                 coachStartShown = true
                 model.startWalk()
             } label: {
-                WalkButton()
+                BlockLabel("START WALK")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.primaryBlock)
             .padding(.horizontal, Theme.S.screenPad)
             .padding(.bottom, 10)
         }
@@ -340,12 +340,11 @@ extension BoardView {
                 // read as a control — the same grammar the Document Builder's
                 // "NEW DOCUMENT TYPE" already uses.
                 Button { showNewJob = true } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("ADD JOB")
-                            .font(Theme.F.mono(9, .semibold))
-                            .tracking(0.8)
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Add job")
+                            .font(Theme.F.ui(13, .semibold))
                     }
                     .foregroundStyle(Theme.C.orangeDeep)
                     .padding(.horizontal, 8)
@@ -422,18 +421,14 @@ extension BoardView {
     @ViewBuilder
     private var planChip: some View {
         if model.entitlement.isPro {
+            // Tier 3. These OPEN BILLING but read as stamps at ~16pt — the
+            // exact "looks like a label, is actually a button" failure.
             Button { showManageSubscription = true } label: {
-                Text("PRO")
-                    .font(Theme.F.mono(8, .semibold))
-                    .tracking(1.0)
+                Text("Pro")
+                    .font(Theme.F.ui(12, .semibold))
                     .foregroundStyle(Theme.C.greenTag)
-                    .padding(.horizontal, 6)
-                    .padding(.top, 3)
-                    .padding(.bottom, 2)
-                    .background(Theme.C.greenTint)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WellChipStyle(tint: Theme.C.greenTint, text: Theme.C.greenTag, minHeight: 36))
         } else if model.entitlement.canSubscribe {
             // Only shown when the limit is actually being enforced. With no
             // purchasable product the gate declines to block (see
@@ -445,17 +440,15 @@ extension BoardView {
                 model.blockedUsage = nil   // opened by choice, not refused
                 model.showPaywall = true
             } label: {
-                Text(left == 0 ? "0 LEFT" : "\(left) LEFT")
-                    .font(Theme.F.mono(8, .semibold))
-                    .tracking(1.0)
+                Text(left == 0 ? "0 left" : "\(left) left")
+                    .font(Theme.F.ui(12, .semibold))
                     .foregroundStyle(left == 0 ? Theme.C.redTag : Theme.C.ink60)
-                    .padding(.horizontal, 6)
-                    .padding(.top, 3)
-                    .padding(.bottom, 2)
-                    .background(left == 0 ? Theme.C.redTint : Theme.C.paperDeep)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WellChipStyle(
+                tint: left == 0 ? Theme.C.redTint : Theme.C.paperDeep,
+                text: left == 0 ? Theme.C.redTag : Theme.C.ink60,
+                minHeight: 36
+            ))
         }
     }
 
@@ -575,8 +568,8 @@ private struct OperatorJobCard: View {
                     .padding(.leading, Theme.S.screenPad + 2)
                     .padding(.trailing, Theme.S.screenPad)
                     .padding(.vertical, 7)
-                    .contentShape(Rectangle())
                 }
+                .buttonStyle(FieldRowStyle(minHeight: 56))
                 .buttonStyle(.plain)
             }
             .padding(.bottom, walks.isEmpty ? 0 : 8)
@@ -761,6 +754,9 @@ private struct WalkLogRow<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // Tier 4. This row NAVIGATES (it reopens the walk) and until now
+            // said so with nothing at all: no chevron, no fill under the
+            // finger, and ~44pt against a declared `minTarget` of 56.
             Button(action: onOpen) {
                 HStack(spacing: 12) {
                     Text(walk.time)
@@ -783,10 +779,14 @@ private struct WalkLogRow<Trailing: View>: View {
                     }
                     Spacer(minLength: 8)
                     FieldTag(tag: walkTag(walk))
+                    // This row navigates — it reopens the walk — and said so
+                    // with nothing at all until now.
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.C.ink35)
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(FieldRowStyle(minHeight: 62))
 
             trailing
         }
@@ -845,35 +845,27 @@ private struct FileChip: View {
                 }
             }
         } label: {
+            // Tier 3 recessed well, both states. The unfiled state used to be
+            // a 1px DASHED box at ~30pt — dashed reads "empty placeholder" in
+            // app language, which is the exact opposite of "tap me", and Isaac
+            // reported it as not obviously tappable. A well says "press here"
+            // and catches a glove at 44pt.
             if let filedJob {
-                Text(filedJob.name.uppercased())
-                    .font(Theme.F.mono(8, .semibold))
-                    .tracking(0.8)
+                Text(filedJob.name)
+                    .font(Theme.F.ui(12, .semibold))
                     .foregroundStyle(Theme.C.orangeDeep)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 88, alignment: .trailing)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 8)
-                    .background(Theme.C.orangeTint)
-                    .contentShape(Rectangle())
+                    .frame(maxWidth: 96, alignment: .trailing)
             } else {
                 // Unfiled reads as an invitation, not an error — most walks
                 // will sit unfiled for a while and that's fine.
-                Text("FILE")
-                    .font(Theme.F.mono(8, .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.C.ink35)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 2)
-                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-                            .foregroundStyle(Theme.C.ink35)
-                    )
-                    .contentShape(Rectangle())
+                Text("File")
+                    .font(Theme.F.ui(12, .semibold))
+                    .foregroundStyle(Theme.C.ink60)
             }
         }
+        .wellChrome(tint: filedJob == nil ? Theme.C.paperDeep : Theme.C.orangeTint)
         .accessibilityLabel(filedJob.map { "Filed under \($0.name). Change." } ?? "File this walk")
     }
 }

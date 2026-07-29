@@ -103,34 +103,25 @@ struct ReviewView: View {
             .background(Theme.C.paperDeep)
 
             HStack(spacing: 10) {
+                // Tier 2. DISCARD stays ink rather than going red: it abandons
+                // an unsent draft and the walk's notes survive untouched, so
+                // dressing it as destructive would overstate what it does.
                 Button { model.discardDocument() } label: {
-                    Text("DISCARD")
-                        .font(Theme.F.ui(14, .bold))
-                        .tracking(1.1)
-                        .foregroundStyle(Theme.C.ink)
-                        .frame(width: 124)
-                        .frame(height: 58)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.S.radius)
-                                .stroke(Theme.C.ink, lineWidth: 2)
-                        )
+                    BlockLabel("DISCARD", size: 14)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RaisedBlockStyle(
+                    face: Theme.C.sheet, lip: Theme.C.ink.opacity(0.32),
+                    text: Theme.C.ink, border: Theme.C.ink, height: 58
+                ))
+                .frame(width: 124)
+                // Tier 1. Was a hand-stacked ZStack of two rounded rectangles —
+                // the same drawing, but as a View it could never see press
+                // state. This is the screen where money gets confirmed, so it's
+                // also the press that most needs to be felt.
                 Button { model.makePDF() } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: Theme.S.radius)
-                            .fill(Theme.C.orangeDeep)
-                            .offset(y: 3)
-                        RoundedRectangle(cornerRadius: Theme.S.radius)
-                            .fill(Theme.C.orange)
-                        Text(model.document?.send ?? "SEND")
-                            .font(Theme.F.ui(15, .bold))
-                            .tracking(1.4)
-                            .foregroundStyle(Theme.C.onOrange)
-                    }
-                    .frame(height: 58)
+                    BlockLabel(model.document?.send ?? "SEND")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RaisedBlockStyle(height: 58))
                 .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, Theme.S.screenPad)
