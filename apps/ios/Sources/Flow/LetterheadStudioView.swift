@@ -177,7 +177,7 @@ struct LetterheadStudioView: View {
             if let footer = draft.footerText {
                 Text(footer)
                     .font(Theme.F.mono(7)).tracking(1.6)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 12)
             }
@@ -216,7 +216,7 @@ struct LetterheadStudioView: View {
         HStack(spacing: 10) {
             Text(key)
                 .font(Theme.F.mono(8, .semibold)).tracking(1.0)
-                .foregroundStyle(Theme.C.ink35)
+                .foregroundStyle(Theme.C.ink45)
                 .frame(width: 56, alignment: .leading)
             TextField(placeholder, text: text)
                 .font(Theme.F.cond(13, .medium))
@@ -264,7 +264,7 @@ struct LetterheadStudioView: View {
                     if let logo = previewLogo {
                         Image(uiImage: logo).resizable().scaledToFit().padding(6)
                     } else {
-                        Text("NONE").font(Theme.F.mono(8)).foregroundStyle(Theme.C.ink35)
+                        Text("NONE").font(Theme.F.mono(8)).foregroundStyle(Theme.C.ink45)
                     }
                 }
                 .frame(width: 54, height: 54)
@@ -349,7 +349,7 @@ struct LetterheadStudioView: View {
         HStack(spacing: 10) {
             Text(key)
                 .font(Theme.F.mono(8, .semibold)).tracking(1.0)
-                .foregroundStyle(Theme.C.ink35)
+                .foregroundStyle(Theme.C.ink45)
                 .frame(width: 46, alignment: .leading)
             TextField("", text: text)
                 .font(Theme.F.cond(13, .medium))
@@ -369,7 +369,7 @@ struct LetterheadStudioView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("TERMS / PAYMENT")
                     .font(Theme.F.mono(7.5, .semibold)).tracking(1.0)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
                 TextField("50% deposit to schedule · balance on completion · quote valid 30 days",
                           text: $draftLayout.termsText, axis: .vertical)
                     .font(Theme.F.cond(13, .medium))

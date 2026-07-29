@@ -101,7 +101,7 @@ struct VocabularyView: View {
                 Text("NO TERMS YET — ADD THE WORDS CREWS ACTUALLY SAY.\n\u{201C}BOXWOOD\u{201D} · \u{201C}GFCI\u{201D} · \u{201C}HOLLIS\u{201D}")
                     .font(Theme.F.mono(8.5))
                     .tracking(0.6)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
                     .multilineTextAlignment(.center)
                     .lineSpacing(5)
                     .frame(maxWidth: .infinity)
@@ -109,7 +109,7 @@ struct VocabularyView: View {
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                             .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                            .foregroundStyle(Theme.C.ink35)
+                            .foregroundStyle(Theme.C.ink45)
                     )
                     .padding(.horizontal, Theme.S.screenPad)
                     .padding(.top, 16)

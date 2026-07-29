@@ -84,7 +84,7 @@ private struct PDFPageView: View {
                 Text(footer)
                     .font(Theme.F.mono(7))
                     .tracking(1.6)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.bottom, 8)
             }

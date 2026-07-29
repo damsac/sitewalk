@@ -297,7 +297,7 @@ struct NotesView: View {
                 Text("MISSING")
                     .font(Theme.F.mono(7, .semibold))
                     .tracking(0.6)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Theme.C.paperDeep)
             }
@@ -450,12 +450,12 @@ struct NotesView: View {
     private var emptyState: some View {
         Text("NOTHING WAS CAPTURED ON THIS WALK")
             .font(Theme.F.mono(9)).tracking(0.6)
-            .foregroundStyle(Theme.C.ink35)
+            .foregroundStyle(Theme.C.ink45)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 22)
             .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                 .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .foregroundStyle(Theme.C.ink35))
+                .foregroundStyle(Theme.C.ink45))
             .padding(Theme.S.screenPad)
     }
 
@@ -858,7 +858,7 @@ private struct NoteItemEditSheet: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label)
                 .font(Theme.F.mono(8, .semibold)).tracking(1.4)
-                .foregroundStyle(Theme.C.ink35)
+                .foregroundStyle(Theme.C.ink45)
             TextField(placeholder, text: text)
                 .font(Theme.F.cond(15, .semibold))
                 .autocorrectionDisabled()

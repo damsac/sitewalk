@@ -25,12 +25,13 @@ Flighty's core lesson applies directly ([Behind the Design](https://developer.ap
 
 ## Physical constraints (non-negotiable, and where generic AI design always fails)
 
-1. **Sunlight legibility.** Used outdoors at noon. Light/"paper" mode is the default (dark UIs wash out in direct sun). True ink-on-paper contrast (AAA) for body copy; no mid-gray-on-white text.
-   **Known exception, not yet fixed:** deep amber `#9A6A00` on paper is ~4.4:1 —
-   AA for large text, short of the AAA claimed here — so it must not be used
-   below 14pt. `ink35` is weaker still (~2.4:1) and is doing real work in job
-   cards. Either the tokens change or this line does; today the line is
-   aspirational for those two. Dark mode is the secondary theme, not the identity.
+1. **Sunlight legibility.** Used outdoors at noon. Light/"paper" mode is the default (dark UIs wash out in direct sun). True ink-on-paper contrast for body copy; no mid-gray-on-white text. Every
+   token used as TYPE is measured against both grounds the app draws on
+   (`paper` and `paperDeep`): ink is AAA, `amberInk` `#6B4900` is 7.8:1, and
+   quiet text uses `ink45` `#6E6B62` at 5.1:1 / 4.7:1. **`ink35` and
+   `orangeDeep` are deliberately below threshold and are decoration only** —
+   hairlines, dashes, fills, lips — plus disabled-control text, which WCAG
+   1.4.3 exempts and where being faint is the point. Dark mode is the secondary theme, not the identity.
 2. **Gloves and one hand.** Primary actions ≥ 56pt, bottom-anchored in the thumb zone. The mic control is the biggest thing on the screen.
 3. **Glanceable at arm's length.** User is walking with phone at hip. Recording state must be unmistakable from 3 feet: full-screen state change, not a small red dot. One line per captured item — airport-board density discipline.
 4. **Interruptible.** Client walks up mid-recording → pause is instant and obvious; state never ambiguous; nothing lost.

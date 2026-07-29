@@ -66,7 +66,7 @@ struct OnboardingFlow: View {
                     Text("SKIP")
                         .font(Theme.F.mono(9, .semibold))
                         .tracking(1.5)
-                        .foregroundStyle(Theme.C.ink35)
+                        .foregroundStyle(Theme.C.ink45)
                 }
                 .buttonStyle(.plain)
             } else {

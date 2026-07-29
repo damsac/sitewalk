@@ -114,7 +114,7 @@ struct PaywallView: View {
                 // doesn't match. Say nothing about price rather than invent one.
                 Text("Loading…")
                     .font(Theme.F.mono(11))
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
             }
         }
         .padding(.horizontal, Theme.S.screenPad)
@@ -149,7 +149,7 @@ struct PaywallView: View {
             Text("Payment is charged to your Apple ID at confirmation. It renews monthly unless you cancel at least 24 hours before the period ends. Manage or cancel it any time in your Apple ID settings.")
                 .font(Theme.F.mono(9))
                 .lineSpacing(2)
-                .foregroundStyle(Theme.C.ink35)
+                .foregroundStyle(Theme.C.ink45)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 14) {
                 Link("TERMS OF USE", destination: Self.termsURL)

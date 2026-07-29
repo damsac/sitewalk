@@ -193,7 +193,7 @@ private struct SchemaRow: View {
                 Text(summary)
                     .font(Theme.F.mono(10, .regular))
                     .tracking(0.6)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
             }
             Spacer()
             if schema.isBuiltin {
@@ -207,7 +207,7 @@ private struct SchemaRow: View {
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.C.ink35)
+                .foregroundStyle(Theme.C.ink45)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -376,7 +376,7 @@ private struct SchemaEditor: View {
             )
             Text("Documents will be numbered \(prefixPreview)-0001, -0002, and so on.")
                 .font(Theme.F.mono(10, .regular))
-                .foregroundStyle(Theme.C.ink35)
+                .foregroundStyle(Theme.C.ink45)
         }
     }
 
@@ -538,7 +538,7 @@ private struct FieldCard: View {
                 TextField("Field name", text: $field.label)
                     .font(Theme.F.ui(14, .regular))
                 Button(action: onDelete) { Image(systemName: "minus.circle") }
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
             }
             HStack(spacing: 8) {
                 Picker("Type", selection: $field.kind) {
@@ -581,7 +581,7 @@ private struct FieldLabel: View {
         Text(text)
             .font(Theme.F.mono(10, .semibold))
             .tracking(1.4)
-            .foregroundStyle(Theme.C.ink35)
+            .foregroundStyle(Theme.C.ink45)
     }
 }
 

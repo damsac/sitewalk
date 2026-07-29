@@ -215,7 +215,7 @@ struct ReviewView: View {
                 Text("NO PHOTOS — USE THE PHOTO BUTTON DURING A WALK, OR ADD HERE")
                     .font(Theme.F.mono(8))
                     .tracking(0.6)
-                    .foregroundStyle(Theme.C.ink35)
+                    .foregroundStyle(Theme.C.ink45)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
@@ -223,7 +223,7 @@ struct ReviewView: View {
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                             .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                            .foregroundStyle(Theme.C.ink35)
+                            .foregroundStyle(Theme.C.ink45)
                     )
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 10)], alignment: .leading, spacing: 10) {
