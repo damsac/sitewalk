@@ -29,6 +29,7 @@ struct PaywallView: View {
                     headline
                     priceBlock
                     reassurance
+                    legalBlock
                     if let error = entitlement.purchaseError {
                         Text(error)
                             .font(Theme.F.mono(10))
@@ -129,6 +130,45 @@ struct PaywallView: View {
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 26)
     }
+
+    /// Apple's required subscription disclosure (App Review 3.1.2).
+    ///
+    /// An auto-renewable subscription must state, IN THE BINARY and on the
+    /// purchase screen: the title, the length of the period, the price per
+    /// period, and functional links to the Terms of Use (EULA) and Privacy
+    /// Policy. Missing any of it is a hard rejection, not a note. Title,
+    /// length, and price are above; this carries the renewal terms and the two
+    /// links.
+    ///
+    /// The renewal sentence is Apple's own required substance, in plain words:
+    /// billing is on the Apple ID, it renews unless cancelled, and cancellation
+    /// is 24 hours before the period ends. Anyone paying $12.99 a month deserves
+    /// to read that before paying rather than discover it after.
+    private var legalBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Payment is charged to your Apple ID at confirmation. It renews monthly unless you cancel at least 24 hours before the period ends. Manage or cancel it any time in your Apple ID settings.")
+                .font(Theme.F.mono(9))
+                .lineSpacing(2)
+                .foregroundStyle(Theme.C.ink35)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 14) {
+                Link("TERMS OF USE", destination: Self.termsURL)
+                Link("PRIVACY POLICY", destination: Self.privacyURL)
+            }
+            .font(Theme.F.mono(9, .semibold))
+            .tracking(0.8)
+            .foregroundStyle(Theme.C.orangeDeep)
+        }
+        .padding(.horizontal, Theme.S.screenPad)
+        .padding(.top, 24)
+    }
+
+    // swiftlint:disable force_unwrapping
+    // Both are literals verified to parse; a nil here would silently drop a
+    // link Apple requires to be present and functional.
+    static let termsURL = URL(string: "https://getjefe.netlify.app/terms.html")!
+    static let privacyURL = URL(string: "https://getjefe.netlify.app/privacy.html")!
+    // swiftlint:enable force_unwrapping
 
     private func row(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 9) {
