@@ -259,4 +259,18 @@ extension AppModel {
     private func deletePhotoFile(_ name: String) {
         try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(name))
     }
+
+    /// On-disk location of a stored photo. `nonisolated static` because views
+    /// need it to render a thumbnail and have no business reaching into the
+    /// model's actor to do it — and because two screens now display photos, so
+    /// the path construction has exactly one home.
+    ///
+    /// Deliberately does NOT create the directory (unlike `photosDirectory`):
+    /// reading a photo must never have a side effect.
+    nonisolated static func photoURL(filename: String) -> URL {
+        FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("photos", isDirectory: true)
+            .appendingPathComponent(filename)
+    }
 }
