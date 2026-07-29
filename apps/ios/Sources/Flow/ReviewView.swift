@@ -230,10 +230,9 @@ struct ReviewView: View {
     }
 
     private func photoThumbnail(_ photo: PhotoModel, index: Int) -> some View {
-        let url = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("photos")
-            .appendingPathComponent(photo.filename)
+        // Shared with the notes screen's strip (#224) — two screens display
+        // photos now, so the path construction has exactly one home.
+        let url = AppModel.photoURL(filename: photo.filename)
         return VStack(alignment: .leading, spacing: 3) {
             ZStack(alignment: .topTrailing) {
                 Group {
