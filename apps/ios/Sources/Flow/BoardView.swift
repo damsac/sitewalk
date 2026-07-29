@@ -140,13 +140,17 @@ struct BoardView: View {
                 if model.profile != nil {
                 // Operator mode: no fixture crew/sync strip, no fixture jobs.
                 // The board logs the walks actually finished this session.
-                SectionHead(
-                    left: "TODAY",
-                    right: "\(model.sessionWalks.count) \(model.sessionWalks.count == 1 ? "WALK" : "WALKS")",
-                    rightColor: Theme.C.orangeDeep
-                )
-
+                //
+                // Only UNFILED walks show here, grouped by day. Operator report
+                // 2026-07-27 ("random walks"): the old top list was a single
+                // hardcoded "TODAY" that actually showed the ENTIRE history
+                // newest-first, AND filed walks appeared twice (loose up top and
+                // under their job card). Now a walk lives in exactly one place —
+                // loose here until filed, then under its job alone — and the
+                // loose list is honestly labelled TODAY / EARLIER by date.
                 if model.sessionWalks.isEmpty {
+                    // Fresh board — no walks at all yet.
+                    SectionHead(left: "TODAY", right: "0 WALKS", rightColor: Theme.C.orangeDeep)
                     // Honest empty state, same dashed-box idiom as the
                     // vocabulary editor's.
                     Text("NO WALKS YET — TAP START WALK")
@@ -163,24 +167,56 @@ struct BoardView: View {
                         )
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
+                } else if model.looseWalks.isEmpty {
+                    // Walks exist but every one is filed under a job below —
+                    // nothing loose to list. Say so rather than showing an empty
+                    // "TODAY"; this is also filing's payoff ("it moved under the
+                    // job").
+                    SectionHead(left: "UNFILED", right: "0 WALKS", rightColor: Theme.C.orangeDeep)
+                    Text("ALL WALKS FILED — SEE JOBS BELOW")
+                        .font(Theme.F.mono(8.5))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.C.ink35)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 22)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                .foregroundStyle(Theme.C.ink35)
+                        )
+                        .padding(.horizontal, Theme.S.screenPad)
+                        .padding(.top, 16)
                 } else {
                     // Plan 20 D5: rows are tappable — reopen the walk's notes.
                     // // sac: the reopen affordance visuals (chevron? row
                     // // sac: press state?) + the reopened banner are yours.
-                    ForEach(visibleWalks) { walk in
-                        WalkLogRow(walk: walk) {
-                            model.reopenWalk(sessionId: walk.sessionId)
-                        } trailing: {
-                            FileChip(walk: walk, jobs: activeJobs) { jobId in
-                                fileWalk(walk, to: jobId)
+                    // One SectionHead per non-empty date group (TODAY / EARLIER),
+                    // over the CAPPED list: collapsing and date-grouping compose
+                    // in that order, so the collapsed view shows the 3 newest
+                    // unfiled walks (in practice all TODAY) and expanding reveals
+                    // the older ones under their own head.
+                    ForEach(visibleSections) { section in
+                        SectionHead(
+                            left: section.title,
+                            right: "\(section.walks.count) \(section.walks.count == 1 ? "WALK" : "WALKS")",
+                            rightColor: Theme.C.orangeDeep
+                        )
+                        ForEach(section.walks) { walk in
+                            WalkLogRow(walk: walk) {
+                                model.reopenWalk(sessionId: walk.sessionId)
+                            } trailing: {
+                                FileChip(walk: walk, jobs: activeJobs) { jobId in
+                                    fileWalk(walk, to: jobId)
+                                }
                             }
                         }
                     }
-                    if model.sessionWalks.count > Self.collapsedWalkCount {
+                    if model.looseWalks.count > Self.collapsedWalkCount {
                         Button { showAllWalks.toggle() } label: {
                             Text(showAllWalks
                                  ? "SHOW LESS"
-                                 : "SHOW ALL \(model.sessionWalks.count) WALKS")
+                                 : "SHOW ALL \(model.looseWalks.count) WALKS")
                                 .font(Theme.F.mono(8.5, .semibold))
                                 .tracking(1.0)
                                 .foregroundStyle(Theme.C.orangeDeep)
@@ -206,7 +242,7 @@ struct BoardView: View {
                     }
                 }
 
-                // JOBS — the board's organizing unit, below TODAY on purpose.
+                // JOBS — the board's organizing unit, below the walk log on purpose.
                 // Walk-first (Isaac, 07-26): START WALK stays instant and
                 // unblocked at the truck door; jobs are where work accumulates,
                 // not a gate in front of recording it.
@@ -362,11 +398,23 @@ extension BoardView {
 
     var activeJobs: [JobModel] { operatorJobs.filter { $0.status == .active } }
 
-    /// Today's walks, capped until expanded.
+    /// The UNFILED walks, capped until expanded.
+    ///
+    /// Reads `looseWalks`, not `sessionWalks`: a filed walk lives under its job
+    /// card and must not also sit loose up top, or it appears twice and the cap
+    /// is spent showing a walk that is already visible elsewhere.
     var visibleWalks: [AppModel.WalkRecord] {
         showAllWalks
-            ? model.sessionWalks
-            : Array(model.sessionWalks.prefix(Self.collapsedWalkCount))
+            ? model.looseWalks
+            : Array(model.looseWalks.prefix(Self.collapsedWalkCount))
+    }
+
+    /// Those same walks split into honest date groups. Grouping the CAPPED list
+    /// (rather than capping each group) keeps one rule — "at most N rows before
+    /// you ask for more" — instead of a cap that silently multiplies by however
+    /// many days the operator happens to have walked.
+    var visibleSections: [AppModel.WalkSection] {
+        AppModel.groupWalksByDay(visibleWalks, now: Date(), calendar: .current)
     }
 
     func loadJobs() {

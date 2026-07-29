@@ -86,10 +86,15 @@ final class AppModel {
             return sent ? .documented : .saved
         }
 
-        /// Raw start time. Kept alongside the formatted `time` because the
-        /// TODAY list wants a clock ("9:41") while a job card spanning months
-        /// needs a date — and "9:41" on a walk from March is useless for the
-        /// case jobs exist to serve.
+        /// Raw start time, epoch SECONDS (core `started_at`). Kept alongside
+        /// the formatted `time` for two reasons that arrived independently:
+        /// the TODAY list wants a clock ("9:41") while a job card spanning
+        /// months needs a date, AND the loose list groups by calendar day
+        /// (TODAY / EARLIER) rather than piling a multi-day history under one
+        /// hardcoded "TODAY" (operator report 2026-07-27: "random walks").
+        ///
+        /// `UInt64` to match `WalkSummary.startedAt` at the FFI boundary —
+        /// converted at the two comparison sites rather than stored lossy.
         let startedAt: UInt64
 
         /// The job this walk is filed under; nil = unfiled. Set AFTER the walk
@@ -101,13 +106,13 @@ final class AppModel {
              sessionId: String, queued: Bool, jobId: String? = nil,
              startedAt: UInt64 = 0) {
             self.jobId = jobId
-            self.startedAt = startedAt
             self.time = time
             self.docNo = docNo
             self.docKind = docKind
             self.sent = sent
             self.sessionId = sessionId
             self.queued = queued
+            self.startedAt = startedAt
         }
 
         /// Board hydration mapping (Plan 20 F7, pinned): `sent` reads a
@@ -787,6 +792,61 @@ final class AppModel {
         if !fetched.isEmpty || isRealCore {
             sessionWalks = fetched.map(WalkRecord.init)
         }
+    }
+
+    /// One dated group of loose walks for the board's top list.
+    struct WalkSection: Identifiable {
+        /// The title doubles as a stable id — at most one TODAY and one
+        /// EARLIER section exist at a time.
+        var id: String { title }
+        let title: String
+        let walks: [WalkRecord]
+    }
+
+    /// Walks not yet filed under any job — the board's top list. A filed walk
+    /// lives under its job card only (see `BoardView.walks(for:)`), so it must
+    /// NOT also appear loose up top. Operator report 2026-07-27 ("random
+    /// walks"): the old top list was unfiltered, so a filed walk showed twice
+    /// (loose up top AND under its job), which read as clutter/duplication.
+    var looseWalks: [WalkRecord] {
+        sessionWalks.filter { $0.jobId == nil }
+    }
+
+    /// The board's top list, split into honest date groups so a multi-day
+    /// history isn't piled under a single hardcoded "TODAY" (operator report
+    /// 2026-07-27: days-old walks under "TODAY" read as "a bunch of random
+    /// walks"). Newest-first order within each group is preserved from
+    /// `sessionWalks`; empty groups are dropped.
+    var looseWalkSections: [WalkSection] {
+        Self.looseWalkSections(from: sessionWalks, now: Date(), calendar: .current)
+    }
+
+    /// The full board top-list pipeline: keep only unfiled walks, then split
+    /// them into TODAY / EARLIER. Pure and `nonisolated` so the whole thing is
+    /// unit-testable with a fixed `now`/`calendar` (no wall clock, no live
+    /// `sessionWalks`).
+    nonisolated static func looseWalkSections(
+        from walks: [WalkRecord], now: Date, calendar: Calendar
+    ) -> [WalkSection] {
+        groupWalksByDay(walks.filter { $0.jobId == nil }, now: now, calendar: calendar)
+    }
+
+    /// Split walks into TODAY / EARLIER by calendar day. Pure and `nonisolated`
+    /// so it's unit-testable with a fixed `now`/`calendar` (no wall clock).
+    nonisolated static func groupWalksByDay(
+        _ walks: [WalkRecord], now: Date, calendar: Calendar
+    ) -> [WalkSection] {
+        let startOfToday = calendar.startOfDay(for: now)
+        var today: [WalkRecord] = []
+        var earlier: [WalkRecord] = []
+        for walk in walks {
+            let day = Date(timeIntervalSince1970: TimeInterval(walk.startedAt))
+            if day >= startOfToday { today.append(walk) } else { earlier.append(walk) }
+        }
+        var sections: [WalkSection] = []
+        if !today.isEmpty { sections.append(WalkSection(title: "TODAY", walks: today)) }
+        if !earlier.isEmpty { sections.append(WalkSection(title: "EARLIER", walks: earlier)) }
+        return sections
     }
 
     /// Files a walk under a job (or unfiles it with nil), then refreshes.
