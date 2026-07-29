@@ -260,6 +260,29 @@ private struct SchemaEditor: View {
 
     private var problem: String? { SchemaValidation.firstProblem(in: draft) }
 
+    /// What actually gets sent to `save_document_schema`.
+    ///
+    /// `save` upserts BY ID, so sending a built-in's id back overwrites the
+    /// built-in in place — while this screen promised "saving creates your own
+    /// copy, the default stays available." That was simply false, and it took
+    /// the shipped default with it.
+    ///
+    /// Clearing the id makes core mint a new one, so the copy is real. If the
+    /// operator also renamed it, the kind is re-derived: a built-in keeps its
+    /// kind frozen (that is what `buildDocument` resolves against), but a
+    /// RENAMED copy is a different document type and must not keep answering
+    /// to "estimate" — otherwise a button labelled RFP builds an estimate.
+    private func saveShape(of draft: DocumentSchemaModel) -> DocumentSchemaModel {
+        guard draft.isBuiltin else { return draft }
+        var copy = draft
+        copy.id = ""            // create, don't overwrite the shipped default
+        copy.isBuiltin = false
+        if draft.label != original.label {
+            copy.kind = Self.slug(draft.label)
+        }
+        return copy
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             editorBar
@@ -283,7 +306,7 @@ private struct SchemaEditor: View {
                 .font(Theme.F.mono(11, .semibold))
                 .foregroundStyle(Theme.C.ink60)
             Spacer()
-            Button("SAVE") { onSave(draft) }
+            Button("SAVE") { onSave(saveShape(of: draft)) }
                 .font(Theme.F.mono(11, .semibold))
                 .foregroundStyle(problem == nil ? Theme.C.orangeDeep : Theme.C.ink35)
                 .disabled(problem != nil)
@@ -310,8 +333,8 @@ private struct SchemaEditor: View {
 
     private var builtinNote: some View {
         Text(
-            "This is a default document type. Saving changes creates your own copy — "
-                + "the default stays available."
+            "This is a default document type. Saving makes your own copy — the "
+                + "original stays. Rename it and it becomes a new kind of document."
         )
         .font(Theme.F.ui(13, .regular))
         .foregroundStyle(Theme.C.ink60)

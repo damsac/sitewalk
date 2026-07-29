@@ -891,7 +891,14 @@ final class AppModel {
             } catch {
                 Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "document")
                     .error("buildDocument(\(kind, privacy: .public)) failed: \(error, privacy: .public)")
-                self.documentBuildError = "Couldn’t build the \(DocKinds.label(for: kind).lowercased()) — tap to try again."
+                // Carry the REAL reason. The old message said "couldn't build
+                // the report" for ANY custom kind (DocKinds.label falls through
+                // to "Report" for anything it doesn't hardcode), so a failure on
+                // a custom document type named itself after the wrong document
+                // and explained nothing. Isaac tapped a custom button and got
+                // no usable signal at all.
+                self.documentBuildError =
+                    "Couldn’t build it — \(error.localizedDescription)"
             }
         }
     }
