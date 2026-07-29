@@ -331,7 +331,7 @@ struct GalleryRoot: View {
                             Spacer()
                             Text("→")
                                 .font(Theme.F.mono(11))
-                                .foregroundStyle(Theme.C.orangeDeep)
+                                .foregroundStyle(Theme.C.amberInk)
                         }
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.vertical, 16)

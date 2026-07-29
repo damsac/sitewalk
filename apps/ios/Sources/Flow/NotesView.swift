@@ -341,7 +341,7 @@ struct NotesView: View {
         Button { itemEdit = .add } label: {
             Text("＋ ADD LINE")
                 .font(Theme.F.mono(9, .semibold)).tracking(1.0)
-                .foregroundStyle(Theme.C.orangeDeep)
+                .foregroundStyle(Theme.C.amberInk)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 11)
                 .overlay(RoundedRectangle(cornerRadius: 4)
@@ -371,7 +371,7 @@ struct NotesView: View {
             Text("WALK NOTES")
                 .font(Theme.F.mono(9, .semibold))
                 .tracking(2.0)
-                .foregroundStyle(Theme.C.orangeDeep)
+                .foregroundStyle(Theme.C.amberInk)
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 12)
@@ -470,7 +470,7 @@ struct NotesView: View {
                         .foregroundStyle(Theme.C.ink60)
                     Spacer()
                     Text(showTranscript ? "▾" : "▸")
-                        .font(Theme.F.mono(9)).foregroundStyle(Theme.C.orangeDeep)
+                        .font(Theme.F.mono(9)).foregroundStyle(Theme.C.amberInk)
                 }
                 .padding(9)
                 .overlay(RoundedRectangle(cornerRadius: 3)
@@ -549,7 +549,7 @@ struct NotesView: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .bold))
                     }
-                    .foregroundStyle(filedJob == nil ? Theme.C.ink60 : Theme.C.orangeDeep)
+                    .foregroundStyle(filedJob == nil ? Theme.C.ink60 : Theme.C.amberInk)
                     .padding(.horizontal, 9).padding(.vertical, 7)
                     .background(filedJob == nil ? Theme.C.paperDeep : Theme.C.orangeTint)
                     .contentShape(Rectangle())
@@ -567,7 +567,7 @@ struct NotesView: View {
                 // on their behalf so they can correct it.
                 Text("HEARD “\(auto.jobName.uppercased())” IN THE WALK — FILED THERE. TAP TO CHANGE.")
                     .font(Theme.F.mono(8)).tracking(0.4)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -812,7 +812,7 @@ private struct NoteItemEditSheet: View {
                 Spacer()
                 Text(isEdit ? "EDIT LINE" : "ADD LINE")
                     .font(Theme.F.mono(9, .semibold)).tracking(2.0)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
             }
             .padding(.horizontal, Theme.S.screenPad).padding(.top, 18).padding(.bottom, 14)
             .overlay(alignment: .bottom) { Theme.C.ink.frame(height: 2) }

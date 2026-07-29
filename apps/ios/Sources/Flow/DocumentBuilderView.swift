@@ -117,7 +117,7 @@ struct DocumentBuilderView: View {
                             .font(Theme.F.mono(11, .semibold))
                             .tracking(1.2)
                     }
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 18)
                 }
@@ -325,7 +325,7 @@ private struct SchemaEditor: View {
             Spacer()
             Button("SAVE") { onSave(saveShape(of: draft)) }
                 .font(Theme.F.mono(11, .semibold))
-                .foregroundStyle(problem == nil ? Theme.C.orangeDeep : Theme.C.ink35)
+                .foregroundStyle(problem == nil ? Theme.C.amberInk : Theme.C.ink35)
                 .disabled(problem != nil)
         }
         .tracking(1.0)
@@ -430,7 +430,7 @@ private struct SchemaEditor: View {
             Label("ADD SECTION", systemImage: "plus")
                 .font(Theme.F.mono(11, .semibold))
                 .tracking(1.2)
-                .foregroundStyle(Theme.C.orangeDeep)
+                .foregroundStyle(Theme.C.amberInk)
         }
         .buttonStyle(.plain)
     }
@@ -499,7 +499,7 @@ private struct SectionCard: View {
                 } label: {
                     Label("Add field", systemImage: "plus")
                         .font(Theme.F.ui(13, .regular))
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                 }
                 .buttonStyle(.plain)
             }

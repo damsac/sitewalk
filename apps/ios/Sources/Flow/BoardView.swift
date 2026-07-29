@@ -36,7 +36,7 @@ struct BoardView: View {
                     Text(model.boardDateLabel)
                         .font(Theme.F.mono(10, .semibold))
                         .tracking(2.0)
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                     Spacer()
                     // Practice-run marker: the armed dry run is visible on the
                     // board (the old mode chip carried this; the chip is gone —
@@ -153,7 +153,7 @@ struct BoardView: View {
                 // loose list is honestly labelled TODAY / EARLIER by date.
                 if model.sessionWalks.isEmpty {
                     // Fresh board — no walks at all yet.
-                    SectionHead(left: "TODAY", right: "0 WALKS", rightColor: Theme.C.orangeDeep)
+                    SectionHead(left: "TODAY", right: "0 WALKS", rightColor: Theme.C.amberInk)
                     // Honest empty state, same dashed-box idiom as the
                     // vocabulary editor's.
                     Text("NO WALKS YET — TAP START WALK")
@@ -175,7 +175,7 @@ struct BoardView: View {
                     // nothing loose to list. Say so rather than showing an empty
                     // "TODAY"; this is also filing's payoff ("it moved under the
                     // job").
-                    SectionHead(left: "UNFILED", right: "0 WALKS", rightColor: Theme.C.orangeDeep)
+                    SectionHead(left: "UNFILED", right: "0 WALKS", rightColor: Theme.C.amberInk)
                     Text("ALL WALKS FILED — SEE JOBS BELOW")
                         .font(Theme.F.mono(8.5))
                         .tracking(0.8)
@@ -203,7 +203,7 @@ struct BoardView: View {
                         SectionHead(
                             left: section.title,
                             right: "\(section.walks.count) \(section.walks.count == 1 ? "WALK" : "WALKS")",
-                            rightColor: Theme.C.orangeDeep
+                            rightColor: Theme.C.amberInk
                         )
                         ForEach(section.walks) { walk in
                             WalkLogRow(walk: walk) {
@@ -239,7 +239,7 @@ struct BoardView: View {
                         Text(reopenError.uppercased())
                             .font(Theme.F.mono(8.5))
                             .tracking(0.4)
-                            .foregroundStyle(Theme.C.orangeDeep)
+                            .foregroundStyle(Theme.C.amberInk)
                             .padding(.horizontal, Theme.S.screenPad)
                             .padding(.top, 8)
                     }
@@ -256,7 +256,7 @@ struct BoardView: View {
                 SectionHead(
                     left: "TODAY",
                     right: "\(model.jobs.filter { !$0.done }.count) OPEN",
-                    rightColor: Theme.C.orangeDeep
+                    rightColor: Theme.C.amberInk
                 )
 
                 ForEach(model.jobs) { job in
@@ -333,7 +333,7 @@ extension BoardView {
             HStack(spacing: 10) {
                 SectionLabel("JOBS")
                 Spacer()
-                SectionLabel("\(activeJobs.count) OPEN", color: Theme.C.orangeDeep)
+                SectionLabel("\(activeJobs.count) OPEN", color: Theme.C.amberInk)
                 // Labeled, not a bare glyph: Isaac's field report was "the plus
                 // sign to add a new job isn't apparent enough." A lone + next
                 // to a count reads as decoration. Words and a border make it
@@ -346,7 +346,7 @@ extension BoardView {
                         Text("Add job")
                             .font(Theme.F.ui(13, .semibold))
                     }
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .overlay(
@@ -536,7 +536,7 @@ private struct OperatorJobCard: View {
                 Text(walkCountLabel)
                     .font(Theme.F.mono(8.5))
                     .tracking(0.8)
-                    .foregroundStyle(walks.isEmpty ? Theme.C.ink35 : Theme.C.orangeDeep)
+                    .foregroundStyle(walks.isEmpty ? Theme.C.ink60 : Theme.C.amberInk)
             }
             .padding(.horizontal, Theme.S.screenPad)
             .padding(.top, 13)
@@ -623,7 +623,7 @@ struct CustomizeView: View {
             HStack {
                 Text("MY BUSINESS")
                     .font(Theme.F.mono(9, .semibold)).tracking(2.0)
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                 Spacer()
                 Button { dismiss() } label: {
                     Text("CLOSE")
@@ -720,7 +720,7 @@ struct CoachCallout: View {
                     Text("GOT IT")
                         .font(Theme.F.mono(9, .semibold))
                         .tracking(1.0)
-                        .foregroundStyle(Theme.C.orangeDeep)
+                        .foregroundStyle(Theme.C.amberInk)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -853,7 +853,7 @@ private struct FileChip: View {
             if let filedJob {
                 Text(filedJob.name)
                     .font(Theme.F.ui(12, .semibold))
-                    .foregroundStyle(Theme.C.orangeDeep)
+                    .foregroundStyle(Theme.C.amberInk)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 96, alignment: .trailing)
