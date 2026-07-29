@@ -156,18 +156,17 @@ struct BoardView: View {
                     SectionHead(left: "TODAY", right: "0 WALKS", rightColor: Theme.C.amberInk)
                     // Honest empty state, same dashed-box idiom as the
                     // vocabulary editor's.
-                    Text("NO WALKS YET — TAP START WALK")
-                        .font(Theme.F.mono(8.5))
-                        .tracking(0.8)
-                        .foregroundStyle(Theme.C.ink35)
+                    Text("No walks yet. Tap Start walk and talk through the job.")
+                        .font(Theme.F.ui(14, .medium))
+                        .foregroundStyle(Theme.C.ink60)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 26)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                                .foregroundStyle(Theme.C.ink35)
-                        )
+                        // Filled, not dashed. Dashed reads "disabled" in app
+                        // language; a quiet filled panel reads "nothing here
+                        // yet", which is what this actually is.
+                        .background(Theme.C.paperDeep)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else if model.looseWalks.isEmpty {
@@ -183,11 +182,11 @@ struct BoardView: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 22)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                                .foregroundStyle(Theme.C.ink35)
-                        )
+                        // Filled, not dashed. Dashed reads "disabled" in app
+                        // language; a quiet filled panel reads "nothing here
+                        // yet", which is what this actually is.
+                        .background(Theme.C.paperDeep)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else {
@@ -219,16 +218,21 @@ struct BoardView: View {
                         // Tier 3: was 8.5pt amber text with no bounds at all
                         // (~27pt tall). Amber also goes — a disclosure toggle
                         // is not the screen's primary action.
-                        Button { showAllWalks.toggle() } label: {
-                            Text(showAllWalks
-                                 ? "Show less"
-                                 : "Show all \(model.looseWalks.count) walks")
-                                .font(Theme.F.ui(13, .semibold))
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        // Sized to its label, not the screen. Full-width gave a
+                        // disclosure toggle the visual weight of a primary
+                        // action (Isaac's on-device shot: a large grey slab).
+                        HStack {
+                            Button { showAllWalks.toggle() } label: {
+                                Text(showAllWalks
+                                     ? "Show less"
+                                     : "Show all \(model.looseWalks.count) walks")
+                                    .font(Theme.F.ui(13, .semibold))
+                            }
+                            .buttonStyle(WellChipStyle(minHeight: 34))
+                            Spacer()
                         }
-                        .buttonStyle(.wellChip)
                         .padding(.horizontal, Theme.S.screenPad)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 8)
                         .overlay(alignment: .bottom) {
                             Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
                         }
@@ -753,49 +757,87 @@ private struct WalkLogRow<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Tier 4. This row NAVIGATES (it reopens the walk) and until now
-            // said so with nothing at all: no chevron, no fill under the
-            // finger, and ~44pt against a declared `minTarget` of 56.
-            Button(action: onOpen) {
-                HStack(spacing: 12) {
-                    Text(walk.time)
-                        .font(Theme.F.mono(11, .medium))
+        // TWO LINES, not one (Isaac, on-device 2026-07-29: "this section looks
+        // cramped… I can't read the full sentence on each walk").
+        //
+        // The single-line version crammed five things across one row — time,
+        // title, status tag, chevron and the FILE chip — so the title, the only
+        // part that is actually CONTENT, got squeezed to "Field session t…".
+        // Everything decorative was winning space from the one thing an
+        // operator is reading. The title now owns the full width and gets two
+        // lines; the small stuff moves to a quiet metadata line beneath it.
+        Button(action: onOpen) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(walk.time)
+                    .font(Theme.F.mono(11, .medium))
+                    .foregroundStyle(Theme.C.ink)
+                    .frame(width: 46, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    // Two lines, and the full remaining width. A walk summary
+                    // is a sentence; one truncated line of it is useless for
+                    // "what happened here?", which is the whole reason the
+                    // summary is the title (#221).
+                    Text(walk.title)
+                        .font(Theme.F.ui(14.5, .semibold))
                         .foregroundStyle(Theme.C.ink)
-                        .frame(width: 46, alignment: .leading)
-                    // What the walk WAS, not what document it might become
-                    // (#221). This led with `docNo`, which is synthesized empty
-                    // for every stored walk — so each hydrated row rendered
-                    // with a blank title — over a `docKind` subtitle that reads
-                    // as a claim an estimate exists when none was built.
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(walk.title)
-                            .font(Theme.F.ui(14.5, .semibold))
-                            .lineLimit(1)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 8) {
                         Text(walk.subtitle)
                             .font(Theme.F.cond(11.5, .medium))
                             .foregroundStyle(Theme.C.ink60)
                             .lineLimit(1)
+                        // Only NOTABLE states get a tag. "Notes saved" is what
+                        // nearly every walk is, so a chip saying it carried
+                        // almost no information while eating the width the
+                        // title needed — and sitting it beside a chevron and a
+                        // FILE button made three controls compete for the same
+                        // corner ("that looks weird").
+                        if let tag = notableTag(walk) {
+                            FieldTag(tag: tag)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                        Spacer(minLength: 8)
+                        // Filing lives on the metadata line now, right-aligned
+                        // under the chevron rather than fighting it for the
+                        // same corner.
+                        trailing
                     }
-                    Spacer(minLength: 8)
-                    FieldTag(tag: walkTag(walk))
-                    // This row navigates — it reopens the walk — and said so
-                    // with nothing at all until now.
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.C.ink35)
                 }
-            }
-            .buttonStyle(FieldRowStyle(minHeight: 62))
 
-            trailing
+                // The row's own affordance, alone in the trailing position so
+                // it unambiguously belongs to the row.
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.C.ink60)
+                    .padding(.top, 2)
+            }
+            .padding(.leading, Theme.S.screenPad)
+            .padding(.trailing, Theme.S.screenPad)
+            .padding(.vertical, 12)
         }
-        .padding(.leading, Theme.S.screenPad)
-        .padding(.trailing, Theme.S.screenPad - 6)
-        .padding(.vertical, 13)
+        .buttonStyle(FieldRowStyle(minHeight: 62))
         // No dimming. A walk with no document is a normal, complete walk —
         // fading it implied "lesser" or "dead" and made a saved walk look lost.
         .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
+    }
+}
+
+/// The tag a row shows — nil when there is nothing worth saying.
+///
+/// "NOTES SAVED" is the state of nearly every finished walk, so rendering it on
+/// every row is pure furniture: it competes with the title for width and tells
+/// the operator something they already assume. SENT and SAVING are genuinely
+/// worth a glance, so those keep a chip.
+private func notableTag(_ walk: AppModel.WalkRecord) -> TagFixture? {
+    switch walk.disposition {
+    case .saved:      return nil
+    case .saving:     return TagFixture(kind: .yellow, label: "SAVING")
+    case .documented: return TagFixture(kind: .green, label: "SENT")
     }
 }
 
@@ -865,7 +907,13 @@ private struct FileChip: View {
                     .foregroundStyle(Theme.C.ink60)
             }
         }
-        .wellChrome(tint: filedJob == nil ? Theme.C.paperDeep : Theme.C.orangeTint)
+        // Compact because it now sits INLINE on the metadata line. The 8pt
+        // hit slop in `WellChrome` keeps the real target near 44pt, so it
+        // reads small and still catches a glove.
+        .wellChrome(
+            tint: filedJob == nil ? Theme.C.paperDeep : Theme.C.orangeTint,
+            minHeight: 28
+        )
         .accessibilityLabel(filedJob.map { "Filed under \($0.name). Change." } ?? "File this walk")
     }
 }
