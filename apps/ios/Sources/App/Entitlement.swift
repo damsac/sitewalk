@@ -39,6 +39,15 @@ final class Entitlement {
     /// lookup failed — the paywall must handle both without claiming a price.
     private(set) var proProduct: Product?
 
+    /// Whether a subscription can actually be bought right now.
+    ///
+    /// False while the product is loading, if the App Store Connect product
+    /// doesn't exist or its id doesn't match, if agreements aren't signed, or if
+    /// StoreKit is simply unreachable. The free-tier gate reads this and
+    /// declines to block when it's false — we do not refuse someone's money and
+    /// their work at the same time. See `WalkAllowance.decide`.
+    var canSubscribe: Bool { proProduct != nil }
+
     /// Set when a load or purchase failed in a way worth telling the operator
     /// about. `nil` for user-cancelled: cancelling is not an error.
     var purchaseError: String?

@@ -67,14 +67,30 @@ enum WalkAllowance {
     }
 
     /// The gate. Pro is unmetered and short-circuits before any date handling.
+    ///
+    /// `canSubscribe` is whether a purchasable product actually loaded. **If we
+    /// cannot sell someone a way out, we do not block them.** Refusing to take
+    /// somebody's money and refusing to let them work is indefensible — and it
+    /// is not hypothetical: until the App Store Connect product exists, no
+    /// install can subscribe at all, so a hard gate would brick every TestFlight
+    /// tester at walk six with no recourse until the 1st of the month.
+    ///
+    /// It also covers the ordinary failures — StoreKit unreachable, a network
+    /// blip on a job site with no signal, agreements lapsing. The cost of
+    /// failing open is a handful of unmetered walks, bounded by the proxy's
+    /// per-install and global daily spend caps. The cost of failing closed is a
+    /// contractor standing in front of a client unable to record. Those are not
+    /// close.
     static func decide(
         isPro: Bool,
         record: Record,
         now: Date,
         calendar: Calendar = .current,
-        limit: Int = freeMonthlyLimit
+        limit: Int = freeMonthlyLimit,
+        canSubscribe: Bool = true
     ) -> Decision {
         if isPro { return .allowed(remaining: nil) }
+        if !canSubscribe { return .allowed(remaining: nil) }
         let used = usage(in: record, now: now, calendar: calendar)
         // `>=`, not `==`: a limit that drops (or a record written by a build
         // with a higher limit) must still block rather than wrap into an

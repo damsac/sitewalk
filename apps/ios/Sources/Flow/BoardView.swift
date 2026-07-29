@@ -434,7 +434,11 @@ extension BoardView {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-        } else {
+        } else if model.entitlement.canSubscribe {
+            // Only shown when the limit is actually being enforced. With no
+            // purchasable product the gate declines to block (see
+            // `WalkAllowance.decide`), so "2 LEFT" would be a lie — and a
+            // discouraging one, since nothing runs out.
             let used = WalkAllowance.usage(in: WalkMeter.load(), now: Date())
             let left = max(0, WalkAllowance.freeMonthlyLimit - used)
             Button {
