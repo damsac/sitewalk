@@ -148,7 +148,28 @@ extraction pass is yours.
 
 Genuinely nice-to-have. Do A1–A3 and B first.
 
-### C2. The demo engine ignores the requested doc kind (#222, second half)
+### C2. Is a universal (nil trade_key) schema a thing we want? (#284)
+
+`list_document_schemas` treats `trade_key IS NULL` as *matches any trade*;
+`resolve_active_schema` treats it as *only for a nil-template session*. The
+shipped `report` built-in is seeded nil, so a landscape operator was offered a
+REPORT button that could never build — and every custom doc type made by
+duplicating Report inherited the same defect. That's what Isaac hit on
+TestFlight.
+
+**Already fixed app-side (#283)** — the picker mirrors the resolver, so nothing
+broken is offered, and duplicating Report stamps the operator's trade so their
+copy works. Not launch-blocking any more.
+
+The question that's yours: I wrote the one-line resolver change and **reverted
+it**, because `resolve_report_only_for_none_template_not_for_landscape` pins the
+current behaviour by name with the comment "matching today." That reads as
+deliberate Plan 19 parity, not an oversight, and flipping it days before you
+leave isn't my call. Either nil should mean universal in the resolver too, or
+`report` shouldn't be seeded nil — the current state is the one combination that
+can't be right. Two minutes on the issue is enough.
+
+### C3. The demo engine ignores the requested doc kind (#222, second half)
 
 `DemoWalkEngine.buildDocument(sessionId:kind:)` takes `kind` and never reads it —
 it returns `trade.rows` unconditionally, so every document button in the demo
