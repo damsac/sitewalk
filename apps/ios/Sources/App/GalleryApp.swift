@@ -287,6 +287,21 @@ struct GalleryRoot: View {
 
     @State private var path: [Dest] = GalleryRoot.initialPath()
 
+    /// ONE model for the whole gallery, created once.
+    ///
+    /// The vocab and structure destinations used to construct `AppModel()`
+    /// inline in the `navigationDestination` builder. SwiftUI re-evaluates that
+    /// builder freely, so every evaluation minted a fresh model — which was
+    /// merely wasteful until `AppModel` gained an `Entitlement` (#277), and each
+    /// one spawned a `Transaction.updates` listener. From then on `screen=vocab`
+    /// and `screen=structure` rendered BLANK (#289): the whole design gallery,
+    /// the only headless route to any screen behind a tap, was dead.
+    ///
+    /// Hoisting to `@State` is the fix and is also just correct SwiftUI —
+    /// building an observable model inside a ViewBuilder was always wrong,
+    /// StoreKit only made it visible.
+    @State private var galleryModel = AppModel()
+
     var body: some View {
         NavigationStack(path: $path) {
             VStack(alignment: .leading, spacing: 0) {
@@ -334,11 +349,11 @@ struct GalleryRoot: View {
                 case .jobs: JobsBoardScreen(trade: Fixtures.landscape)
                 case .capture: CaptureScreen(trade: Fixtures.landscape)
                 case .document: DocumentReviewScreen(trade: Fixtures.landscape)
-                case .vocab: VocabularyView(model: AppModel())
+                case .vocab: VocabularyView(model: galleryModel)
             // The Document Builder is the surface most in need of design
             // iteration without a Rust build — the demo engine seeds it
             // with built-ins, so `screen=structure` is a full editor.
-            case .structure: DocumentBuilderView(model: AppModel())
+            case .structure: DocumentBuilderView(model: galleryModel)
                 }
             }
         }
