@@ -86,6 +86,30 @@ final class AppModel {
             return sent ? .documented : .saved
         }
 
+        /// The board row's headline. Pure so it can be tested without a store.
+        ///
+        /// Prefers the walk's own summary — the one thing that answers "what
+        /// was this?" months later. Falls back to a document number when there
+        /// genuinely is one (in-session records keep the real minted number),
+        /// then to a plain, honest label. Never blank: an untitled row is
+        /// unreadable and looks broken.
+        var title: String {
+            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+            if !docNo.isEmpty { return docNo }
+            return queued ? "Walk still processing" : "Walk notes"
+        }
+
+        /// The quiet second line. Item count is a FACT about the walk; the doc
+        /// kind is advisory and would read as "an estimate exists" on a walk
+        /// that never produced one (#221). Kind is shown only once a document
+        /// really was built.
+        var subtitle: String {
+            let items = itemCount == 1 ? "1 item" : "\(itemCount) items"
+            guard disposition == .documented, !docKind.isEmpty else { return items }
+            return "\(items) · \(docKind.capitalized)"
+        }
+
         /// Raw start time, epoch SECONDS (core `started_at`). Kept alongside
         /// the formatted `time` for two reasons that arrived independently:
         /// the TODAY list wants a clock ("9:41") while a job card spanning
@@ -102,10 +126,27 @@ final class AppModel {
         /// job months ago has to be movable.
         var jobId: String?
 
+        /// The walk's narrative summary — what the board row actually says.
+        ///
+        /// The row used to lead with `docNo`, which is synthesized EMPTY for
+        /// every stored walk (the number is minted per-build and isn't in the
+        /// lightweight projection), so every hydrated row rendered with a blank
+        /// title (#221). The summary is the honest answer to "what was this
+        /// walk?" — and it is precisely the question an operator opening a
+        /// months-old walk has.
+        let summary: String
+
+        /// How many lines the walk captured. A quiet, TRUE subtitle — unlike
+        /// the doc kind, which is advisory and reads as a claim that an
+        /// estimate exists when none was ever built.
+        let itemCount: Int
+
         init(time: String, docNo: String, docKind: String, sent: Bool,
              sessionId: String, queued: Bool, jobId: String? = nil,
-             startedAt: UInt64 = 0) {
+             startedAt: UInt64 = 0, summary: String = "", itemCount: Int = 0) {
             self.jobId = jobId
+            self.summary = summary
+            self.itemCount = itemCount
             self.time = time
             self.docNo = docNo
             self.docKind = docKind
@@ -130,6 +171,8 @@ final class AppModel {
             self.queued = summary.queued
             self.jobId = summary.jobId
             self.startedAt = summary.startedAt
+            self.summary = summary.summary
+            self.itemCount = Int(summary.itemCount)
         }
     }
     private(set) var sessionWalks: [WalkRecord] = []
@@ -1352,7 +1395,8 @@ final class AppModel {
         }
         sessionWalks.append(WalkRecord(
             time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: true,
-            sessionId: currentSessionId ?? "", queued: notes?.queued ?? false
+            sessionId: currentSessionId ?? "", queued: notes?.queued ?? false,
+            summary: notes?.summary ?? "", itemCount: notes?.items.count ?? 0
         ))
         shareURL = nil
         document = nil
@@ -1369,7 +1413,8 @@ final class AppModel {
         if exitPracticeIfActive() { return }
         sessionWalks.append(WalkRecord(
             time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: false,
-            sessionId: currentSessionId ?? "", queued: notes?.queued ?? false
+            sessionId: currentSessionId ?? "", queued: notes?.queued ?? false,
+            summary: notes?.summary ?? "", itemCount: notes?.items.count ?? 0
         ))
         shareURL = nil
         document = nil

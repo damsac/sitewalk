@@ -767,11 +767,16 @@ private struct WalkLogRow<Trailing: View>: View {
                         .font(Theme.F.mono(11, .medium))
                         .foregroundStyle(Theme.C.ink)
                         .frame(width: 46, alignment: .leading)
+                    // What the walk WAS, not what document it might become
+                    // (#221). This led with `docNo`, which is synthesized empty
+                    // for every stored walk — so each hydrated row rendered
+                    // with a blank title — over a `docKind` subtitle that reads
+                    // as a claim an estimate exists when none was built.
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(walk.docNo)
+                        Text(walk.title)
                             .font(Theme.F.ui(14.5, .semibold))
                             .lineLimit(1)
-                        Text(walk.docKind.capitalized)
+                        Text(walk.subtitle)
                             .font(Theme.F.cond(11.5, .medium))
                             .foregroundStyle(Theme.C.ink60)
                             .lineLimit(1)
