@@ -1,0 +1,56 @@
+{
+  "identifier" : "A1F2C4E8",
+  "nonRenewingSubscriptions" : [
+  ],
+  "products" : [
+  ],
+  "settings" : {
+    "_applicationInternalID" : "jefe",
+    "_developerTeamID" : "98GXNZ6NKZ",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21456789",
+      "localizations" : [
+      ],
+      "name" : "Jefe",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+          ],
+          "codeOffers" : [
+          ],
+          "displayPrice" : "12.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "31456789",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited walks. Talk through as many jobs as you want and Jefe writes up the paperwork.",
+              "displayName" : "Jefe Pro",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.damsac.jefe.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Jefe Pro Monthly",
+          "subscriptionGroupID" : "21456789",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

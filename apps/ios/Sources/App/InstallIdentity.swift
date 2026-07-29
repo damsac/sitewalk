@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// A stable, anonymous per-install id, used to meter and rate-limit this
 /// install at the proxy.
@@ -35,38 +34,13 @@ enum InstallIdentity {
     }
 
     private static func read() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let value = String(data: data, encoding: .utf8),
-              !value.isEmpty
+        guard let data = KeychainStore.read(service: service, account: account),
+              let value = String(data: data, encoding: .utf8), !value.isEmpty
         else { return nil }
         return value
     }
 
     private static func write(_ value: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        // Delete-then-add rather than update: simpler, and idempotent if a
-        // partial item somehow exists.
-        SecItemDelete(query as CFDictionary)
-
-        var attributes = query
-        attributes[kSecValueData as String] = Data(value.utf8)
-        // AfterFirstUnlock, not WhenUnlocked: a walk can finish and process
-        // with the screen locked in a pocket (the background-audio path), and
-        // the id has to be readable then.
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(attributes as CFDictionary, nil)
+        KeychainStore.write(Data(value.utf8), service: service, account: account)
     }
 }
