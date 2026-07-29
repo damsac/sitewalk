@@ -250,6 +250,40 @@ land first: **real-mic device tuning**, **walk-reopen seam (#223)**, **whisper
 warm-up (#228)**, and the **#234 DocumentSchema seam**. App Store readiness is
 app-side — I own it, no dependency on you.
 
+## 2026-07-28 — the app can take money, and won't be rejected on the paperwork
+
+Readiness audit is `docs/design/2026-07-28-app-store-readiness-audit.md` (#276).
+Merged since the last handover: **#277** (StoreKit 2 + the free-tier meter +
+`PrivacyInfo.xcprivacy`), **#278** (photo strip on the notes screen, #224),
+**#279** (guideline 3.1.2 subscription disclosure), plus **#275** and your
+**#267**, which I rebased onto main and merged — a filed walk was still showing
+twice and that was the real half of the "random walks" report.
+
+**Monetization** is Jefe Pro at $12.99/mo, free tier 5 finished walks a month.
+Metering is on OUTPUT, not on tapping START; the gate runs at `startWalk()` so a
+refusal can never destroy a recording already made. Practice and demo walks are
+exempt — neither costs anything, and metering demo would break autoflow QA at
+walk six. Keychain-backed so reinstall isn't a one-tap reset. 16 tests on the
+pure decision logic.
+
+**Deliberately deferred to you + App Attest:** the meter and the entitlement
+check are both on-device, so a patched binary walks free. What bounds that today
+is the proxy's per-install and global daily spend caps. Proxy-side entitlement
+only becomes worth building once App Attest can prove the caller is a genuine
+build — before that it's a header anyone can set.
+
+**Issue triage:** closed **#168**, **#156**, **#223**, **#228** with evidence
+comments (all four were shipped and just never closed). **#222** is half done —
+the blank rows are fixed, but `DemoWalkEngine.buildDocument` still ignores
+`kind` entirely, so every doc button in the demo build produces the same
+document. **#224** is half done — select-into-paperwork and markup remain.
+
+**Still waiting on you: #263 and #265.** #263 is the narrowed one — I agree with
+your #207 §7 ruling that upload is out of v1, and I've recommended shipping
+without it. The ask is only whether the `ContentBlock` Image/Document *variants*
+can land before you go, so upload becomes a sac-side 1.1 feature instead of one
+that's blocked for a month.
+
 ## Notes for dam (evergreen)
 
 - **FFI gotcha:** `build-ffi.sh --device-only` leaves the **sim** slice stale;
