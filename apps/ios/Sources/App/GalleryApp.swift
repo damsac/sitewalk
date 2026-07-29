@@ -329,7 +329,7 @@ struct GalleryRoot: View {
                                 .tracking(1.2)
                                 .foregroundStyle(Theme.C.ink)
                             Spacer()
-                            Text("→")
+                            Image(systemName: "arrow.right")
                                 .font(Theme.F.mono(11))
                                 .foregroundStyle(Theme.C.amberInk)
                         }

@@ -83,10 +83,10 @@ struct VocabularyView: View {
             if let error = model.vocabularyError {
                 HStack(spacing: 0) {
                     Theme.C.yellowTag.frame(width: 3)
-                    Text(error.uppercased())
-                        .font(Theme.F.mono(8))
-                        .tracking(0.4)
+                    Text(error)
+                        .font(Theme.F.ui(13, .medium))
                         .foregroundStyle(Theme.C.ink60)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)

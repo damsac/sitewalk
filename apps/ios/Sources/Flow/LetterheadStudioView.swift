@@ -244,7 +244,9 @@ struct LetterheadStudioView: View {
                         .font(Theme.F.cond(13, .semibold))
                         .foregroundStyle(Theme.C.ink)
                     Spacer()
-                    Text("⌄").font(Theme.F.mono(12)).foregroundStyle(Theme.C.ink60)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.C.ink60)
                 }
                 .padding(.horizontal, 11).padding(.vertical, 11)
                 .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))

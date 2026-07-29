@@ -200,10 +200,10 @@ struct ReviewView: View {
             if let error = model.photoError {
                 HStack(spacing: 0) {
                     Theme.C.redTag.frame(width: 3)
-                    Text(error.uppercased())
-                        .font(Theme.F.mono(8))
-                        .tracking(0.4)
+                    Text(error)
+                        .font(Theme.F.ui(13, .medium))
                         .foregroundStyle(Theme.C.redTag)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)

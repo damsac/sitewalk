@@ -75,10 +75,10 @@ struct VocabSeedCard: View {
                 }
 
                 if let confirmation {
-                    Text(confirmation.uppercased())
-                        .font(Theme.F.mono(9, .semibold))
-                        .tracking(1.0)
+                    Text(confirmation)
+                        .font(Theme.F.ui(13, .semibold))
                         .foregroundStyle(Theme.C.greenTag)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 10)
                 }
