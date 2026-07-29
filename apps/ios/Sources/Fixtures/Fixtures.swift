@@ -47,11 +47,13 @@ struct CapturedFixture: Identifiable {
 struct DocRowFixture: Identifiable {
     let id = UUID()
     let title: String
-    let sub: String
+    var sub: String
     var subWarn: Bool = false
     var hint: String? = nil
     let qty: String
-    let amount: String
+    /// `var` so a non-pricing document can blank it without rebuilding the row
+    /// field by field (#222) — a work order must not carry prices.
+    var amount: String
     var isEdit: Bool = false
     var isGap: Bool = false
     /// The core item this row was built from (Plan 12). `nil` for demo/

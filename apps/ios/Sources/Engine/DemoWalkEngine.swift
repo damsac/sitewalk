@@ -357,14 +357,50 @@ final class DemoWalkEngine: WalkEngine {
     // per-kind rendering — it returns the trade's canned document rows
     // regardless of `kind` (Worked Ex B shape), so the button -> ReviewView
     // wiring is exercised end to end without a backend.
+    /// Issue #222: this used to take `kind` and never read it, so every button
+    /// on the notes screen produced the same document. Demo is the
+    /// no-credential fallback AND the path a fresh clone takes — including any
+    /// run used to produce App Store screenshots — so "every document looks like
+    /// an estimate" is a claim we'd be shipping to reviewers.
+    ///
+    /// It mirrors the two distinctions the real pipeline actually makes, rather
+    /// than inventing per-kind fixtures nobody maintains:
+    ///
+    /// - **Pricing** (`is_pricing_kind` in core): only estimates and invoices
+    ///   carry money. A work order handed to a crew with prices on it is the
+    ///   wrong document, and printing one is a real-world mistake.
+    /// - **Total shape** (`total_shape` in core): an inspection has no summable
+    ///   dollar total; it counts findings.
     func buildDocument(sessionId: String, kind: String) async throws -> DocumentModel {
         try? await Task.sleep(for: .seconds(0.8))
+        let priced = DocKinds.isPricingKind(kind)
+        // Strip everything that only means something on a priced document:
+        // the amount, the price-history hint ("LAST 3: $110 · $120"), the gap
+        // flag (a gap IS a missing price — it drives the "+1 GAP" badge), and
+        // the warning sub that explains the gap. A crew reading a work order
+        // should see the work, not a conversation about money.
+        let rows = priced ? trade.rows : trade.rows.map { row in
+            var stripped = row
+            stripped.amount = ""
+            stripped.hint = nil
+            stripped.isGap = false
+            // The edit affordance marks an EDITABLE AMOUNT; with no amount it
+            // is a mark pointing at nothing.
+            stripped.isEdit = false
+            if row.subWarn { stripped.sub = "" }
+            stripped.subWarn = false
+            return stripped
+        }
+        // Findings-counted rather than summed, matching core's ("static",
+        // "findings") shape for an inspection.
+        let counted = kind == "inspection"
         return DocumentModel(
-            rows: trade.rows,
-            totalKey: trade.totalKey,
-            staticTotal: trade.totalValue,
-            note: trade.note,
-            send: trade.send
+            rows: rows,
+            totalKey: priced ? trade.totalKey : (counted ? "FINDINGS" : "ITEMS"),
+            staticTotal: priced ? trade.totalValue : "\(rows.count)",
+            // The gap/price note only means anything on a priced document.
+            note: priced ? trade.note : "",
+            send: "SEND \(DocKinds.label(for: kind).uppercased())"
         )
     }
 
