@@ -91,7 +91,16 @@ struct DocumentSchemaModel: Identifiable, Hashable {
     var label: String
     /// Core mints `<prefix>-NNNN`; the app never invents document numbers.
     var numberPrefix: String
-    /// Which trade this belongs to; nil = all.
+    /// Which trade this belongs to.
+    ///
+    /// **`nil` does NOT mean "works for every trade."** It means "resolves only
+    /// for a session with no template" — core's `resolve_active_schema` matches
+    /// `trade_key = ?template OR (trade_key IS NULL AND ?template IS NULL)`.
+    /// The listing query is looser and *does* return nil-trade rows for any
+    /// trade, which is what made the shipped universal `report` schema appear
+    /// in a landscape operator's picker and then fail to build (Isaac,
+    /// TestFlight 2026-07-28). Filter with `buildable(from:tradeKey:)` before
+    /// offering anything.
     var tradeKey: String?
     var totalKind: String
     var totalLabelKey: String
@@ -107,6 +116,35 @@ struct DocumentSchemaModel: Identifiable, Hashable {
     /// Surfaced so the editor can steer toward "duplicate" rather than
     /// in-place edits of a shared default.
     var isBuiltin: Bool
+
+    /// The schemas a walk on `tradeKey` can ACTUALLY build — a mirror of core's
+    /// `resolve_active_schema`, so a button never offers a document that will
+    /// then be refused.
+    ///
+    /// Two rules, both copied from the resolver rather than invented here:
+    ///
+    /// 1. **Trade must match exactly**, including nil-to-nil. `listDocumentSchemas`
+    ///    is deliberately looser — it returns nil-trade rows for every trade —
+    ///    so the shipped universal `report` schema showed up in a landscape
+    ///    operator's picker and then failed with *"'report' is not a legal
+    ///    document kind for template Some(\"landscape\")"*. Duplicating Report in
+    ///    the Document Builder stamps it with the operator's trade, which is how
+    ///    a landscaper gets a working Report.
+    /// 2. **One winner per kind**, the newest. Core resolves with
+    ///    `ORDER BY updated_at DESC LIMIT 1`, so when two schemas share a kind
+    ///    exactly one is ever built; showing both would put a dead button on
+    ///    screen and collide as `ForEach` ids, which is undefined in SwiftUI and
+    ///    can swallow taps.
+    ///
+    /// Sorted by label for a stable order.
+    static func buildable(
+        from schemas: [DocumentSchemaModel], tradeKey: String?
+    ) -> [DocumentSchemaModel] {
+        let matching = schemas.filter { $0.tradeKey == tradeKey }
+        return Dictionary(grouping: matching, by: \.kind)
+            .compactMap { _, group in group.max(by: { $0.updatedAt < $1.updatedAt }) }
+            .sorted { $0.label < $1.label }
+    }
 
     init(
         id: String = "",

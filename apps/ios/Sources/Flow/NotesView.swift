@@ -71,22 +71,28 @@ struct NotesView: View {
                 DocChoice(kind: $0, label: DocKinds.label(for: $0), stamp: DocKinds.stamp(for: $0))
             }
         } else {
-            // ONE button per KIND, choosing the same schema core will.
+            // Only what core will actually build. `buildable(from:tradeKey:)`
+            // mirrors `resolve_active_schema` — exact trade match, one winner
+            // per kind — so a button's label always describes a document that
+            // really comes out.
             //
-            // `buildDocument(kind:)` resolves with ORDER BY updated_at DESC
-            // LIMIT 1, so when two schemas share a kind — which happens the
-            // moment someone customizes a built-in — exactly one of them gets
-            // built. Showing both would put two buttons on screen where one is
-            // dead, and (before this) they collided as ForEach ids, which is
-            // undefined behaviour in SwiftUI and can swallow taps outright.
-            //
-            // Mirroring the resolver here means the button's label always
-            // describes the document that will actually come out.
-            let winners = Dictionary(grouping: schemas, by: \.kind)
-                .compactMap { _, group in group.max(by: { $0.updatedAt < $1.updatedAt }) }
-                .sorted { $0.label < $1.label }
+            // The trade filter is the field fix (Isaac, TestFlight 2026-07-28):
+            // `listDocumentSchemas` returns nil-trade rows for every trade, so
+            // the universal `report` built-in was offered to a landscape
+            // operator and then refused by the build. Same for any doc type
+            // duplicated from it.
+            let winners = DocumentSchemaModel.buildable(from: schemas, tradeKey: model.trade.key)
             docChoices = winners.map {
                 DocChoice(kind: $0.kind, label: $0.label, stamp: $0.numberPrefix.uppercased())
+            }
+            // Every schema filtered out — an operator with only nil-trade
+            // customs would face an action row with no buttons, which reads as
+            // a broken screen. Fall back to the built-in list for the trade,
+            // which core's `doc_kinds_for_template` accepts unconditionally.
+            if docChoices.isEmpty {
+                docChoices = DocKinds.legalKinds(for: model.trade.key).map {
+                    DocChoice(kind: $0, label: DocKinds.label(for: $0), stamp: DocKinds.stamp(for: $0))
+                }
             }
         }
     }

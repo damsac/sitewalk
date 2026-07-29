@@ -42,6 +42,7 @@ struct DocumentBuilderView: View {
             if let editing {
                 SchemaEditor(
                     schema: editing,
+                    tradeKey: model.trade.key,
                     onCancel: { self.editing = nil },
                     onSave: { save($0) },
                     onDelete: editing.isBuiltin || editing.id.isEmpty
@@ -244,14 +245,18 @@ private struct SchemaEditor: View {
     let onSave: (DocumentSchemaModel) -> Void
     /// nil for built-ins and unsaved drafts — neither can be deleted.
     let onDelete: (() -> Void)?
+    /// The operator's trade, stamped onto a copy of a built-in. See `saveShape`.
+    private let tradeKey: String?
 
     init(
         schema: DocumentSchemaModel,
+        tradeKey: String?,
         onCancel: @escaping () -> Void,
         onSave: @escaping (DocumentSchemaModel) -> Void,
         onDelete: (() -> Void)?
     ) {
         self.original = schema
+        self.tradeKey = tradeKey
         _draft = State(initialValue: schema)
         self.onCancel = onCancel
         self.onSave = onSave
@@ -277,6 +282,18 @@ private struct SchemaEditor: View {
         var copy = draft
         copy.id = ""            // create, don't overwrite the shipped default
         copy.isBuiltin = false
+        // Stamp the operator's trade. The shipped `report` built-in carries
+        // `trade_key: nil`, and core only resolves a nil-trade schema for a
+        // nil-template session — so copying the nil through produced a document
+        // type that appeared in every picker and built under none of them
+        // (Isaac, TestFlight 2026-07-28: "'prf' is not a legal document kind
+        // for template Some(\"landscape\")").
+        //
+        // A copy belongs to the operator who made it, so their trade is the
+        // right answer regardless. For an already trade-scoped built-in this is
+        // a no-op; for the universal one it's what makes duplicating Report the
+        // way a landscaper gets a working Report.
+        copy.tradeKey = tradeKey
         if draft.label != original.label {
             copy.kind = Self.slug(draft.label)
         }
