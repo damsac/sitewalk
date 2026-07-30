@@ -1365,11 +1365,16 @@ final class AppModel {
         guard !text.isEmpty else { return "" }
 
         let sentence = Self.withoutLeadIn(Self.upToFirstTerminator(text))
-        guard sentence.count > limit else { return sentence }
+        // Clamped: `prefix(_:)` traps on a negative length, so a caller passing
+        // a bad limit would take the app down rather than render something ugly.
+        // Found by fuzzing after a field crash report on build 93 — not the
+        // cause of that one, but the same class of trap.
+        let cap = max(0, limit)
+        guard sentence.count > cap else { return sentence }
 
         // Still too long for one line: cut on a word boundary rather than
         // mid-word, so the ellipsis reads as "there's more" and not as damage.
-        let head = sentence.prefix(limit)
+        let head = sentence.prefix(cap)
         guard let lastSpace = head.lastIndex(of: " ") else {
             return String(head) + "…"
         }
