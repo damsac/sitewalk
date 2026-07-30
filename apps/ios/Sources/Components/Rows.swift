@@ -27,6 +27,9 @@ struct JobRow: View {
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.vertical, 13)
         .opacity(job.done ? 0.45 : 1)
+        // A label and a count on one line — capped for the same reason
+        // MetaStrip is (design review P0 #2).
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
     }
 }

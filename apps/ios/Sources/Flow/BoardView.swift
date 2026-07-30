@@ -71,8 +71,12 @@ struct BoardView: View {
                     Button { showCustomize = true } label: {
                         Text("My business")
                             .font(Theme.F.ui(13, .semibold))
+                            .lineLimit(1)
                     }
                     .buttonStyle(.secondaryChip)
+                    // A header chip cannot grow without truncating its own
+                    // label; capped so the words survive at accessibility sizes.
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 }
                 if let profile = model.profile {
                     // Operator mode: the board carries THEIR business. Trade
@@ -449,6 +453,8 @@ extension BoardView {
             .padding(.trailing, Theme.S.screenPad - 8)
             .padding(.top, 10)
             .padding(.bottom, 4)
+            // JOBS · N OPEN · Add job share one line.
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .overlay(alignment: .bottom) {
                 Theme.C.ink.frame(height: 1.5)
             }
@@ -892,10 +898,20 @@ private struct WalkLogRow<Trailing: View>: View {
         // lines; the small stuff moves to a quiet metadata line beneath it.
         Button(action: onOpen) {
             HStack(alignment: .top, spacing: 12) {
+                // Capped, and sized to content rather than a fixed 46pt.
+                //
+                // #294 adopted Dynamic Type in the font helpers but did not
+                // audit the layouts for it, so at accessibility sizes this
+                // column wrapped mid-timestamp — "9:" over "41". A stamped scan
+                // column has to stay on one line; the review names this exact
+                // pattern as the place to cap growth.
                 Text(walk.time)
                     .font(Theme.F.mono(11, .medium))
                     .foregroundStyle(Theme.C.ink)
-                    .frame(width: 46, alignment: .leading)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                    .frame(minWidth: 46, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 4) {
                     // Two lines, and the full remaining width. A walk summary
