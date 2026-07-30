@@ -90,6 +90,15 @@ final class AudioCaptureSource: PCMAudioSource {
 
         // Re-derive AFTER the voice-processing toggle (format may have changed).
         let hwFormat = input.outputFormat(forBus: 0)
+        // A 0 Hz / 0-channel format means the session never actually activated —
+        // another app holds the mic, a call is up, or `.measurement` mode was
+        // refused. The two `try?`s above swallow that, and installing a tap with
+        // an invalid format is another raise-and-abort. Bail loudly instead.
+        guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "audio")
+                .error("mic unavailable: input format \(hwFormat.sampleRate, privacy: .public) Hz, \(hwFormat.channelCount, privacy: .public) ch — not installing a tap")
+            return
+        }
         guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else { return }
 
         // Capture only Sendable locals in the render-thread closure so nothing
@@ -97,6 +106,17 @@ final class AudioCaptureSource: PCMAudioSource {
         let target = targetFormat
         let deliver = deliveryQueue
         let push = pushSamples
+
+        // Remove any existing tap FIRST. `installTap` on a bus that already
+        // has one raises an ObjC exception, which is an abort() — not a
+        // recoverable error — and it took the app down on build 93:
+        //
+        //   AVAudioNode installTapOnBus: → NSException → objc_exception_throw
+        //   → abort(), SIGABRT, on the first thing START WALK does.
+        //
+        // `removeTap` on a bus with no tap is a documented no-op, so this is
+        // free insurance against every path that could double up.
+        input.removeTap(onBus: 0)
 
         input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { buffer, _ in
             // Render thread: convert to 16 kHz mono f32, copy the samples out,

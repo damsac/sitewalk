@@ -333,6 +333,10 @@ final class AppModel {
     /// complete — WalkView shows "MIC STARTING…" while the (usually warm,
     /// occasionally cold-load) engine bring-up runs behind the painted screen.
     var micStarting = false
+    /// Latch preventing a second walk from starting while one is being set up.
+    /// See `startWalk()` — this is what stops two mic taps and the abort() they
+    /// caused.
+    private var isStartingWalk = false
 
     /// A scripted, unsaved "practice run" armed from onboarding's optional
     /// offer. While set, the next walk plays demo content regardless of the
@@ -453,6 +457,22 @@ final class AppModel {
     /// conditions that must be settled BEFORE the operator starts talking.
     /// Refusing at finish would destroy a recording they had already made.
     func startWalk() {
+        // ONE walk at a time, enforced synchronously.
+        //
+        // The voice path defers `beginWalk()` behind `await
+        // requestPermissions()`, so `phase` is still `.board` when a second tap
+        // lands — a phase guard alone cannot catch it. Two taps therefore built
+        // TWO `AudioCaptureSource`s, each with its own `AVAudioEngine`, each
+        // installing a tap on the shared mic input. The second
+        // `installTapOnBus` raises an ObjC exception, which is an abort():
+        // SIGABRT on the first thing START WALK does (crash report, build 93).
+        //
+        // Cleared by `beginWalk` once the walk is actually live, and by every
+        // failure path below, so a refused permission or a blocked meter does
+        // not wedge the button.
+        guard !isStartingWalk else { return }
+        isStartingWalk = true
+
         // Two exemptions, both principled rather than convenient.
         //
         // Practice walks: they run on a throwaway engine, are never saved, and
@@ -475,6 +495,7 @@ final class AppModel {
             case .blocked(let used, let limit):
                 blockedUsage = (used: used, limit: limit)
                 showPaywall = true
+                isStartingWalk = false
                 return
             case .allowed(let remaining):
                 // Surfaced on the notes screen after the walk, not now: a
@@ -491,6 +512,7 @@ final class AppModel {
                     self.beginWalk()
                 } else {
                     self.micDenied = true
+                    self.isStartingWalk = false
                 }
             }
         } else {
@@ -519,6 +541,7 @@ final class AppModel {
         // Paint-first block (D9): screen appears immediately; WalkView shows
         // "MIC STARTING…" until step 4 below clears it.
         micStarting = true
+        isStartingWalk = false   // the walk is live; START WALK is armed again
         phase = .walking
         path = [.walking]
         keepScreenAwake(true)   // don't let the phone sleep + kill the walk
@@ -598,6 +621,10 @@ final class AppModel {
     private func startScriptedSource() {
         let src = makeScriptedSource(trade)
         source = src
+        // STOP before dropping the reference. Assigning nil over a live
+        // AudioCaptureSource orphans it with its mic tap still installed, and
+        // the next real walk's `installTap` then aborts.
+        audioSource?.stop()
         audioSource = nil
         pumpTask = Task { [weak self] in
             guard let self else { return }
@@ -621,6 +648,9 @@ final class AppModel {
         let audio: any PCMAudioSource = wavFixture
             ? WavFileAudioSource(pushSamples: onSamples)   // mic-free fixture (D7)
             : AudioCaptureSource(pushSamples: onSamples, voiceProcessing: voiceProcessing) // live mic
+        // Same reasoning as `startScriptedSource`: never replace a live source
+        // without stopping it first.
+        audioSource?.stop()
         audioSource = audio
         audio.start()
     }
