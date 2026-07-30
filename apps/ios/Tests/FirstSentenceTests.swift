@@ -14,6 +14,11 @@ import XCTest
 /// sentence end. `3 yd. of mulch` and `Alder Ct. beds` are both real things an
 /// operator says, and truncating either to three words would be worse than the
 /// verbosity. Most of these pin the cases where it must NOT split.
+private extension String {
+    /// Small helper so the fuzz corpus can build a long run cheaply.
+    func repeatedString(_ n: Int) -> String { String(repeating: self, count: n) }
+}
+
 final class FirstSentenceTests: XCTestCase {
 
     // MARK: The reported case
@@ -135,6 +140,39 @@ final class FirstSentenceTests: XCTestCase {
             AppModel.firstSentence(of: "  Marston HOA — irrigation check  "),
             "Marston HOA — irrigation check"
         )
+    }
+
+    /// Fuzz. `firstSentence` does index arithmetic over model-generated text —
+    /// the newest untrusted-input code on the board path, and a crash was
+    /// reported on build 93. If it can be made to trap, that happens here rather
+    /// than on a job site.
+    func testSurvivesAdversarialInput() {
+        let pieces = [
+            "", " ", ".", "..", "...", "!", "?", ".!?", "  .  ", "\n", ".\n",
+            "a.", "a. ", "a. B", "A.", "Field session ", "Field session at ",
+            "Field session at .", "Field session to A.", "\u{00A0}", "\u{200B}",
+            "e\u{0301}.", "\u{1F600}.", "\u{1F600}\u{1F600}. A", "İ. A",
+            "ß. A", "\u{0041}\u{030A}. B", "— . —", "“mulch.” A", "3 yd. 4 yd.",
+            "Mr. Mrs. Dr. A", "a".repeatedString(200) + ". B",
+        ]
+        // Every single piece, and every ordered pair, at several limits.
+        for a in pieces {
+            for b in pieces {
+                for limit in [1, 2, 3, 8, 16, 56, 500] {
+                    _ = AppModel.firstSentence(of: a + b, limit: limit)
+                    _ = AppModel.firstSentence(of: b + a, limit: limit)
+                }
+            }
+        }
+    }
+
+    /// A limit of zero or below must not trap on `prefix`/index math.
+    func testDegenerateLimits() {
+        for limit in [-5, 0, 1] {
+            _ = AppModel.firstSentence(of: "Front beds need mulch and edging", limit: limit)
+            _ = AppModel.firstSentence(of: "", limit: limit)
+            _ = AppModel.firstSentence(of: "Field session at 1418 Alder Ct.", limit: limit)
+        }
     }
 
     /// The row falls back to a plain label when there is no summary, so this
