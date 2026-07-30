@@ -333,6 +333,10 @@ final class AppModel {
     /// complete — WalkView shows "MIC STARTING…" while the (usually warm,
     /// occasionally cold-load) engine bring-up runs behind the painted screen.
     var micStarting = false
+    /// The mic could not be opened — the session would not activate, or the
+    /// input reported an invalid format. Surfaced on the walk screen; the walk
+    /// is live but deaf, and the operator has to know that immediately.
+    var micUnavailable = false
     /// Latch preventing a second walk from starting while one is being set up.
     /// See `startWalk()` — this is what stops two mic taps and the abort() they
     /// caused.
@@ -541,6 +545,7 @@ final class AppModel {
         // Paint-first block (D9): screen appears immediately; WalkView shows
         // "MIC STARTING…" until step 4 below clears it.
         micStarting = true
+        micUnavailable = false
         isStartingWalk = false   // the walk is live; START WALK is armed again
         phase = .walking
         path = [.walking]
@@ -645,9 +650,23 @@ final class AppModel {
         let onSamples: @Sendable ([Float]) -> Void = { [weak self] samples in
             Task { @MainActor in self?.engine.pushAudio(samples) }
         }
-        let audio: any PCMAudioSource = wavFixture
-            ? WavFileAudioSource(pushSamples: onSamples)   // mic-free fixture (D7)
-            : AudioCaptureSource(pushSamples: onSamples, voiceProcessing: voiceProcessing) // live mic
+        let audio: any PCMAudioSource
+        if wavFixture {
+            audio = WavFileAudioSource(pushSamples: onSamples)   // mic-free fixture (D7)
+        } else {
+            let mic = AudioCaptureSource(pushSamples: onSamples, voiceProcessing: voiceProcessing)
+            // A walk whose mic never opened must SAY so. Sitting on a live
+            // RECORDING screen capturing silence is worse than the crash it
+            // replaced: the operator talks through a whole site and gets
+            // nothing, with no clue why.
+            mic.onUnavailable = { [weak self] in
+                Task { @MainActor in
+                    self?.micUnavailable = true
+                    self?.micStarting = false
+                }
+            }
+            audio = mic
+        }
         // Same reasoning as `startScriptedSource`: never replace a live source
         // without stopping it first.
         audioSource?.stop()

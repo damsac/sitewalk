@@ -44,6 +44,14 @@ final class AudioCaptureSource: PCMAudioSource {
     /// `AVAudioEngine.inputNode.setVoiceProcessingEnabled`, which is what this
     /// knob toggles.
     private let voiceProcessing: Bool
+    private let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "audio"
+    )
+    /// Called when the mic could not be opened at all. Without this the walk
+    /// would sit on a live-looking RECORDING screen capturing silence, which is
+    /// worse than saying so — the operator would talk through a whole site and
+    /// get nothing.
+    var onUnavailable: (@Sendable () -> Void)?
     private let audioEngine = AVAudioEngine()
     /// 16 kHz mono f32 — whisper's expected input (SttConfig.sample_rate).
     private let targetFormat = AVAudioFormat(
@@ -67,9 +75,53 @@ final class AudioCaptureSource: PCMAudioSource {
     }
 
     func start() {
+        // Configure and ACTIVATE the session, surfacing failure instead of
+        // swallowing it.
+        //
+        // The two `try?`s this replaces hid the cause of a launch-race abort
+        // (crash report, build 93, 0.87s after process start): START WALK
+        // pressed within a second of opening the app runs this before the
+        // session can activate, `inputNode.outputFormat` then reports 0 Hz /
+        // 0 channels, and `installTap` raises on the invalid format — which is
+        // an abort(), not a catchable error.
+        //
+        // `.duckOthers` is also not a documented option for `.record`, so the
+        // ideal configuration is tried first and a plain `.record` is the
+        // fallback rather than leaving the session in whatever state a rejected
+        // setCategory left behind.
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.record, mode: .measurement, options: .duckOthers)
-        try? session.setActive(true, options: .notifyOthersOnDeactivation)
+        do {
+            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+        } catch {
+            log.error("setCategory(.record, .measurement, .duckOthers) refused: \(error, privacy: .public) — retrying plain .record")
+            do {
+                try session.setCategory(.record, mode: .measurement)
+            } catch {
+                log.error("setCategory(.record, .measurement) refused too: \(error, privacy: .public)")
+            }
+        }
+
+        // Activation can legitimately fail while the app is still becoming
+        // active, or if another app holds the mic. Retry briefly rather than
+        // proceeding into an abort — a walk is worth a few milliseconds.
+        var activated = false
+        for attempt in 0..<3 {
+            do {
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+                activated = true
+                break
+            } catch {
+                log.error("setActive attempt \(attempt + 1, privacy: .public) failed: \(error, privacy: .public)")
+                // 40ms, twice — enough to clear a foreground transition without
+                // making START WALK feel unresponsive.
+                Thread.sleep(forTimeInterval: 0.04)
+            }
+        }
+        guard activated else {
+            log.error("audio session would not activate — no tap installed, walk will capture nothing")
+            onUnavailable?()
+            return
+        }
 
         let input = audioEngine.inputNode
 
@@ -95,8 +147,11 @@ final class AudioCaptureSource: PCMAudioSource {
         // refused. The two `try?`s above swallow that, and installing a tap with
         // an invalid format is another raise-and-abort. Bail loudly instead.
         guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
-            Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "audio")
-                .error("mic unavailable: input format \(hwFormat.sampleRate, privacy: .public) Hz, \(hwFormat.channelCount, privacy: .public) ch — not installing a tap")
+            // THE abort from the build-93 crash report. installTap raises on an
+            // invalid format, and a raise is an abort — so this guard is the
+            // difference between a dead mic and a dead app.
+            log.error("mic unavailable: input format \(hwFormat.sampleRate, privacy: .public) Hz, \(hwFormat.channelCount, privacy: .public) ch — not installing a tap")
+            onUnavailable?()
             return
         }
         guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else { return }

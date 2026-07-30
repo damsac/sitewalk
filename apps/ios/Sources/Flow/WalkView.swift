@@ -137,6 +137,25 @@ struct WalkView: View {
             .padding(.bottom, 10)
             .overlay(alignment: .top) { Theme.C.hairline.frame(height: 1) }
         }
+        // A deaf walk has to announce itself. Same red-note grammar as the
+        // mic-denied bar on the board.
+        .overlay(alignment: .top) {
+            if model.micUnavailable {
+                HStack(spacing: 0) {
+                    Theme.C.redTag.frame(width: 3)
+                    Text("Jefe can't hear the mic — another app may be using it. Tap DONE and start again.")
+                        .font(Theme.F.ui(13, .medium))
+                        .foregroundStyle(Theme.C.redTag)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(Theme.C.redTint)
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.top, 8)
+            }
+        }
         .animation(.easeOut(duration: 0.25), value: coachDoneShown)
         .background(Theme.C.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
