@@ -282,18 +282,16 @@ private struct SchemaEditor: View {
         var copy = draft
         copy.id = ""            // create, don't overwrite the shipped default
         copy.isBuiltin = false
-        // Stamp the operator's trade. The shipped `report` built-in carries
-        // `trade_key: nil`, and core only resolves a nil-trade schema for a
-        // nil-template session — so copying the nil through produced a document
-        // type that appeared in every picker and built under none of them
-        // (Isaac, TestFlight 2026-07-28: "'prf' is not a legal document kind
-        // for template Some(\"landscape\")").
+        // INHERIT the source's trade — do not stamp the operator's.
         //
-        // A copy belongs to the operator who made it, so their trade is the
-        // right answer regardless. For an already trade-scoped built-in this is
-        // a no-op; for the universal one it's what makes duplicating Report the
-        // way a landscaper gets a working Report.
-        copy.tradeKey = tradeKey
+        // #283 stamped the current trade here, to work around a nil-trade copy
+        // being unbuildable. Core now treats nil as universal, so the
+        // workaround is not only unnecessary but backwards: stamping would pin
+        // a copy of the universal Report to one trade, and Isaac's call
+        // (2026-07-30) is the opposite — "They should come in regardless of
+        // trade!" A duplicate of Report stays universal; a duplicate of the
+        // landscape Estimate stays landscape. The copy keeps whatever scope the
+        // thing it was copied from had.
         if draft.label != original.label {
             copy.kind = Self.slug(draft.label)
         }

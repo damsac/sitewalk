@@ -271,12 +271,37 @@ impl Store {
         kind: &str,
         template: Option<&str>,
     ) -> Result<Option<DocumentSchema>, CoreError> {
+        // A NULL `trade_key` means UNIVERSAL — resolvable under ANY template,
+        // not only under a NULL one.
+        //
+        // Isaac's product call, 2026-07-30: "They should come in regardless of
+        // trade!" A document type an operator authored belongs to that
+        // operator, not to whichever trade they happened to be in when they
+        // made it — a landscaper who builds an RFP wants it on every walk.
+        //
+        // This is what #284 asked and what the earlier behaviour got wrong.
+        // `list_document_schemas` has always treated NULL as "matches any
+        // trade"; the resolver disagreeing meant a universal schema could be
+        // LISTED and never BUILT, so a custom type showed up and then failed
+        // with "'prf' is not a legal document kind for template
+        // Some(\"landscape\")". A shape that can be offered and never used is
+        // the one combination that cannot be right.
+        //
+        // Trade-specific still WINS over universal: `trade_key IS NULL` sorts 0
+        // for a trade match and 1 for a universal row, so an operator's
+        // landscape-specific `report` beats the shared one. Newest breaks the
+        // remaining tie, preserving the `updated_at DESC` behaviour the app's
+        // picker mirrors.
+        //
+        // Does NOT widen across trades: a `property` schema still has
+        // `trade_key = 'property'`, which matches neither clause under a
+        // landscape session.
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {SCHEMA_COLS} FROM document_schemas
              WHERE kind = ?1
-               AND (trade_key = ?2 OR (trade_key IS NULL AND ?2 IS NULL))
+               AND (trade_key = ?2 OR trade_key IS NULL)
                AND deleted_at IS NULL
-             ORDER BY updated_at DESC LIMIT 1"
+             ORDER BY (trade_key IS NULL) ASC, updated_at DESC LIMIT 1"
         ))?;
         let mut rows = stmt.query(rusqlite::params![kind, template])?;
         match rows.next()? {
@@ -522,14 +547,53 @@ mod tests {
         assert!(s.has_active_schema("estimate", Some("landscape")).unwrap());
     }
 
-    /// Parity guard: `report` (trade NULL) resolves ONLY for a None-template
-    /// session — it stays illegal on a landscape session, matching today.
+    /// A NULL trade is UNIVERSAL: `report` resolves under any template.
+    ///
+    /// This replaces a parity guard that pinned the opposite ("stays illegal on
+    /// a landscape session, matching today"). That preserved pre-Plan-19
+    /// behaviour, and the behaviour was wrong: Isaac, 2026-07-30, on finding
+    /// his own custom types missing — "They should come in regardless of
+    /// trade!" A type the operator authored belongs to the operator, not to
+    /// whichever trade they were in when they made it.
     #[test]
-    fn resolve_report_only_for_none_template_not_for_landscape() {
+    fn resolve_null_trade_is_universal_across_templates() {
         let s = Store::open_in_memory("device-a").unwrap();
-        let resolved = s.resolve_active_schema("report", None).unwrap().unwrap();
-        assert_eq!(resolved.id, BUILTIN_SCHEMA_ID_REPORT);
-        assert!(s.resolve_active_schema("report", Some("landscape")).unwrap().is_none());
+        for template in [None, Some("landscape"), Some("property"), Some("inspection")] {
+            let resolved = s.resolve_active_schema("report", template).unwrap();
+            assert_eq!(
+                resolved.map(|r| r.id),
+                Some(BUILTIN_SCHEMA_ID_REPORT.to_string()),
+                "report should resolve for template {template:?}"
+            );
+            assert!(s.has_active_schema("report", template).unwrap());
+        }
+    }
+
+    /// Universal must not become a back door across trades: a schema that names
+    /// a DIFFERENT trade still must not resolve.
+    #[test]
+    fn a_named_trade_still_does_not_leak_into_another() {
+        let s = Store::open_in_memory("device-a").unwrap().with_clock(Arc::new(|| 1000));
+        s.save_document_schema(&custom_schema("hoa", "hoa_addendum", Some("property"))).unwrap();
+        assert!(s.resolve_active_schema("hoa_addendum", Some("landscape")).unwrap().is_none());
+        assert!(s.resolve_active_schema("hoa_addendum", Some("property")).unwrap().is_some());
+    }
+
+    /// Trade-specific beats universal for the same kind, whatever the clock
+    /// says — otherwise a shared default could shadow the operator's own.
+    #[test]
+    fn a_trade_specific_schema_wins_over_a_universal_one() {
+        let s = Store::open_in_memory("device-a").unwrap().with_clock(Arc::new(|| 1000));
+        // Universal, and NEWER than the trade-specific one saved next.
+        s.save_document_schema(&custom_schema("universal-rfp", "rfp", None)).unwrap();
+        let s = s.with_clock(Arc::new(|| 2000));
+        s.save_document_schema(&custom_schema("landscape-rfp", "rfp", Some("landscape"))).unwrap();
+
+        let resolved = s.resolve_active_schema("rfp", Some("landscape")).unwrap().unwrap();
+        assert_eq!(resolved.id, "landscape-rfp", "the trade-specific schema must win");
+        // And on a trade with no specific version, the universal one serves.
+        let elsewhere = s.resolve_active_schema("rfp", Some("property")).unwrap().unwrap();
+        assert_eq!(elsewhere.id, "universal-rfp");
     }
 
     /// The resurrection consequence: a tombstoned built-in does not resolve —

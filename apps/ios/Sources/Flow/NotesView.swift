@@ -596,7 +596,6 @@ struct NotesView: View {
                 HStack(spacing: 8) {
                     ForEach(Array(docChoices.enumerated()), id: \.element.kind) { i, choice in
                         docButton(choice, hero: i == 0)
-                            .frame(minWidth: docChoices.count > 3 ? 104 : nil)
                     }
                 }
             }
@@ -634,14 +633,26 @@ struct NotesView: View {
                         Text(choice.label)
                             .font(Theme.F.ui(12, .bold)).tracking(0.04)
                             .foregroundStyle(hero ? Theme.C.onOrange : Theme.C.ink)
-                            .lineLimit(1).minimumScaleFactor(0.75)
+                            .lineLimit(1)
                         Text(choice.stamp)
                             .font(Theme.F.mono(6.5, .semibold)).tracking(0.6)
                             .foregroundStyle(hero ? Theme.C.onOrange.opacity(0.85) : Theme.C.ink60)
+                            .lineLimit(1)
                     }
+                    // Breathing room INSIDE the border, so the shape grows with
+                    // the label instead of the label escaping the shape.
+                    .padding(.horizontal, 14)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .frame(height: 54).frame(maxWidth: .infinity)
+            // Sized to content, with a floor so a short label still reads as a
+            // button. `maxWidth: .infinity` proposed an unbounded width inside
+            // the horizontal ScrollView, which is how "Invoice" and "Work
+            // Order" ended up printed across their own borders once the type
+            // ramp grew them (Isaac, on device 2026-07-30).
+            .frame(height: 54)
+            .frame(minWidth: 96)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
