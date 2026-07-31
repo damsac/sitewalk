@@ -93,14 +93,10 @@ struct DocumentSchemaModel: Identifiable, Hashable {
     var numberPrefix: String
     /// Which trade this belongs to.
     ///
-    /// **`nil` does NOT mean "works for every trade."** It means "resolves only
-    /// for a session with no template" — core's `resolve_active_schema` matches
-    /// `trade_key = ?template OR (trade_key IS NULL AND ?template IS NULL)`.
-    /// The listing query is looser and *does* return nil-trade rows for any
-    /// trade, which is what made the shipped universal `report` schema appear
-    /// in a landscape operator's picker and then fail to build (Isaac,
-    /// TestFlight 2026-07-28). Filter with `buildable(from:tradeKey:)` before
-    /// offering anything.
+    /// **`nil` means UNIVERSAL — available on every trade.** Core's
+    /// `resolve_active_schema` matches `trade_key = ?template OR trade_key IS
+    /// NULL`, preferring a trade-specific row when one exists. Filter with
+    /// `buildable(from:tradeKey:)`, which mirrors that ordering.
     var tradeKey: String?
     var totalKind: String
     var totalLabelKey: String
@@ -123,13 +119,12 @@ struct DocumentSchemaModel: Identifiable, Hashable {
     ///
     /// Two rules, both copied from the resolver rather than invented here:
     ///
-    /// 1. **Trade must match exactly**, including nil-to-nil. `listDocumentSchemas`
-    ///    is deliberately looser — it returns nil-trade rows for every trade —
-    ///    so the shipped universal `report` schema showed up in a landscape
-    ///    operator's picker and then failed with *"'report' is not a legal
-    ///    document kind for template Some(\"landscape\")"*. Duplicating Report in
-    ///    the Document Builder stamps it with the operator's trade, which is how
-    ///    a landscaper gets a working Report.
+    /// 1. **Trade matches, or the schema is UNIVERSAL.** A nil `tradeKey` means
+    ///    "any trade" — Isaac's call, 2026-07-30: *"They should come in
+    ///    regardless of trade!"* A type the operator authored belongs to them,
+    ///    not to whichever trade they were in when they made it. Core's
+    ///    resolver was changed to match, so a universal schema is now genuinely
+    ///    buildable rather than merely listable.
     /// 2. **One winner per kind**, the newest. Core resolves with
     ///    `ORDER BY updated_at DESC LIMIT 1`, so when two schemas share a kind
     ///    exactly one is ever built; showing both would put a dead button on
@@ -140,9 +135,24 @@ struct DocumentSchemaModel: Identifiable, Hashable {
     static func buildable(
         from schemas: [DocumentSchemaModel], tradeKey: String?
     ) -> [DocumentSchemaModel] {
-        let matching = schemas.filter { $0.tradeKey == tradeKey }
+        let matching = schemas.filter { $0.tradeKey == tradeKey || $0.tradeKey == nil }
         return Dictionary(grouping: matching, by: \.kind)
-            .compactMap { _, group in group.max(by: { $0.updatedAt < $1.updatedAt }) }
+            .compactMap { _, group in
+                // Mirrors the resolver's ORDER BY exactly: a trade-specific
+                // schema beats a universal one for the same kind whatever the
+                // timestamps say, so an operator's own version is never
+                // shadowed by a shared default. Newest breaks the remaining tie.
+                // Trade-specific ranks 1, universal ranks 0, so `max` picks
+                // the specific one. (Getting this backwards made the shared
+                // default win — caught by
+                // `testATradeSpecificSchemaBeatsAUniversalOneOfTheSameKind`.)
+                // Core expresses the same order as `ORDER BY (trade_key IS
+                // NULL) ASC` with LIMIT 1.
+                group.max {
+                    ($0.tradeKey == nil ? 0 : 1, $0.updatedAt)
+                        < ($1.tradeKey == nil ? 0 : 1, $1.updatedAt)
+                }
+            }
             .sorted { $0.label < $1.label }
     }
 

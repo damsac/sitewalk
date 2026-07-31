@@ -32,36 +32,52 @@ final class DocumentChoiceTests: XCTestCase {
 
     // MARK: The field bug
 
-    func testUniversalSchemaIsNotOfferedToATradeSession() {
-        // The exact shape of Isaac's report: the shipped `report` built-in
-        // carries trade_key nil and was listed for a landscape walk.
+    func testUniversalSchemaIsOfferedOnEveryTrade() {
+        // Isaac, 2026-07-30: "They should come in regardless of trade!" A
+        // nil-trade schema is UNIVERSAL, and core's resolver now agrees, so the
+        // picker offers it everywhere.
         let all = [
             schema("estimate", trade: "landscape"),
             schema("report", trade: nil)
         ]
-        let kinds = DocumentSchemaModel.buildable(from: all, tradeKey: "landscape").map(\.kind)
-        XCTAssertEqual(kinds, ["estimate"], "a nil-trade schema must not be offered to a trade walk")
+        for trade in ["landscape", "property", "inspection"] {
+            let kinds = Set(DocumentSchemaModel.buildable(from: all, tradeKey: trade).map(\.kind))
+            XCTAssertTrue(kinds.contains("report"), "report missing on \(trade)")
+        }
     }
 
-    func testCustomTypeCopiedFromReportIsNotOfferedUntilItHasATrade() {
-        // The PRF case. Duplicating Report used to carry its nil trade through,
-        // producing a doc type visible everywhere and buildable nowhere.
+    func testACustomTypeWithNoTradeShowsUpEverywhere() {
+        // The RFP case, which is what Isaac actually lost: a custom type
+        // duplicated from Report carries nil and must work on every walk.
         let all = [schema("prf", label: "PRF", trade: nil)]
-        XCTAssertTrue(DocumentSchemaModel.buildable(from: all, tradeKey: "landscape").isEmpty)
-    }
-
-    func testTheSameCustomTypeIsOfferedOnceItCarriesTheTrade() {
-        // And the fix: `saveShape` now stamps the operator's trade, so their
-        // own document type works. This is also how a landscaper gets a
-        // working Report — duplicate it, and the copy is trade-scoped.
-        let all = [schema("prf", label: "PRF", trade: "landscape")]
         XCTAssertEqual(
             DocumentSchemaModel.buildable(from: all, tradeKey: "landscape").map(\.kind), ["prf"]
+        )
+        XCTAssertEqual(
+            DocumentSchemaModel.buildable(from: all, tradeKey: "property").map(\.kind), ["prf"]
+        )
+    }
+
+    func testATradeSpecificSchemaBeatsAUniversalOneOfTheSameKind() {
+        // Mirrors the resolver's ORDER BY: the operator's own version must
+        // never be shadowed by a shared default, even if the default is newer.
+        let all = [
+            schema("report", label: "Shared report", trade: nil, updatedAt: 900, id: "universal"),
+            schema("report", label: "My report", trade: "landscape", updatedAt: 100, id: "mine")
+        ]
+        let winners = DocumentSchemaModel.buildable(from: all, tradeKey: "landscape")
+        XCTAssertEqual(winners.count, 1)
+        XCTAssertEqual(winners.first?.id, "mine", "trade-specific must win over universal")
+        // On a trade with no specific version, the universal one serves.
+        XCTAssertEqual(
+            DocumentSchemaModel.buildable(from: all, tradeKey: "property").first?.id, "universal"
         )
     }
 
     // MARK: Trade matching in general
 
+    /// Universal must not become a back door: a schema naming a DIFFERENT trade
+    /// still must not appear.
     func testAnotherTradesSchemaIsNeverOffered() {
         let all = [
             schema("condition", trade: "property"),
@@ -73,9 +89,8 @@ final class DocumentChoiceTests: XCTestCase {
         )
     }
 
-    func testNilTradeSessionGetsExactlyTheUniversalSchemas() {
-        // The mirror image — nil-to-nil matches, and a trade-scoped schema
-        // must not leak into a session with no template.
+    func testNilTradeSessionGetsOnlyTheUniversalSchemas() {
+        // A walk with no template still must not see a trade-scoped schema.
         let all = [
             schema("report", trade: nil),
             schema("estimate", trade: "landscape")
