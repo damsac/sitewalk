@@ -76,7 +76,7 @@ struct PaywallView: View {
                     .font(Theme.F.serif(23, .bold))
                     .foregroundStyle(Theme.C.ink)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("They reset on the 1st. Jefe Pro removes the limit today.")
+                Text("They reset on the 1st. Or get Pro and stop counting.")
                     .font(Theme.F.ui(14, .medium))
                     .foregroundStyle(Theme.C.ink60)
                     .fixedSize(horizontal: false, vertical: true)
@@ -85,7 +85,7 @@ struct PaywallView: View {
                     .font(Theme.F.serif(23, .bold))
                     .foregroundStyle(Theme.C.ink)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("The free tier covers \(WalkAllowance.freeMonthlyLimit) walks a month. Pro removes the limit.")
+                Text("Free gets you \(WalkAllowance.freeMonthlyLimit) walks a month. Pro doesn’t count them.")
                     .font(Theme.F.ui(14, .medium))
                     .foregroundStyle(Theme.C.ink60)
                     .fixedSize(horizontal: false, vertical: true)
@@ -105,7 +105,7 @@ struct PaywallView: View {
                 Text(product.displayPrice)
                     .font(Theme.F.serif(30, .bold))
                     .foregroundStyle(Theme.C.ink)
-                Text("per month · cancel anytime")
+                Text("a month · cancel anytime")
                     .font(Theme.F.mono(10))
                     .tracking(0.6)
                     .foregroundStyle(Theme.C.ink60)
@@ -123,9 +123,9 @@ struct PaywallView: View {
 
     private var reassurance: some View {
         VStack(alignment: .leading, spacing: 9) {
-            row("Your notes and jobs stay yours — nothing is deleted if you cancel.")
-            row("Audio never leaves your phone. Jefe transcribes it right here.")
-            row("No account. Nothing to log into on a job site.")
+            row("Cancel whenever. Your notes and jobs stay put.")
+            row("Your audio never leaves your phone.")
+            row("No account to log into.")
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 26)
@@ -146,7 +146,7 @@ struct PaywallView: View {
     /// to read that before paying rather than discover it after.
     private var legalBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Payment is charged to your Apple ID at confirmation. It renews monthly unless you cancel at least 24 hours before the period ends. Manage or cancel it any time in your Apple ID settings.")
+            Text("Payment goes to your Apple ID when you confirm. It renews every month unless you cancel at least 24 hours before it ends. You can cancel any time in your Apple ID settings.")
                 .font(Theme.F.mono(9))
                 .lineSpacing(2)
                 .foregroundStyle(Theme.C.ink45)

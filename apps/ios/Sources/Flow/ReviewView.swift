@@ -212,7 +212,7 @@ struct ReviewView: View {
             }
 
             if model.photos.isEmpty {
-                Text("NO PHOTOS — USE THE PHOTO BUTTON DURING A WALK, OR ADD HERE")
+                Text("No photos yet. Take them during a walk, or add some here.")
                     .font(Theme.F.mono(8))
                     .tracking(0.6)
                     .foregroundStyle(Theme.C.ink45)

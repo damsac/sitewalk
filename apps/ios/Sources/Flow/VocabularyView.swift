@@ -41,7 +41,7 @@ struct VocabularyView: View {
                     SectionLabel("FIELD VOCABULARY", color: Theme.C.amberInk)
                     Text("Teach the mic your jargon")
                         .font(Theme.F.ui(22, .bold))
-                    Text("NAMES, PLANTS, PART NUMBERS — WALKS HEAR THEM BETTER")
+                    Text("Names, plants, part numbers. Jefe listens for them.")
                         .font(Theme.F.mono(8.5))
                         .tracking(0.8)
                         .foregroundStyle(Theme.C.ink60)
@@ -67,7 +67,7 @@ struct VocabularyView: View {
             if isFull {
                 HStack(spacing: 0) {
                     Theme.C.yellowTag.frame(width: 3)
-                    Text("REMOVE ONE TO ADD ANOTHER — A SHORT LIST BIASES THE MIC BETTER THAN A LONG ONE")
+                    Text("Remove one to add another. A short list works better than a long one.")
                         .font(Theme.F.mono(8))
                         .tracking(0.4)
                         .foregroundStyle(Theme.C.ink60)
@@ -98,7 +98,7 @@ struct VocabularyView: View {
 
             // Terms
             if model.vocabulary.isEmpty {
-                Text("NO TERMS YET — ADD THE WORDS CREWS ACTUALLY SAY.\n\u{201C}BOXWOOD\u{201D} · \u{201C}GFCI\u{201D} · \u{201C}HOLLIS\u{201D}")
+                Text("No terms yet. Add the words your crew actually says.\n\u{201C}boxwood\u{201D} · \u{201C}GFCI\u{201D} · \u{201C}Hollis\u{201D}")
                     .font(Theme.F.mono(8.5))
                     .tracking(0.6)
                     .foregroundStyle(Theme.C.ink45)

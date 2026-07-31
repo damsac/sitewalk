@@ -111,7 +111,7 @@ struct OnboardingFlow: View {
                 .font(Theme.F.ui(30, .bold))
                 .lineSpacing(2)
                 .padding(.top, 8)
-            Text("Walk the job and talk — like you’d tell a helper. Jefe turns it into a finished estimate you can send.")
+            Text("Walk the job and talk it through, like you’re telling a helper. Jefe writes up the estimate.")
                 .font(Theme.F.serif(15))
                 .foregroundStyle(Theme.C.ink60)
                 .lineSpacing(3)
