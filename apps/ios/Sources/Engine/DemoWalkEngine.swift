@@ -217,7 +217,7 @@ final class DemoWalkEngine: WalkEngine {
         try? await Task.sleep(for: .seconds(0.8))
         let itemWord = board.count == 1 ? "item" : "items"
         let notes = NotesModel(
-            summary: "Walked \(trade.site.capitalized(with: nil)) — \(board.count) \(itemWord) captured.",
+            summary: "Walked \(trade.site.capitalized(with: nil)), \(board.count) \(itemWord) captured.",
             items: board,
             docKind: DocKinds.primaryKind(for: trade.key),
             queued: false,
@@ -258,7 +258,7 @@ final class DemoWalkEngine: WalkEngine {
     private static let sampleNotes: [NotesEntryFixture] = [
         NotesEntryFixture(
             bucket: .scopeOfWork,
-            label: "Mulch — front beds",
+            label: "Mulch, front beds",
             detail: "Darker mulch than last year; the old mulch faded."
         ),
         NotesEntryFixture(
@@ -269,7 +269,7 @@ final class DemoWalkEngine: WalkEngine {
         NotesEntryFixture(
             bucket: .conditionsAndIssues,
             label: "Zone-2 irrigation head broken",
-            detail: "Replace — parts + labor."
+            detail: "Replace. Parts and labor."
         )
     ]
 
@@ -550,7 +550,7 @@ final class DemoWalkEngine: WalkEngine {
                  scheduledAt: nil, status: .active, createdAt: 3, updatedAt: 3),
         JobModel(id: "job-2", name: "The Hendersons", client: nil, site: nil,
                  scheduledAt: nil, status: .active, createdAt: 2, updatedAt: 2),
-        JobModel(id: "job-3", name: "412 Maple — retaining wall", client: nil, site: nil,
+        JobModel(id: "job-3", name: "412 Maple retaining wall", client: nil, site: nil,
                  scheduledAt: nil, status: .done, createdAt: 1, updatedAt: 1),
     ]
     private var nextJobOrdinal = 4

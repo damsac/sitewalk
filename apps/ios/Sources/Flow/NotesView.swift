@@ -629,19 +629,20 @@ struct NotesView: View {
                 if building {
                     ProgressView().tint(hero ? Theme.C.onOrange : Theme.C.ink)
                 } else {
-                    VStack(spacing: 2) {
-                        Text(choice.label)
-                            .font(Theme.F.ui(12, .bold)).tracking(0.04)
-                            .foregroundStyle(hero ? Theme.C.onOrange : Theme.C.ink)
-                            .lineLimit(1)
-                        Text(choice.stamp)
-                            .font(Theme.F.mono(6.5, .semibold)).tracking(0.6)
-                            .foregroundStyle(hero ? Theme.C.onOrange.opacity(0.85) : Theme.C.ink60)
-                            .lineLimit(1)
-                    }
+                    // ONE line. The stamp under the label ("Estimate" over
+                    // "EST") said the same thing twice, and the type ramp made
+                    // it the bigger problem of the two: at 6.5pt it sat below
+                    // the 11pt floor, so it was forced up 69% while the label
+                    // grew 30%. A redundant sub-label ended up nearly the size
+                    // of the real one, which is what made these read as chunky
+                    // and cut off (Isaac, on device).
+                    Text(choice.label)
+                        .font(Theme.F.ui(12, .bold)).tracking(0.04)
+                        .foregroundStyle(hero ? Theme.C.onOrange : Theme.C.ink)
+                        .lineLimit(1)
                     // Breathing room INSIDE the border, so the shape grows with
                     // the label instead of the label escaping the shape.
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 16)
                     .fixedSize(horizontal: true, vertical: false)
                 }
             }
@@ -650,8 +651,10 @@ struct NotesView: View {
             // the horizontal ScrollView, which is how "Invoice" and "Work
             // Order" ended up printed across their own borders once the type
             // ramp grew them (Isaac, on device 2026-07-30).
-            .frame(height: 54)
-            .frame(minWidth: 96)
+            // 46 rather than 54: a single line needs less box, and a shorter
+            // row leaves more of the notes visible above it.
+            .frame(height: 46)
+            .frame(minWidth: 88)
             .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)

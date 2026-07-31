@@ -145,7 +145,7 @@ enum Fixtures {
 
     static let landscape = TradeFixture(
         key: "landscape",
-        dateLabel: "TUE — JUL 01",
+        dateLabel: "TUE · JUL 01",
         countTitle: "4 sites today",
         biz: "Ridgeline Landscape Co.",
         bizCaps: "RIDGELINE LANDSCAPE CO.",
@@ -176,18 +176,18 @@ enum Fixtures {
             DocRowFixture(title: "Boxwood trim, walkway line", sub: "SHAPE + HAUL CLIPPINGS", qty: "× 4", amount: "$140"),
             DocRowFixture(title: "Irrigation head, zone 2", sub: "PARTS + LABOR", hint: "↺ LAST 3: $110 · $120 · $125", qty: "× 1", amount: "$120", isEdit: true),
             DocRowFixture(title: "Bed edging, front beds", sub: "SPADE EDGE, RE-CUT", qty: "60 LF", amount: "$310"),
-            DocRowFixture(title: "Haul & disposal", sub: "NOT HEARD — TAP OR SAY IT", subWarn: true, qty: "× 1", amount: "——", isGap: true),
+            DocRowFixture(title: "Haul & disposal", sub: "NOT HEARD, TAP OR SAY IT", subWarn: true, qty: "× 1", amount: "——", isGap: true),
             DocRowFixture(title: "Crew labor", sub: "2-MAN CREW · HALF DAY", qty: "4 HR", amount: "$355"),
         ],
         totalKey: "TOTAL",
         totalValue: "$1,210",
-        note: "1 GAP LEFT — \u{201C}haul and disposal, ninety-five\u{201D} fills it. Never guessed for you.",
+        note: "1 GAP LEFT: \u{201C}haul and disposal, ninety-five\u{201D} fills it. Never guessed for you.",
         send: "SEND ESTIMATE"
     )
 
     static let property = TradeFixture(
         key: "property",
-        dateLabel: "TUE — JUL 01",
+        dateLabel: "TUE · JUL 01",
         countTitle: "5 units today",
         biz: "Corbett Property Group",
         bizCaps: "CORBETT PROPERTY GROUP",
@@ -218,17 +218,17 @@ enum Fixtures {
             DocRowFixture(title: "Blinds, kitchen", sub: "2 SLATS MISSING · PHOTO ×1", qty: "DEDUCT", amount: "$45"),
             DocRowFixture(title: "Walls, all rooms", sub: "NORMAL WEAR AND TEAR", qty: "OK", amount: "—"),
             DocRowFixture(title: "Water heater", sub: "MFG 2019 · SERIAL LOGGED", qty: "NOTE", amount: "—"),
-            DocRowFixture(title: "Garage remote", sub: "NOT HEARD — RETURNED? SAY IT", subWarn: true, qty: "DEDUCT", amount: "——", isGap: true),
+            DocRowFixture(title: "Garage remote", sub: "NOT HEARD, RETURNED? SAY IT", subWarn: true, qty: "DEDUCT", amount: "——", isGap: true),
         ],
         totalKey: "DEPOSIT DEDUCTION",
         totalValue: "$185",
-        note: "PHOTOS PIN TO THE LINE YOU\u{2019}RE SPEAKING ABOUT — SAY \u{201C}PHOTO\u{201D} OR TAP",
+        note: "PHOTOS PIN TO THE LINE YOU\u{2019}RE SPEAKING ABOUT: SAY \u{201C}PHOTO\u{201D} OR TAP",
         send: "SEND REPORT"
     )
 
     static let inspection = TradeFixture(
         key: "inspection",
-        dateLabel: "TUE — JUL 01",
+        dateLabel: "TUE · JUL 01",
         countTitle: "2 inspections today",
         biz: "TrueLine Home Inspection",
         bizCaps: "TRUELINE HOME INSPECTION",
@@ -238,7 +238,7 @@ enum Fixtures {
         jobs: [
             JobFixture(time: "8:30", name: "212 Garfield Ave", sub: "Pre-purchase · 1954 SFR", tag: TagFixture(kind: .green, label: "SENT"), done: true),
             JobFixture(time: "12:00", name: "77 Larkspur Ln", sub: "Pre-purchase · 2001 SFR", tag: TagFixture(kind: .plain, label: "NEXT")),
-            JobFixture(time: "—", name: "Report follow-up", sub: "Buyer Q — 212 Garfield", tag: TagFixture(kind: .yellow, label: "F/U")),
+            JobFixture(time: "—", name: "Report follow-up", sub: "Buyer Q, 212 Garfield", tag: TagFixture(kind: .yellow, label: "F/U")),
             JobFixture(time: "—", name: "Thu hold", sub: "4-point · insurer req.", tag: TagFixture(kind: .plain, label: "HOLD")),
         ],
         site: "77 LARKSPUR LN",
@@ -259,11 +259,11 @@ enum Fixtures {
             DocRowFixture(title: "GFCI, hall bathroom", sub: "FAILS TO TRIP ON TEST", hint: "↺ AUTO-FILED FROM YOUR LAST 12 REPORTS", qty: "SAFETY", amount: "§ 6.4", isEdit: true),
             DocRowFixture(title: "Attic ventilation", sub: "RIDGE + SOFFIT, ADEQUATE", qty: "OK", amount: "§ 3.2"),
             DocRowFixture(title: "Furnace filter", sub: "REPLACEMENT OVERDUE", qty: "MAINT", amount: "§ 5.1"),
-            DocRowFixture(title: "Water heater TPR valve", sub: "NOT ACCESSED — VERIFY OR EXCLUDE", subWarn: true, qty: "——", amount: "§ 5.3", isGap: true),
+            DocRowFixture(title: "Water heater TPR valve", sub: "NOT ACCESSED, VERIFY OR EXCLUDE", subWarn: true, qty: "——", amount: "§ 5.3", isGap: true),
         ],
         totalKey: "FINDINGS",
         totalValue: "1 SAFETY · 3 REPAIR",
-        note: "FINDINGS FILE INTO TREC SECTIONS AUTOMATICALLY — REORDER BY DRAG",
+        note: "FINDINGS FILE INTO TREC SECTIONS AUTOMATICALLY: REORDER BY DRAG",
         send: "SEND REPORT"
     )
 
