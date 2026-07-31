@@ -954,7 +954,7 @@ final class AppModel {
                 time: "9:41", docNo: "", docKind: "ESTIMATE", sent: true,
                 sessionId: "seed-1", queued: false, jobId: nil,
                 startedAt: base - 3_600,
-                summary: "Field session at 1418 Alder Ct to scope mulch and trim work. "
+                summary: "1418 Alder Ct, scoped mulch and trim. "
                     + "The operator noted three yards of hardwood mulch, four boxwoods "
                     + "along the walkway, and a broken zone-2 irrigation head.",
                 itemCount: 5
@@ -971,7 +971,7 @@ final class AppModel {
                 time: "16:20", docNo: "", docKind: "WORK ORDER", sent: true,
                 sessionId: "seed-3", queued: false, jobId: nil,
                 startedAt: base - (2 * day),
-                summary: "Marston HOA — irrigation check",
+                summary: "Marston HOA irrigation check",
                 itemCount: 6
             ),
         ]
@@ -1096,7 +1096,7 @@ final class AppModel {
             } catch {
                 Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "walk")
                     .error("reopenWalk(\(sessionId, privacy: .public)) failed: \(error, privacy: .public)")
-                self.reopenError = "Couldn’t reopen that walk — it may have been removed."
+                self.reopenError = "Couldn’t reopen that walk. It may have been removed."
             }
         }
     }
@@ -1161,7 +1161,7 @@ final class AppModel {
                 // and explained nothing. Isaac tapped a custom button and got
                 // no usable signal at all.
                 self.documentBuildError =
-                    "Couldn’t build it — \(EngineErrorText.readable(error))"
+                    "Couldn’t build it. \(EngineErrorText.readable(error))"
             }
         }
     }
@@ -1245,7 +1245,7 @@ final class AppModel {
     }
 
     private func itemEditFailed(_ what: String, _ error: Error) {
-        notesEditError = "Couldn’t \(what) that line — try again."
+        notesEditError = "Couldn’t \(what) that line. Try again."
         Logger(subsystem: Bundle.main.bundleIdentifier ?? "sitewalk", category: "items")
             .error("item \(what, privacy: .public) failed: \(error, privacy: .public)")
     }

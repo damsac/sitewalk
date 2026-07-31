@@ -62,7 +62,7 @@ struct WalkView: View {
             // First-run DONE hint: appears once anything is captured (so it
             // shows exactly when DONE becomes tappable), pointing at DONE.
             if !coachDoneShown && !(model.transcript.isEmpty && model.items.isEmpty) {
-                CoachCallout(text: "All done talking? Tap DONE — Jefe writes up your notes and paperwork.", pointer: .trailing) {
+                CoachCallout(text: "Done talking? Tap DONE and Jefe writes it up.", pointer: .trailing) {
                     coachDoneShown = true
                 }
                 .padding(.horizontal, Theme.S.screenPad)
@@ -90,7 +90,7 @@ struct WalkView: View {
                         Button("Discard — nothing will be saved", role: .destructive) { model.discardWalk() }
                         Button("Keep walking", role: .cancel) {}
                     } message: {
-                        Text("The transcript and everything captured on this walk will be deleted.")
+                        Text("This deletes the transcript and everything on this walk.")
                     }
                 } else {
                     Waveform()
@@ -143,7 +143,7 @@ struct WalkView: View {
             if model.micUnavailable {
                 HStack(spacing: 0) {
                     Theme.C.redTag.frame(width: 3)
-                    Text("Jefe can't hear the mic — another app may be using it. Tap DONE and start again.")
+                    Text("Jefe can't hear the mic. Something else might be using it. Tap DONE and try again.")
                         .font(Theme.F.ui(13, .medium))
                         .foregroundStyle(Theme.C.redTag)
                         .fixedSize(horizontal: false, vertical: true)

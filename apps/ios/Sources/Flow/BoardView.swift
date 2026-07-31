@@ -127,7 +127,7 @@ struct BoardView: View {
                 } label: {
                     HStack(spacing: 0) {
                         Theme.C.redTag.frame(width: 3)
-                        Text("MIC IS OFF — SITEWALK CAN'T HEAR YOUR WALK. TAP TO ENABLE IN SETTINGS")
+                        Text("Your mic is off, so Jefe can't hear you. Tap to turn it on.")
                             .font(Theme.F.mono(8, .semibold))
                             .tracking(0.4)
                             .foregroundStyle(Theme.C.redTag)
@@ -184,7 +184,7 @@ struct BoardView: View {
                     // "TODAY"; this is also filing's payoff ("it moved under the
                     // job").
                     SectionHead(left: "UNFILED", right: "0 WALKS", rightColor: Theme.C.amberInk)
-                    Text("ALL WALKS FILED — SEE JOBS BELOW")
+                    Text("Everything's filed under a job below.")
                         .font(Theme.F.mono(8.5))
                         .tracking(0.8)
                         .foregroundStyle(Theme.C.ink45)
@@ -369,7 +369,7 @@ private struct NewJobSheet: View {
             // 56pt and recessed, matching the Tier 3 well: a field is something
             // you type INTO, so it is cut into the sheet rather than raised off
             // it.
-            TextField("", text: $name, prompt: Text("14 Oakfield — back beds")
+            TextField("", text: $name, prompt: Text("14 Oakfield, back beds")
                 .foregroundColor(Theme.C.ink45))
                 .font(Theme.F.ui(17, .medium))
                 .foregroundStyle(Theme.C.ink)
@@ -1011,7 +1011,7 @@ private struct FileChip: View {
     var body: some View {
         Menu {
             if jobs.isEmpty {
-                Text("No jobs yet — add one below")
+                Text("No jobs yet. Add one below.")
             } else {
                 ForEach(jobs) { job in
                     Button {

@@ -465,7 +465,7 @@ struct NotesView: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { withAnimation(.easeOut(duration: 0.2)) { showTranscript.toggle() } } label: {
                 HStack {
-                    Text("SHOW WHAT I HEARD — FULL TRANSCRIPT")
+                    Text("Show the full transcript")
                         .font(Theme.F.mono(8.5, .semibold)).tracking(0.8)
                         .foregroundStyle(Theme.C.ink60)
                     Spacer()
@@ -565,7 +565,7 @@ struct NotesView: View {
                 // indistinguishable from a bug the first time it guesses
                 // wrong — and the operator needs to know a choice was made
                 // on their behalf so they can correct it.
-                Text("Heard “\(auto.jobName)” in the walk — filed there. Tap to change.")
+                Text("You said “\(auto.jobName)”, so it’s filed there. Tap to change.")
                     .font(Theme.F.ui(13, .medium))
                     .foregroundStyle(Theme.C.amberInk)
                     .fixedSize(horizontal: false, vertical: true)

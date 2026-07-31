@@ -49,7 +49,7 @@ Talk the job, get the paperwork
 
 **Promotional text (170 max — editable without review):**
 ```
-Walk the site and talk it through. Jefe writes the estimate before you're back in the truck. No typing, no office night, no forgotten line items.
+Walk the site and talk it through. Jefe writes the estimate before you're back in the truck. No typing, and no catching up on paperwork after dinner.
 ```
 
 **Description:**
@@ -57,18 +57,17 @@ Walk the site and talk it through. Jefe writes the estimate before you're back i
 Jefe turns a site walk into paperwork.
 
 Start a walk, put the phone in your pocket, and talk the job the way you'd
-explain it to a helper. Jefe listens, pulls out the line items, quantities and
-conditions as you go, and writes it up when you tap DONE.
+explain it to a helper. Jefe listens, picks out the line items and quantities as
+you go, and writes it up when you tap DONE.
 
 WALK AND TALK
-Press record and work. Jefe keeps listening with the screen off and the phone in
-your pocket. Take photos as you go and they attach to what you were talking
-about.
+Press record and get to work. Jefe keeps listening with the screen off and the
+phone in your pocket. Take photos as you go and they attach to whatever you were
+talking about.
 
 THE WRITE-UP, NOT A TRANSCRIPT
-You get organized notes — scope of work, constraints, conditions and issues,
-follow-ups — not a wall of text you have to read back. Anything it got wrong,
-you tap and fix.
+You get organized notes. Scope of work, constraints, conditions, follow-ups. Not
+a wall of text you have to read back. Anything it got wrong, you tap and fix.
 
 YOUR PAPERWORK, YOUR WORDS
 Turn the notes into an estimate, invoice, work order or report. Put your business
@@ -76,17 +75,17 @@ name, license and terms on it. Build your own document types if ours don't match
 how you work.
 
 JOBS THAT REMEMBER
-Walks file under the job they belong to. When a client emails months later asking
-what you found, it's there — with the photos.
+Walks file under the job they belong to. When a client emails four months later
+asking what you found, it's there, with the photos.
 
 BUILT FOR THE FIELD
-Big buttons for gloves. Works with the screen locked. Your audio never leaves
-your phone — Jefe transcribes it right there on the device.
+Big buttons that work with gloves on. Keeps recording with the screen locked.
+Your audio never leaves your phone. Jefe transcribes it right on the device.
 
 FREE AND PRO
-Five walks a month, free. Jefe Pro removes the limit for $12.99/month.
+Five walks a month, free. Jefe Pro takes the limit off for $12.99/month.
 
-Made for landscapers, property managers and inspectors — and anyone who'd rather
+Made for landscapers, property managers and inspectors, and anyone who'd rather
 be on site than at a desk.
 ```
 

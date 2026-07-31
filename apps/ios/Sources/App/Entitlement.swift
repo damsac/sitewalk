@@ -125,7 +125,7 @@ final class Entitlement {
     @discardableResult
     func purchase() async -> Bool {
         guard let product = proProduct else {
-            purchaseError = "The subscription isn't available right now. Try again in a moment."
+            purchaseError = "Can't reach the App Store right now. Try again in a minute."
             return false
         }
         isWorking = true
@@ -136,7 +136,7 @@ final class Entitlement {
                 guard case .verified(let transaction) = verification else {
                     // Signature check failed. Do not entitle; this is the case
                     // the verification exists for.
-                    purchaseError = "That purchase couldn't be verified."
+                    purchaseError = "That purchase didn't check out. You haven't been charged."
                     log.error("purchase returned an unverified transaction")
                     return false
                 }
@@ -151,14 +151,14 @@ final class Entitlement {
             case .pending:
                 // Ask-to-Buy / SCA. The transaction may complete later and will
                 // arrive through Transaction.updates.
-                purchaseError = "That purchase needs approval before it goes through."
+                purchaseError = "That purchase needs approval first."
                 return false
             @unknown default:
-                purchaseError = "That purchase didn't complete."
+                purchaseError = "That purchase didn't go through."
                 return false
             }
         } catch {
-            purchaseError = "That purchase didn't complete: \(error.localizedDescription)"
+            purchaseError = "That purchase didn't go through. \(error.localizedDescription)"
             log.error("purchase failed: \(error, privacy: .public)")
             return false
         }
@@ -173,9 +173,9 @@ final class Entitlement {
         do {
             try await AppStore.sync()
             await refresh()
-            purchaseError = isPro ? nil : "No previous subscription found on this Apple ID."
+            purchaseError = isPro ? nil : "No subscription found on this Apple ID."
         } catch {
-            purchaseError = "Couldn't restore: \(error.localizedDescription)"
+            purchaseError = "Couldn't restore it. \(error.localizedDescription)"
             log.error("restore failed: \(error, privacy: .public)")
         }
     }

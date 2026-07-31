@@ -31,7 +31,7 @@ struct VocabSeedCard: View {
             Text("Words your trade actually says")
                 .font(Theme.F.ui(22, .bold))
                 .padding(.top, 6)
-            Text("TAP OFF ANY YOU DON’T USE — WALKS HEAR THE REST BETTER")
+            Text("Tap off any you don’t use. Jefe listens harder for the rest.")
                 .font(Theme.F.mono(8.5))
                 .tracking(0.8)
                 .foregroundStyle(Theme.C.ink60)
