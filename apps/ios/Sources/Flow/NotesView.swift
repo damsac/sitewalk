@@ -598,6 +598,7 @@ struct NotesView: View {
                         docButton(choice, hero: i == 0)
                     }
                 }
+                .padding(.vertical, 3)
             }
             Button { exportNotes() } label: {
                 Text("⇪  EXPORT NOTES")
@@ -619,47 +620,42 @@ struct NotesView: View {
         let building = model.buildingKind == kind
         let disabled = notes.queued || (model.isBuildingDocument && !building)
         return Button { model.buildDocument(kind: kind) } label: {
-            ZStack {
-                if hero {
-                    RoundedRectangle(cornerRadius: Theme.S.radius).fill(Theme.C.orangeDeep).offset(y: 3)
-                    RoundedRectangle(cornerRadius: Theme.S.radius).fill(Theme.C.orange)
-                } else {
-                    RoundedRectangle(cornerRadius: Theme.S.radius).stroke(Theme.C.ink, lineWidth: 2)
-                }
-                if building {
-                    ProgressView().tint(hero ? Theme.C.onOrange : Theme.C.ink)
-                } else {
-                    // ONE line. The stamp under the label ("Estimate" over
-                    // "EST") said the same thing twice, and the type ramp made
-                    // it the bigger problem of the two: at 6.5pt it sat below
-                    // the 11pt floor, so it was forced up 69% while the label
-                    // grew 30%. A redundant sub-label ended up nearly the size
-                    // of the real one, which is what made these read as chunky
-                    // and cut off (Isaac, on device).
-                    Text(choice.label)
-                        .font(Theme.F.ui(12, .bold)).tracking(0.04)
-                        .foregroundStyle(hero ? Theme.C.onOrange : Theme.C.ink)
-                        .lineLimit(1)
-                    // Breathing room INSIDE the border, so the shape grows with
-                    // the label instead of the label escaping the shape.
-                    .padding(.horizontal, 16)
-                    .fixedSize(horizontal: true, vertical: false)
-                }
+            if building {
+                ProgressView().tint(hero ? Theme.C.onOrange : Theme.C.ink)
+            } else {
+                // ONE line. The stamp under the label ("Estimate" over "EST")
+                // said the same thing twice, and the type ramp made it the
+                // bigger problem: at 6.5pt it sat below the 11pt floor, so it
+                // was forced up 69% while the label grew 30%.
+                Text(choice.label)
+                    .font(Theme.F.ui(12, .bold))
+                    .tracking(0.04)
+                    .lineLimit(1)
             }
-            // Sized to content, with a floor so a short label still reads as a
-            // button. `maxWidth: .infinity` proposed an unbounded width inside
-            // the horizontal ScrollView, which is how "Invoice" and "Work
-            // Order" ended up printed across their own borders once the type
-            // ramp grew them (Isaac, on device 2026-07-30).
-            // 46 rather than 54: a single line needs less box, and a shorter
-            // row leaves more of the notes visible above it.
-            .frame(height: 46)
-            .frame(minWidth: 88)
-            .fixedSize(horizontal: true, vertical: false)
         }
-        .buttonStyle(.plain)
+        // The control system, rather than a hand-rolled ZStack.
+        //
+        // The old version drew the hero's lip as a second rounded rectangle at
+        // `.offset(y: 3)` — 3pt BELOW its own frame — and the outlined ones with
+        // a 2pt stroke, which draws half outside the path. Inside a horizontal
+        // ScrollView both got clipped at the frame edge, which is the shaved
+        // shadow Isaac spotted under Estimate.
+        //
+        // `RaisedBlockStyle` builds the lip with padding INSIDE the frame, so
+        // nothing overhangs and nothing can be clipped. These also pick up the
+        // press travel and the haptic every other control already has.
+        .buttonStyle(RaisedBlockStyle(
+            face: hero ? Theme.C.orange : Theme.C.sheet,
+            lip: hero ? Theme.C.orangeDeep : Theme.C.ink.opacity(0.32),
+            text: hero ? Theme.C.onOrange : Theme.C.ink,
+            border: hero ? nil : Theme.C.ink,
+            height: 46,
+            leadingDot: false,
+            fillWidth: false
+        ))
+        .frame(minWidth: 88)
+        .fixedSize(horizontal: true, vertical: false)
         .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
     }
 
     // MARK: Comprehensive notes — Plan 14 coordination buckets
