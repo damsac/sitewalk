@@ -1,220 +1,350 @@
-# dam: what we need before the month away
+# dam: everything, before the month away
 
-**Written 2026-07-28 by sac, for dam and dam's Claude.**
+**Rewritten 2026-08-02 by sac.** Replaces the 2026-07-28 version, half of which
+is now stale. This is the single pickup point — if you read one file, this one.
 
-You're gone for a month in a few days. **sac cannot touch core** — that's the
-constraint everything here follows from. Anything in `crates/` that isn't on main
-when you leave is blocked until you're back, and the App Store submission is
-being worked in the meantime.
+**43 commits landed since your last (`c2a2040`, 28 Jul).** All but one are
+app-side. You have not seen any of it.
 
-So this isn't a wish list. It's sorted by one question: **what breaks, or stalls
-for a month, if you don't do it before you go?**
+Structure: **§1 orientation** (what changed, so nothing surprises you), **§2
+review** (your expertise, ~2 hours), **§3 do** (only you can), **§4 hand over**
+(single points of failure), **§5 don't bother**.
 
-If you only do three things, do **A1, A2, A3**. Everything in section D is
-explicitly *don't bother*.
-
----
-
-## Context you may not have
-
-Five things changed since your last pass, and two of them change what you should
-prioritize.
-
-1. **The Anthropic key is out of the app.** There's a Cloudflare Worker at
-   `services/proxy/` holding it; the app sends an install id + app secret
-   instead. Per-install cap \$2/day, global \$25/day, checked *before*
-   forwarding. The worker is forbidden to log, store, or forward request or
-   response **bodies** — that rule is the file header, and it's what lets the
-   privacy policy say we don't retain walk content.
-
-2. **The app can take money.** StoreKit 2, Jefe Pro at \$12.99/mo, free tier of
-   5 finished walks a month (#277, #279, #281). Metering is on-device.
-
-3. **Jobs are on the board** (#264, #266, #268) and walks file under them, with
-   client-side auto-filing when the operator speaks a job name.
-
-4. **Your merges are no longer special.** The account-level Actions gate is gone
-   — sac's merges to main now fire the Release workflow and upload to TestFlight
-   (verified: builds 74–78, all `event: push`, internal lane, `UPLOAD=true`).
-   **This is why your month away is survivable at all.** Please don't change it.
-
-5. **Template upload is deliberately out of v1**, per your own #207 §7 ruling.
-   sac agrees and has recommended shipping without it. See A1 — the ask is much
-   narrower than "build upload."
+If you only have an hour: **2.1, 3.1, 4.1, 4.2.**
 
 ---
 
-## A. Blocking or month-blocked — please do these
+## 1. What changed while you were heads-down
 
-### A1. Land the `ContentBlock` Image/Document variants (#263)
+### 1.1 The one core change — and it replaced a test of yours
 
-**The narrowed ask: the capability only. Not upload, not comprehension, not a
-design.**
+**#306.** `resolve_active_schema` now treats a NULL `trade_key` as **universal**
+(matches any template) rather than "only a NULL template", ordered so a
+trade-specific row still wins.
 
-`harness::ContentBlock` is `Text | ToolUse | ToolResult | Unknown`. There is no
-image or document variant, so the harness cannot put a PDF or a photo in front of
-the model at all.
+This **replaced your named parity test**
+`resolve_report_only_for_none_template_not_for_landscape`. I left it alone the
+first time and said why: its comment — *"it stays illegal on a landscape
+session, matching today"* — read as deliberate Plan 19 parity preservation, and
+it was. I filed **#284** asking you rather than changing it.
 
-Your #207 §7 ruling stands and nobody is asking you to revisit it — upload
-comprehension is Premium/v3. But the *variants* are the long pole, and they're
-core. With them on main, upload becomes a sac-side feature that can ship in 1.1.
-Without them it's blocked on your return, which puts it two months out.
+Then Isaac hit it in the field. His own custom document types (Report, RFP) had
+vanished from the notes screen, and his call was unambiguous: *"They should come
+in regardless of trade!"* That is the product intent I said I was missing, so I
+took it as the answer and closed #284.
 
-If you think landing a capability with no consumer is wrong, say so on the issue
-and we'll drop it — that's a legitimate call. But it's the single highest-leverage
-hour of core work available before you leave.
+**§2.1 is the review.** 72 lines, one file. If you disagree it is one `WHERE`
+clause to revert.
 
-### A2. The App Attest server half
+### 1.2 Monetization exists now
 
-**Hard prerequisite for a public App Store listing.** Not for TestFlight.
+StoreKit 2, Jefe Pro at $12.99/mo, free tier 5 finished walks a month
+(#277, #279, #281).
 
-`JEFE_APP_SECRET` ships inside the binary and install ids are minted client-side
-(`InstallIdentity.swift`), so anyone who extracts the secret can mint unlimited
-install ids.
+- Metered on **output**, not on tapping START — a walk that produces nothing is
+  not charged.
+- The gate runs at `startWalk()`, never at finish. Refusing at DONE would
+  destroy a recording already made.
+- Keychain-backed (`WalkMeter`), so reinstalling is not a one-tap reset.
+- **Fails open when no product is purchasable** (#281) — with no ASC product
+  live, nobody can subscribe, so a hard gate would brick testers at walk six
+  with no way to pay.
+- Practice and demo walks are exempt.
 
-State the exposure accurately, because it's not what it first looks like: the
-global \$25/day cap holds, so this is roughly **\$750/month worst case, not
-unbounded**. The real risk is **availability** — an abuser burning the global cap
-denies service to paying subscribers, who then see "service daily spend cap
-reached; try again tomorrow" standing on a job site.
+Not a security boundary and not meant to be: the meter and the entitlement check
+are both on-device. What bounds it is the proxy's spend caps, and App Attest
+(§3.2).
 
-Survivable at TestFlight scale, where every install is someone we know. Not
-survivable on a public listing.
+### 1.3 The design review — the app looks substantially different
 
-**It needs a device session** — attestation can't be exercised in the simulator.
-That's why it's here and not on the "when you're back" list.
+Two design docs (control system + visual review) landed across #293–#301,
+#307–#309. Headlines:
 
-### A3. The device session you've been carrying
+- **Control system**: `RaisedBlockStyle` / `WellChipStyle` / `FieldRowStyle`.
+  One rule — raised, recessed, or off; **flat means disabled**. `BlockButton`
+  is gone; it hand-stacked rectangles inside a `View`, so it structurally could
+  not see `isPressed`. Every button also carried `.buttonStyle(.plain)`, which
+  threw away press feedback. **Nothing in the app responded to touch before
+  this.**
+- **Type ramp +30% with an 11pt floor**, applied in the four `Theme.F` helpers
+  so ratios survive exactly. `relativeTo:` adopts Dynamic Type, which the app
+  ignored entirely.
+- **Contrast**: `orangeDeep` was 4.53:1 and `ink35` 2.39:1, both used as text.
+  New `amberInk` (7.79:1) and `ink45` (5.09:1). Measured, not eyeballed.
+- **BRIEF.md now describes the app** — gold replaces the safety orange it
+  specified, renamed to Jefe, contrast exception cleared.
+- **Copy pass**: em dashes and AI tells out of the app, the site, and the store
+  listing. Caught a real bug — the mic-denied banner still said "SITEWALK".
 
-From your own STATE: voiceproc A/B sweep, Plan 09 Task 7 rerun, small.en RTF
-validation. Still pending a dedicated device session.
+### 1.4 The crash, and what it cost
+
+Isaac and a tester both hit **SIGABRT on START WALK**, build 93.
+
+`installTapOnBus` raises an ObjC exception when the audio session has not
+activated — an `abort()`, not catchable. The crash log's **0.87-second process
+lifetime** is what named it: START WALK pressed within a second of launch,
+before `setActive` completed. Both `try?`s swallowed the failure, the input node
+reported 0 Hz, and the tap raised.
+
+**I diagnosed it wrong first** (a double-tap race, #303) and shipped a latch
+before checking process lifetime. The latch is still correct — two walks at once
+is a real bug — but it was not the cause. Fixed properly in **#305**, and Isaac
+confirms it is no longer crashing.
+
+`AudioCaptureSource` is arguably your territory. **§2.2 is the review.**
+
+### 1.5 Two process failures worth knowing
+
+**I burned the daily TestFlight upload quota** (#304). Ten small PRs merged in
+three hours = 23 upload attempts, and Apple 409'd the one build that mattered —
+the crash fix. It shipped a day late. Your honesty check from #195 caught the
+false green correctly. Proposal in §3.6; I am batching merges now.
+
+**My local `ffiFFI.xcframework` is stale** — predates the jobs FFI and
+`pause_pump`/`resume_pump`, so a real-core build fails on missing checksum
+symbols. **Everything I verified this week ran against `DemoWalkEngine`**, and
+the crash was on the real audio path. That gap is the single biggest weakness in
+my testing and it is why §3.3 matters.
+
+---
+
+## 2. Review — where your expertise is worth the most (~2 hours)
+
+Ordered by how much a wrong call costs.
+
+### 2.1 The core change (#306) — 15 minutes
+
+`crates/murmur-core/src/store/schemas.rs`, 72 lines.
+
+```sql
+-- was
+WHERE kind = ?1 AND (trade_key = ?2 OR (trade_key IS NULL AND ?2 IS NULL))
+ORDER BY updated_at DESC LIMIT 1
+
+-- now
+WHERE kind = ?1 AND (trade_key = ?2 OR trade_key IS NULL)
+ORDER BY (trade_key IS NULL) ASC, updated_at DESC LIMIT 1
+```
+
+Three tests replace yours: universal resolves under every template; a named
+trade still cannot leak across trades; trade-specific beats universal even when
+the universal row is newer.
+
+**What I want your eyes on:** whether "universal" should have been expressed as
+schema *scope* at all, or whether `doc_kinds_for_template` should have grown a
+notion of shared kinds instead. I picked the smallest change that matched
+Isaac's intent. You designed Plan 19 and may see a cleaner seam.
+
+### 2.2 The audio session fix (#305) — 20 minutes
+
+`apps/ios/Sources/Engine/AudioCaptureSource.swift`.
+
+Now retries `setActive` three times over ~80ms, falls back to plain `.record` if
+`.duckOthers` is refused (**it is not a documented option for `.record`** — that
+`setCategory` may have been failing all along), and surfaces `onUnavailable` so
+a dead mic says so instead of recording silence.
+
+**Questions for you:** is 3×40ms the right shape, or should this await a real
+session-activation notification? And is the silent-walk banner the right
+posture, or should a failed activation abort the walk outright?
+
+### 2.3 The proxy — you have never seen it — 30 minutes
+
+`services/proxy/`. A Cloudflare Worker holding the Anthropic key, because a key
+in `Info.plist` is extractable from any downloaded IPA. 17 vitest tests.
+
+- Caps checked **before** forwarding; body forwarded byte-identically.
+- Unknown models priced at the most expensive rate.
+- Fails closed on misconfiguration.
+- **File header rule: nothing may log, store, or forward a request or response
+  body.** That rule is what lets the privacy policy say we do not retain walk
+  content.
+- Per-install $2/day, global $25/day.
+
+**What I want checked:** the spend accounting against your R9 model, and whether
+the cap posture is right — a heavy tester hits $2/day at roughly 11 walks and
+sees a hard refusal.
+
+### 2.4 Worth a skim, not a review
+
+- **#277** monetization — app-side, but it is a product surface with money in it.
+- **#293** the control system — the file everything else now depends on.
+- **#305 → #303** in that order if you want the crash story; #303 is a defect I
+  shipped and then corrected.
+
+---
+
+## 3. Do — blocking, or month-blocked
+
+### 3.1 Land the `ContentBlock` Image/Document variants (#263)
+
+**The capability only. Not upload, not comprehension, not a revisit of your
+#207 §7 ruling.**
+
+`ContentBlock` is `Text | ToolUse | ToolResult | Unknown`. The harness cannot
+put a PDF or a photo in front of the model at all.
+
+I agree with shipping v1 without upload and have recommended exactly that. But
+the *variants* are core and they are the long pole. With them on main, upload
+becomes a sac-side feature that can ship in 1.1. Without them it waits a month.
+
+**This is the single highest-leverage hour of core work available.** If you
+think landing a capability with no consumer is wrong, say so on the issue.
+
+### 3.2 App Attest server half
+
+Hard prerequisite for a **public** listing. Not for TestFlight.
+
+`JEFE_APP_SECRET` ships in the binary and install ids are client-minted, so
+anyone extracting the secret can mint unlimited ids.
+
+State the exposure accurately: the **global $25/day cap holds**, so this is
+~$750/month worst case, not unbounded. The real risk is **availability** — an
+abuser burning the global cap denies service to paying subscribers mid-job.
+
+Needs a device session; attestation cannot be exercised in the simulator.
+
+### 3.3 The device session you have been carrying
+
+voiceproc A/B sweep, Plan 09 Task 7 rerun, small.en RTF validation.
 
 **This is the biggest un-managed quality risk in the product and it is entirely
 yours.** The whole thing is a voice product. If field transcription is mediocre,
 none of the paperwork, jobs, or billing work matters — and nobody else can
-validate it, because sac has no device build path into core STT and Isaac's
-reports are necessarily "it felt off" rather than an RTF number.
+validate it. My testing this week ran against the demo engine (§1.5), so real
+STT quality is genuinely unmeasured right now.
 
-A month of TestFlight feedback with no mic tuning behind it is a month of
-feedback we can't act on.
+### 3.4 Walk summaries are verbose and narrate the recording (#298)
+
+Real output from Isaac's device:
+
+> "Field session to discuss mulch work. Only the word "mulch" was clearly
+> audible in the recording, with no additional context provided about scope,
+> timing, or constraints."
+
+Two problems: **every** summary opens with "Field session to/at", and the model
+narrates its own difficulty rather than the job.
+
+I patched the **display** side — first sentence only, boilerplate opener
+stripped, 16 tests. That fixes the board. It does **not** fix the notes screen
+(full summary, so the apologetic paragraph is the first thing read after a
+walk), and my lead-in list is a hardcoded guess at the model's phrasing that
+will rot the moment the prompt changes.
+
+**The durable fix is the prompt**, and it may be R6-adjacent: the model fills a
+gap with prose instead of declining to. For a quiet walk `Mulch work discussed`
+is shorter *and* truer.
+
+### 3.5 Infer the job from the walk (#265) — your half
+
+The client-side matcher shipped: whole-name match only, declines on ambiguity,
+declines on names under four characters, 8 tests mostly pinning where it must
+refuse.
+
+Open: **what happens when the operator names a site with no job record.**
+Options — create silently (manufactures records from a mishearing), suggest on
+the notes screen and let them confirm (R6-shaped), or nothing in v1. I lean
+suggest-and-confirm but the extraction pass is yours.
+
+### 3.6 The CI upload-quota guard (#304) — your call, my proposal
+
+Rather than cancelling in-flight runs (`cancel-in-progress` is `false` and I
+read that as deliberate), **skip only the ASC upload when `github.sha` is no
+longer the tip of main**:
+
+```yaml
+- name: Skip upload if superseded
+  run: |
+    TIP=$(git rev-parse origin/main)
+    if [ "$TIP" != "$GITHUB_SHA" ]; then
+      echo "superseded by $TIP — skipping upload"
+      echo "upload=false" >> "$GITHUB_OUTPUT"
+    fi
+```
+
+Nothing is ever cancelled mid-`altool`; ten rapid merges cost one slot; tags
+unaffected. **I did not change `release.yml` myself** — if I break it while you
+are away, nobody ships for four weeks.
 
 ---
 
-## B. Hand-over — things only you can currently do
+## 4. Hand over — single points of failure with your name on them
 
-These aren't features. They're single points of failure with your name on them.
+### 4.1 The ASC API key — this has now blocked me twice
 
-### B1. Signing and certificates — will anything expire while you're away?
+`~/secrets/apple/` is empty on my machine, so the App Store Connect API is
+closed to me. It has cost real time twice:
+
+- Isaac's screenshot feedback — he had to send screenshots by hand.
+- **The build-93 crash** — I could not pull the crash log and spent an hour on a
+  wrong theory before he exported the `.ips` himself.
+
+Three files (`asc_key_id`, `asc_issuer_id`, `AuthKey.p8`) and I can pull crashes
+and beta feedback directly. **With you away for a month and testers on a build
+nobody can triage, this is the highest-value ten minutes on the list.**
+
+### 4.2 Do the signing cert and provisioning profile outlive the trip?
 
 You root-caused the cert-cap incident (#219) and moved the archive to manual
-signing with an imported cert and downloaded profile, on shared team
-`98GXNZ6NKZ` (Jefe + Athanor + Weave).
+signing on shared team `98GXNZ6NKZ`.
 
-**Please check the expiry dates on the cert and the provisioning profile against
-your return date**, and say so explicitly on the tracking issue. If either lapses
-mid-month, every TestFlight build fails and sac cannot fix it — that's the
-scenario that costs the whole month.
+**Check the expiry dates against your return date and say so explicitly.** If
+either lapses mid-month, every TestFlight build fails and I cannot fix it —
+that is the scenario that costs the whole month. If a renewal is due, do it now
+rather than leaving a bomb on a timer.
 
-If a renewal is due, do it now rather than leaving a bomb on a timer.
+### 4.3 A short "if CI breaks" note
 
-### B2. The ASC API key for feedback
+Two or three lines: what fails most often, what you would check first. Not a
+runbook. Just enough that I do not burn a day rediscovering what you know.
 
-`asc-feedback.py` pulls TestFlight feedback with a team key. Confirm sac can run
-it, or write down exactly what's needed. Field feedback is the highest-value
-input we have — it produced issues #220–#228 and nearly every fix this week — and
-losing it for a month would be a real cost.
+### 4.4 Regenerate the FFI, or tell me how
 
-### B3. A short "if CI breaks" note
-
-Two or three lines: what fails most often, and what you'd check first. Not a
-runbook. Just enough that sac doesn't burn a day rediscovering something you
-already know.
+My `ffiFFI.xcframework` is stale (§1.5), so I cannot build or test against real
+core. If `./build-ffi.sh` is all it takes, say so and I will run it. If there is
+a gotcha, write it down.
 
 ---
 
-## C. Worth doing if there's time, in this order
+## 5. Explicitly do NOT spend time on these
 
-### C1. Infer the job from the walk (#265) — the half that's yours
-
-The client-side matcher shipped (`AppModel.jobMatching`): whole-name match only,
-declines on ambiguity, declines on names under four characters, 8 tests mostly
-pinning where it must refuse. That covers "the operator said a job that exists."
-
-The open half is **what happens when they name a site with no job record.**
-Options as sac sees them: create it silently (fast, but manufactures records from
-a mishearing), suggest it on the notes screen and let the operator confirm
-(R6-shaped), or nothing in v1. sac leans toward suggest-and-confirm but the
-extraction pass is yours.
-
-Genuinely nice-to-have. Do A1–A3 and B first.
-
-### C2. Is a universal (nil trade_key) schema a thing we want? (#284)
-
-`list_document_schemas` treats `trade_key IS NULL` as *matches any trade*;
-`resolve_active_schema` treats it as *only for a nil-template session*. The
-shipped `report` built-in is seeded nil, so a landscape operator was offered a
-REPORT button that could never build — and every custom doc type made by
-duplicating Report inherited the same defect. That's what Isaac hit on
-TestFlight.
-
-**Already fixed app-side (#283)** — the picker mirrors the resolver, so nothing
-broken is offered, and duplicating Report stamps the operator's trade so their
-copy works. Not launch-blocking any more.
-
-The question that's yours: I wrote the one-line resolver change and **reverted
-it**, because `resolve_report_only_for_none_template_not_for_landscape` pins the
-current behaviour by name with the comment "matching today." That reads as
-deliberate Plan 19 parity, not an oversight, and flipping it days before you
-leave isn't my call. Either nil should mean universal in the resolver too, or
-`report` shouldn't be seeded nil — the current state is the one combination that
-can't be right. Two minutes on the issue is enough.
-
-### C3. The demo engine ignores the requested doc kind (#222, second half)
-
-`DemoWalkEngine.buildDocument(sessionId:kind:)` takes `kind` and never reads it —
-it returns `trade.rows` unconditionally, so every document button in the demo
-build produces the same document.
-
-**This is app-side, so sac can do it** — flagged here only because it's a
-one-line-ish fix you might knock out while you're in there, and it matters before
-store screenshots (demo is the path a fresh clone and any screenshot run takes).
-
----
-
-## D. Explicitly do NOT spend time on these
-
-Stated so you don't feel obliged.
-
-- **Template upload comprehension.** Out of v1 by your ruling; sac agrees.
-- **Proxy-side entitlement enforcement.** Deliberately deferred. Before App
-  Attest exists it's just trusting a header anyone can set, so it would be
-  security theatre. It pairs with A2 or it doesn't happen.
+- **Template upload comprehension** — out of v1 by your #207 §7 ruling; I agree.
+- **Proxy-side entitlement enforcement** — deliberately deferred. Before App
+  Attest it is trusting a header anyone can set. It pairs with §3.2 or it does
+  not happen.
 - **Plan 17 correction loop, vocab onboarding v2 (#226), low-confidence
-  highlighting (#227).** All good, none launch-critical.
-- **Reviewing sac's app-side PRs.** #275, #277, #278, #279, #281 are all
-  app-side, tested, and merged. Read them if you're curious, not out of duty. If
-  you only read one, read **#281** — it's a defect sac shipped and then caught
-  (the free-tier gate could lock a tester out of the product with no way to pay).
+  highlighting (#227)** — all good, none launch-critical.
+- **Reviewing the design-review PRs individually.** There are ~15. §2.4 lists
+  the two worth skimming.
+- **The store screenshots.** They predate the redesign and are mine to
+  regenerate; the capture is scripted.
 
 ---
 
-## What sac is doing while you're gone
+## 6. State of the world
 
-App Store submission end to end: App Privacy answers, screenshots, review notes,
-the listing. Plus the app-side backlog — #222, the rest of #224
-(select-into-paperwork, markup), and whatever the field sessions turn up.
+**Shipping**: build 101 on TestFlight. Crash fixed and **confirmed by Isaac on
+device**. Photos confirmed working. External testers are still on **build 54**,
+which is 47 builds and one known crash behind — promoting is gated on Isaac
+walking 101 once.
 
-Nothing on that list needs core. That's deliberate.
+**Closed since you last looked**: #156, #168, #221, #222, #223, #224 (the
+"photos vanish" half), #225, #228, #284, #289.
 
-## What we need from Isaac (not you)
+**Isaac's, and they gate submission**: create the ASC subscription
+(`com.damsac.jefe.pro.monthly`, $12.99/mo) + Paid Apps agreements; the App
+Privacy answers (exact clicks in `docs/store/SUBMISSION-KIT.md` §4); a sandbox
+purchase on device. **Nothing about billing has ever been observed working** —
+no product exists, so the paywall shows no price and the meter is untested in
+practice.
 
-Creating the ASC subscription product, signing the Paid Apps agreements, the App
-Privacy answers, and a sandbox purchase on a device. Listed here only so you know
-it isn't waiting on you.
+**Mine while you are gone**: App Store submission end to end, screenshot
+regeneration, the `Sources/Screens/*` duplicate cleanup, and the P2 design items
+(chrome layer, dark-mode unlock). None of it needs core.
 
 ---
 
 ## The one-line version
 
-**#263 variants, App Attest, and the device mic session — plus tell us whether
-your certs outlive the trip.** Everything else can wait for you.
+**Review #306 and #305, land #263, answer the cert question, and drop me the ASC
+key.** Everything else can wait for you.

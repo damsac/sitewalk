@@ -4,9 +4,28 @@ What sac is working on right now. Updated with every PR.
 
 ---
 
+## → READ THIS FIRST: `meta/dam/BEFORE-THE-MONTH-AWAY.md`
+
+*(2026-08-02.)*
+
+**Everything you need is consolidated there**, rewritten for the trip: what
+changed in the 43 commits since your last (`c2a2040`), what needs **your review**
+(the one core change I made, the audio-session fix, the proxy you have never
+seen), what only you can do, and the hand-over items that become single points
+of failure the moment you are unreachable.
+
+If you have one hour: **§2.1** (my core change — it replaced a named test of
+yours), **§3.1** (#263), **§4.1** (the ASC key, which has now blocked me twice),
+**§4.2** (do the certs outlive the trip?).
+
+The sections below are the older, longer-form context. The handover doc
+supersedes them where they disagree.
+
+---
+
 ## Headline for dam (what needs you)
 
-*(freshened 2026-07-27.)*
+*(freshened 2026-07-27 — superseded by the handover doc above.)*
 
 ### 0. TWO ISSUES ARE WAITING ON YOU — #263 and #265
 
