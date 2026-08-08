@@ -41,9 +41,10 @@ struct LetterheadStudioView: View {
     private let accents: [UInt32] = [0x9A6A00, 0x3E6B35, 0x2E5A78, 0xA63A2E, 0x141412]
     private let fonts: [(key: String, label: String)] = [("serif", "SOURCE SERIF"), ("sans", "BARLOW")]
     // Trade type labels mirror onboarding (no display name on TradeFixture).
-    private let trades: [(key: String, label: String)] = [
-        ("landscape", "LANDSCAPE"), ("property", "PROPERTY MGMT"), ("inspection", "INSPECTION"),
-    ]
+    /// ONE source with onboarding. A hardcoded three here meant an operator who
+    /// picked "Plumbing" during onboarding opened this screen and found their
+    /// own trade missing from the menu.
+    private var trades: [Trades.Option] { Trades.catalog }
 
     // The trade the preview renders — follows the draft, so switching it re-keys
     // the doc-kind + sample rows live.
@@ -239,8 +240,7 @@ struct LetterheadStudioView: View {
                 }
             } label: {
                 HStack {
-                    Text(trades.first { $0.key == draftProfile.tradeKey }?.label
-                         ?? draftProfile.tradeKey.uppercased())
+                    Text(Trades.label(for: draftProfile.tradeKey))
                         .font(Theme.F.cond(13, .semibold))
                         .foregroundStyle(Theme.C.ink)
                     Spacer()

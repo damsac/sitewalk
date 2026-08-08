@@ -63,7 +63,11 @@ struct DocRowFixture: Identifiable {
 }
 
 struct TradeFixture {
-    let key: String
+    /// `var`, not `let`: an operator whose trade ships no fixture content
+    /// borrows landscape's demo copy but KEEPS THEIR OWN KEY, because this key
+    /// is what scopes their document schemas and tags their walk template. See
+    /// `BusinessProfile.trade`.
+    var key: String
     let dateLabel: String
     let countTitle: String
     let biz: String
@@ -95,12 +99,23 @@ struct TradeFixture {
 /// per-trade button-set content are sac's (`docs/design/notes-mockup.html`);
 /// this table only guarantees the wiring is correct.
 enum DocKinds {
+    /// Every trade quotes, bills, dispatches work and writes things up, so the
+    /// general four are available to all of them — including a trade the app
+    /// has never heard of. Specialists get their extras on top.
+    ///
+    /// This mirrors the seeded schemas after 2026-08-08: Estimate, Invoice,
+    /// Work Order and Report carry a NULL `trade_key` (universal) in core, while
+    /// Condition, Move-Out and Inspection stay scoped. This function is only the
+    /// FALLBACK for when no schemas load at all — core's resolver is the real
+    /// authority — but it must agree with it or the fallback would offer
+    /// something the build then refuses.
+    static let generalKinds = ["estimate", "invoice", "work_order", "report"]
+
     static func legalKinds(for templateKey: String) -> [String] {
         switch templateKey {
-        case "landscape": return ["estimate", "invoice", "work_order"]
-        case "property": return ["condition", "move_out"]
-        case "inspection": return ["inspection"]
-        default: return ["report"]
+        case "property":   return generalKinds + ["condition", "move_out"]
+        case "inspection": return generalKinds + ["inspection"]
+        default:           return generalKinds
         }
     }
 

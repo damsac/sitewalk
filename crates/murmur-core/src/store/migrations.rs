@@ -183,6 +183,29 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     ALTER TABLE llm_usage ADD COLUMN cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE llm_usage ADD COLUMN cache_read_input_tokens INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v9: the general document types become UNIVERSAL on stores that already
+    // seeded them.
+    //
+    // `seed_builtin_schemas` inserts WHERE NOT EXISTS by id, so changing
+    // `trade_key` in `domain::builtin_schemas()` only reaches NEW installs —
+    // every existing device would keep Estimate/Invoice/Work Order pinned to
+    // `landscape` and could never build one under any other trade. This
+    // repoints exactly those three seeded rows.
+    //
+    // Deliberately narrow: it matches the fixed built-in ids AND
+    // `device_id = 'builtin'`, so an operator's own customised copy of an
+    // estimate keeps whatever scope they gave it. Tombstoned rows are left
+    // alone — a deleted built-in stays deleted (WE-A).
+    r#"
+    UPDATE document_schemas
+       SET trade_key = NULL
+     WHERE id IN (
+             '00000000-0000-7000-8000-000000000001',
+             '00000000-0000-7000-8000-000000000002',
+             '00000000-0000-7000-8000-000000000003'
+           )
+       AND device_id = 'builtin';
+    "#,
 ];
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), CoreError> {
@@ -241,7 +264,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
 
         let (input, cw, cr, output): (i64, i64, i64, i64) = conn
             .query_row(

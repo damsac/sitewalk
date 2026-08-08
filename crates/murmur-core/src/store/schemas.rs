@@ -355,11 +355,11 @@ mod tests {
     }
 
     #[test]
-    fn fresh_store_is_at_schema_v8() {
+    fn fresh_store_is_at_schema_v9() {
         let s = Store::open_in_memory("device-a").unwrap();
         let v: i64 =
             s.conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 8, "v8 added the llm_usage prompt-cache token columns");
+        assert_eq!(v, 9, "v9 repointed the general built-ins to a NULL trade_key");
     }
 
     #[test]
@@ -539,8 +539,14 @@ mod tests {
         let resolved = s.resolve_active_schema("estimate", Some("landscape")).unwrap().unwrap();
         assert_eq!(resolved.id, "custom-est", "newest updated_at wins");
 
-        // Trade must match: the landscape custom does not resolve for property.
-        assert!(s.resolve_active_schema("estimate", Some("property")).unwrap().is_none());
+        // A NAMED trade still cannot leak: the landscape-scoped custom does not
+        // serve property. (The built-in estimate does — it is universal now —
+        // so this asserts on the id rather than on absence.)
+        let elsewhere = s.resolve_active_schema("estimate", Some("property")).unwrap().unwrap();
+        assert_eq!(
+            elsewhere.id, BUILTIN_SCHEMA_ID_ESTIMATE,
+            "property should fall back to the universal built-in, not the landscape custom"
+        );
         // Kind must match.
         assert!(s.resolve_active_schema("hoa_addendum", Some("landscape")).unwrap().is_none());
         assert!(!s.has_active_schema("hoa_addendum", Some("landscape")).unwrap());
@@ -567,6 +573,38 @@ mod tests {
             );
             assert!(s.has_active_schema("report", template).unwrap());
         }
+    }
+
+    /// The general document types are available to EVERY trade, including one
+    /// the app has never heard of.
+    ///
+    /// Isaac, 2026-08-08: a plumber who picks their own trade must still be able
+    /// to build an estimate. Before this, Estimate/Invoice/Work Order were
+    /// scoped to `landscape` and an unknown template resolved none of them.
+    #[test]
+    fn general_document_types_resolve_for_any_trade() {
+        let s = Store::open_in_memory("device-a").unwrap();
+        for template in [None, Some("landscape"), Some("plumbing"), Some("chimney_sweep")] {
+            for kind in ["estimate", "invoice", "work_order", "report"] {
+                assert!(
+                    s.has_active_schema(kind, template).unwrap(),
+                    "{kind} should resolve for template {template:?}"
+                );
+            }
+        }
+    }
+
+    /// The specialist types stay scoped — a fencing contractor has no use for a
+    /// move-out report and should not be offered one.
+    #[test]
+    fn specialist_document_types_stay_trade_scoped() {
+        let s = Store::open_in_memory("device-a").unwrap();
+        for kind in ["condition", "move_out"] {
+            assert!(s.has_active_schema(kind, Some("property")).unwrap());
+            assert!(!s.has_active_schema(kind, Some("plumbing")).unwrap());
+        }
+        assert!(s.has_active_schema("inspection", Some("inspection")).unwrap());
+        assert!(!s.has_active_schema("inspection", Some("plumbing")).unwrap());
     }
 
     /// Universal must not become a back door across trades: a schema that names

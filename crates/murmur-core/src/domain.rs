@@ -352,11 +352,24 @@ fn builtin_schema(
 /// `seed_builtin_schemas` iterates this — never an inline-SQL duplicate.
 /// `priced`/`total_*` per built-in reproduce `is_pricing_kind`/`total_shape`
 /// EXACTLY (pinned by `builtin_schemas_reproduce_todays_pricing_and_total_shape`).
+/// The seeded document types.
+///
+/// Estimate, Invoice, Work Order and Report carry `trade_key: None` —
+/// UNIVERSAL, available to every trade. Every trade quotes, bills, dispatches
+/// work and writes things up; scoping those to landscaping meant a plumber who
+/// picked their own trade could not build an estimate at all (Isaac, 2026-08-08:
+/// "if someone who doesn't belong to one of the trades listed gets the app, I
+/// don't want them to think this isn't for them").
+///
+/// Condition Report, Move-Out Report and Inspection Report stay trade-scoped
+/// because they are genuinely specific to property management and inspection —
+/// a fencing contractor has no use for a move-out report, and offering one
+/// would be noise.
 pub fn builtin_schemas() -> Vec<DocumentSchema> {
     vec![
-        builtin_schema(BUILTIN_SCHEMA_ID_ESTIMATE, "estimate", "Estimate", "EST", Some("landscape"), true, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_INVOICE, "invoice", "Invoice", "INV", Some("landscape"), true, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_WORK_ORDER, "work_order", "Work Order", "WO", Some("landscape"), false, ("sum", "total")),
+        builtin_schema(BUILTIN_SCHEMA_ID_ESTIMATE, "estimate", "Estimate", "EST", None, true, ("sum", "total")),
+        builtin_schema(BUILTIN_SCHEMA_ID_INVOICE, "invoice", "Invoice", "INV", None, true, ("sum", "total")),
+        builtin_schema(BUILTIN_SCHEMA_ID_WORK_ORDER, "work_order", "Work Order", "WO", None, false, ("sum", "total")),
         builtin_schema(BUILTIN_SCHEMA_ID_CONDITION, "condition", "Condition Report", "COND", Some("property"), false, ("sum", "total")),
         builtin_schema(BUILTIN_SCHEMA_ID_MOVE_OUT, "move_out", "Move-Out Report", "MO", Some("property"), false, ("sum", "total")),
         builtin_schema(BUILTIN_SCHEMA_ID_INSPECTION, "inspection", "Inspection Report", "IR", Some("inspection"), false, ("static", "findings")),
