@@ -18,7 +18,11 @@ struct OnboardingFlow: View {
 
     // welcome + 3 "how it works" beats (learn by seeing) → setup (business, mic).
     private enum Step: Int, CaseIterable { case welcome = 1, seeWalk, seeFix, seeDoc, business, mic }
-    @State private var step: Step = .welcome
+    // `onboard=business` jumps straight to the profile/trade step. simctl can't
+    // tap, so without this the trade picker — the screen most likely to change —
+    // can never be seen headlessly.
+    @State private var step: Step =
+        ProcessInfo.processInfo.arguments.contains("onboard=business") ? .business : .welcome
     private var isIntro: Bool { step.rawValue < Step.business.rawValue }
 
     // YOUR BUSINESS fields
@@ -26,7 +30,10 @@ struct OnboardingFlow: View {
     @State private var cityState = ""
     @State private var license = ""
     @State private var tradeKey = "landscape"
-    private enum Field { case name, city, license }
+    /// Free text when "Something else" is picked. Never becomes the trade KEY —
+    /// keys must stay stable because core scopes document schemas by them.
+    @State private var otherTrade = ""
+    private enum Field { case name, city, license, otherTrade }
     @FocusState private var focused: Field?
 
     // MIC
@@ -185,7 +192,7 @@ struct OnboardingFlow: View {
                 Text("ESTIMATE").font(Theme.F.mono(7, .semibold)).tracking(1.4)
                     .foregroundStyle(Theme.C.amberInk)
             }
-            miniRow("Bark mulch — front beds", right: "$285")
+            miniRow("Bark mulch, front beds", right: "$285")
             sendStamp
         }
     }
@@ -215,7 +222,7 @@ struct OnboardingFlow: View {
                 Text("EST-0047").font(Theme.F.mono(7, .semibold)).tracking(1.0)
                     .foregroundStyle(Theme.C.amberInk)
             }
-            miniRow("Bark mulch — front beds", right: "$285")
+            miniRow("Bark mulch, front beds", right: "$285")
             miniRow("TOTAL", right: "$680")
             sendStamp
         }
@@ -288,15 +295,27 @@ struct OnboardingFlow: View {
                               placeholder: "44-0781", field: .license)
                         .padding(.top, 20)
 
-                    SectionLabel("TRADE")
+                    SectionLabel("WHAT DO YOU DO?")
                         .padding(.top, 26)
+                    // Every trade in the catalog, not three. A plumber seeing
+                    // only landscape/property/inspection concluded the app
+                    // wasn't for them — an expensive thing to say on the first
+                    // screen, and untrue (Isaac, 2026-08-08).
                     VStack(spacing: 8) {
-                        tradeRow(key: "landscape", label: "LANDSCAPE", stamp: "ESTIMATES")
-                        tradeRow(key: "property", label: "PROPERTY MGMT", stamp: "MOVE-OUT REPORTS")
-                        tradeRow(key: "inspection", label: "INSPECTION", stamp: "INSPECTION REPORTS")
+                        ForEach(Trades.catalog) { option in
+                            tradeRow(key: option.key, label: option.label, stamp: option.stamp)
+                        }
                     }
                     .padding(.top, 10)
-                    .padding(.bottom, 18)
+
+                    // The catch-all's follow-up. Optional on purpose: the key is
+                    // already stored, so this only improves the letterhead and
+                    // costs nothing to skip.
+                    if tradeKey == Trades.otherKey {
+                        formField("WHAT KIND OF WORK? — OPTIONAL", text: $otherTrade,
+                                  placeholder: "Septic, marine survey, solar…", field: .otherTrade)
+                            .padding(.top, 14)
+                    }
                 }
                 .padding(.horizontal, Theme.S.screenPad)
                 .padding(.top, 18)
@@ -309,7 +328,9 @@ struct OnboardingFlow: View {
                     cityState: cityState.trimmingCharacters(in: .whitespaces),
                     licenseNumber: license.trimmingCharacters(in: .whitespaces).isEmpty
                         ? nil : license.trimmingCharacters(in: .whitespaces),
-                    tradeKey: tradeKey
+                    tradeKey: tradeKey,
+                    tradeLabel: tradeKey == Trades.otherKey
+                        ? otherTrade.trimmingCharacters(in: .whitespaces) : nil
                 ))
                 focused = nil
                 step = .mic
@@ -355,13 +376,17 @@ struct OnboardingFlow: View {
                     .overlay(Rectangle().stroke(
                         selected ? Theme.C.orange : Theme.C.ink35, lineWidth: 1.5))
                 Text(label)
-                    .font(Theme.F.mono(11, .semibold))
-                    .tracking(1.4)
+                    .font(Theme.F.ui(14, .semibold))
                     .foregroundStyle(Theme.C.ink)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
                 Text(stamp)
                     .font(Theme.F.mono(8, .semibold))
                     .tracking(1.0)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundStyle(selected ? Theme.C.amberInk : Theme.C.ink60)
                     .padding(.horizontal, 6)
                     .padding(.top, 3)

@@ -17,6 +17,15 @@ struct BusinessProfile: Codable, Equatable {
     var licenseNumber: String?
     /// Matches `Fixtures.all` keys: landscape | property | inspection.
     var tradeKey: String
+    /// What the operator typed when they picked "Something else". Optional and
+    /// decorative — the KEY is what scopes schemas and templates. Kept so a
+    /// septic contractor's letterhead can say "Septic" instead of "Other".
+    ///
+    /// Optional with a default so decoding a profile written before this field
+    /// existed still succeeds. `current` decodes with `try?`, so a
+    /// non-defaulted addition would silently wipe every existing profile and
+    /// re-onboard the whole beta.
+    var tradeLabel: String? = nil
     /// Migration seam (dam review #190). `current` decodes with `try?`, so a
     /// future breaking schema change silently returns nil and the operator
     /// gets re-onboarded — the stored profile is gone, not just unreadable.
@@ -57,9 +66,24 @@ struct BusinessProfile: Codable, Equatable {
         return parts.joined(separator: " · ")
     }
 
-    /// The trade template this operator works in. Falls back to landscape if
-    /// a stored key ever goes stale against `Fixtures.all`.
+    /// The trade template this operator works in.
+    /// What to SHOW for this operator's trade — their own words when they gave
+    /// them, the catalog label otherwise.
+    var tradeDisplayName: String {
+        if let custom = tradeLabel?.trimmingCharacters(in: .whitespaces), !custom.isEmpty {
+            return custom
+        }
+        return Trades.label(for: tradeKey)
+    }
+
     var trade: TradeFixture {
-        Fixtures.all.first { $0.key == tradeKey } ?? Fixtures.landscape
+        if let exact = Fixtures.all.first(where: { $0.key == tradeKey }) { return exact }
+        // A trade with no fixture content borrows landscape's demo copy — which
+        // only ever renders in demo mode — but KEEPS ITS OWN KEY. Returning
+        // Fixtures.landscape wholesale used to silently re-file a plumber's
+        // walks and document types under "landscape".
+        var generic = Fixtures.landscape
+        generic.key = tradeKey
+        return generic
     }
 }
