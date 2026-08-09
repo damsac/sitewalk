@@ -18,6 +18,17 @@ If you have one hour: **§2.1** (my core change — it replaced a named test of
 yours), **§3.1** (#263), **§4.1** (the ASC key, which has now blocked me twice),
 **§4.2** (do the certs outlive the trip?).
 
+**Since then (2026-08-08), two of your queued items now have code waiting:**
+
+- **#315 — App Attest server half** (§3.2). Verification is written and tested;
+  ships inert behind `ATTEST_MODE=off`. Device half is #316, and it is yours.
+  The residual risk is that the verifier has never seen a *genuine* Apple chain
+  — the sandbox had no network to fetch the real root, so the tests use a
+  synthetic one. That closes with one real attestation in `monitor` mode.
+- **#314 — the CI upload guard** (§3.6). **Deliberately left a DRAFT.**
+  `release.yml` strands everyone if it breaks while you are away, and this is a
+  convenience fix for a problem I caused. Merge, change, or reject — your call.
+
 The sections below are the older, longer-form context. The handover doc
 supersedes them where they disagree.
 
