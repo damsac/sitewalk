@@ -1,5 +1,11 @@
 # Positioning & GTM — what four research streams found
 
+> **SUPERSEDED IN PART, 2026-08-09.** Isaac clarified the goal: **a side hustle
+> at $1–5k MRR**, not a venture-scale business. That inverts several conclusions
+> below. **Read §8 (appended at the end) before acting on §3–§5.** The
+> competitive facts in §1–§2 stand; the strategy built on them assumed an
+> ambition Isaac never had.
+
 **2026-08-08 · sac.** Commissioned by Isaac. Four parallel research streams:
 direct voice competitors, incumbent FSM threat, segment selection, GTM channels.
 
@@ -308,3 +314,107 @@ of the ASO load. Target string clusters, not words: `contractor estimate`,
   minutes downloading all six.
 - Facebook group member counts (blocked to automation) and Reddit rule text
   (403). Several cited counts are from a stale 2023 roundup.
+
+
+---
+
+# 8. Refit for a $1–5k side hustle (2026-08-09)
+
+Isaac: *"Im not trying to create a massive business, just a side hustle and id
+honestly be happy if I was making 1-2k mrr"* — later widened to **$1–5k**, with
+*"the easiest path"* as the explicit optimisation target.
+
+**Everything above optimised for winning a market. That was never the goal, and
+I filled in an ambition rather than asking.** What follows replaces §3–§5.
+
+## 8.1 The arithmetic that actually governs this
+
+After Apple's 15% and roughly $0.18/walk in API cost, at ~20 walks/month:
+
+| Price | Net per sub | Subs for $3k MRR |
+|---|---|---|
+| $14.99 | ~$9 | 333 |
+| **$19.99** | **~$13** | **224** |
+| $29.99 | ~$22 | 137 |
+| $39.99 | ~$30 | 100 |
+
+At this scale the bottleneck is **finding humans**, not earning margin. Price is
+the only lever that moves the human count without any marketing spend.
+
+## 8.2 Why the market analysis stops mattering
+
+$1–5k MRR is **100–330 subscribers**. Against 692,777 landscaping businesses
+alone, that is 0.03%. Every competitive dynamic in §2 — Jobber's 300k pros,
+VoxTrade's price parity, six new App Store entrants — is a fight over share, and
+we do not need share.
+
+**Corollary: the §4 restoration pivot is withdrawn.** It optimised TAM and
+whitespace, which is the right instinct for a company and the wrong one here. It
+would cost a new domain, IICRC schemas, photo-mandatory workflows and an
+air-mover noise risk, to reach a segment we would need 0.2% of. Not worth it.
+
+## 8.3 What we honestly sell, and for how much
+
+The feature comparison, stated plainly:
+
+| | Jefe | VoxTrade £14.99 | QuoteIQ $29.99 | Spectora $149 |
+|---|---|---|---|---|
+| Voice → document | yes | yes | yes | yes (template-matched) |
+| Estimates / invoices | yes | yes | yes | — |
+| Payments | **no** | yes | yes | yes |
+| Scheduling / CRM | **no** | no | yes | yes |
+| Expense & profit tracking | **no** | yes | yes | — |
+| Comment library / state templates | **no** | no | no | yes |
+| On-device audio | **yes** | no | no | no |
+| Uncapped walk length | **yes** | no (120 min) | no | no |
+| Custom document types | **yes** | no | no | partial |
+
+**We are differentiated, not more featured.** VoxTrade matches us at the same
+price and adds payments. Against Spectora we are roughly 15% of the product.
+
+**Therefore $19.99, not the $39 I first recommended.** That was over-confident:
+it assumed a parity that does not exist, and it ignored that an App Store buyer
+anchors on consumer pricing however the ROI reads. $19.99 clears the $20
+psychological line, delivers **45% better unit economics than $14.99**, and is
+honest about a tool that does one job.
+
+Keep the ceiling open: ASC can raise the price for **new** subscribers while
+grandfathering existing ones. Launch at $19.99; if churn is low after 60 days,
+move new signups to $29.99.
+
+## 8.4 The buyer, corrected
+
+I pitched "home inspectors on Spectora." **That is a bad buyer** — Spectora
+already ships voice, so the pitch is an add-on to something they have.
+
+The real buyer is **a small operator with no real software**, who walks a job and
+types it up at 9pm. They are not choosing between us and Spectora; they are
+choosing between us and a notes app.
+
+That buyer exists in every trade, which is what the widened trade catalog
+(#312) now serves. **Market narrow, accept wide.**
+
+## 8.5 The plan
+
+1. **Price at $19.99** when the ASC product is created. One field, biggest lever.
+2. **App Store organic is the centrepiece** — our buyer searches for a tool and
+   has no vendor relationship to defend. Cheapest customer available, and it
+   compounds unattended. Head terms are unwinnable (Invoice Simple has 122,658
+   ratings); the long tail is not — "Estimate Maker for Contractors" ranks on
+   2,063 ratings and has not shipped since May 2023.
+3. **Subtitle and keywords carry the whole ASO load**, because "Jefe" has zero
+   keyword value. Write them for privacy + uncapped, not for "voice estimates"
+   (taken by BuildWalk).
+4. **Retention over acquisition.** At 200 subs, 10% monthly churn means replacing
+   20 people every month forever.
+5. **InterNACHI ($49/mo) is demoted to a test**, not the centrepiece — good
+   channel, but it points at buyers who already own tools.
+
+## 8.6 The two product gaps that would move the price
+
+- **Payments.** VoxTrade has it at the same price; we do not.
+- **Corrections that stick.** The dominant complaint across *every* competitor's
+  reviews is that the AI's numbers are wrong and the fix is forgotten. Nobody has
+  solved it. Our editable-output work is aimed at the right wound; the missing
+  half is **memory** of the correction. This is the one feature that would make
+  us better rather than merely different.
