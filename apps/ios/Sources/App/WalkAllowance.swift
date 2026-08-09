@@ -106,6 +106,32 @@ enum WalkAllowance {
         return .allowed(remaining: limit - used - 1)
     }
 
+    /// Whether a finished walk spends one of the free five.
+    ///
+    /// `canSubscribe` gates the COUNT for the same reason `decide` uses it to
+    /// gate the BLOCK: **an allowance we are not willing to enforce is not an
+    /// allowance we may spend.** Without that clause the meter runs through
+    /// the entire pre-launch window — every TestFlight tester silently burning
+    /// a lifetime allowance against a product that cannot be bought — and on
+    /// the day the App Store Connect product goes live they are all at zero,
+    /// having never had the free evaluation the tier exists to give them.
+    /// (Isaac, 2026-08-09, on his first walk after a reinstall: *"it said I
+    /// have 0 free walks left. I dont think this is correct."*)
+    ///
+    /// The other direction costs a handful of uncounted walks whenever
+    /// StoreKit is unreachable — the same fail-open trade `decide` makes, and
+    /// the cheaper one.
+    ///
+    /// `isMeteredWalk` carries `decide`'s two exemptions, restated at the
+    /// other end of the walk: a practice run is onboarding, and demo mode
+    /// makes no model calls at all, so neither costs anything the free tier
+    /// exists to bound. The caller computes it BEFORE the finish work, since
+    /// the exit paths clear the practice flag first.
+    static func shouldCount(isPro: Bool, canSubscribe: Bool, isMeteredWalk: Bool) -> Bool {
+        if isPro || !isMeteredWalk { return false }
+        return canSubscribe
+    }
+
     /// The record after a walk finishes.
     static func recordingFinish(in record: Record) -> Record {
         Record(count: max(0, record.count) + 1)

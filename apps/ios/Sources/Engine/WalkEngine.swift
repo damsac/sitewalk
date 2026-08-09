@@ -46,19 +46,47 @@ struct DocumentModel {
     var staticTotal: String   // used when rows carry no $ amounts (e.g. inspection)
     var note: String
     var send: String
+    /// Whether this document has an amount column at all.
+    ///
+    /// Set once, at build, from the kind — NOT inferred from the rows, which
+    /// would flip the wrong way the moment an operator cleared the last price
+    /// on an estimate. Review reads it to decide whether editing a line may
+    /// touch money: on a work order it may not, because a work order handed to
+    /// a crew with prices on it is the wrong document.
+    var pricesShown: Bool = true
 
     var gapCount: Int { rows.filter(\.isGap).count }
 
     /// Sum of $-parseable amounts; falls back to the template total.
+    ///
+    /// Summed in CENTS, from a `Double` parse. It used to parse each amount as
+    /// an `Int`, so any line carrying cents — "$125.50" — failed to parse and
+    /// was silently dropped from the total. A total that quietly omits a line
+    /// it is printed directly underneath is the worst kind of wrong on a
+    /// document someone signs, and it got likelier the moment spoken prices
+    /// started landing on lines verbatim.
     var totalValue: String {
-        let sum = rows.compactMap { row -> Int? in
+        let cents = rows.compactMap { row -> Int? in
             guard row.amount.hasPrefix("$") else { return nil }
-            return Int(row.amount.dropFirst().replacingOccurrences(of: ",", with: ""))
+            let digits = row.amount.dropFirst().replacingOccurrences(of: ",", with: "")
+            guard let dollars = Double(digits) else { return nil }
+            return Int((dollars * 100).rounded())
         }.reduce(0, +)
-        guard sum > 0 else { return staticTotal }
+        guard cents > 0 else { return staticTotal }
+        return DocumentModel.money(cents: cents)
+    }
+
+    /// Cents → "$1,210" / "$1,210.50". Whole dollars carry no decimals — a
+    /// trade document reads as money, not as a spreadsheet — and anything
+    /// with cents shows both digits, never the "$125.5" a plain decimal
+    /// formatter produces.
+    static func money(cents: Int) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        return "$" + (formatter.string(from: NSNumber(value: sum)) ?? "\(sum)")
+        formatter.minimumFractionDigits = cents % 100 == 0 ? 0 : 2
+        formatter.maximumFractionDigits = cents % 100 == 0 ? 0 : 2
+        let dollars = Double(cents) / 100
+        return "$" + (formatter.string(from: NSNumber(value: dollars)) ?? "\(dollars)")
     }
 }
 

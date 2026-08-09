@@ -46,7 +46,10 @@ struct CapturedFixture: Identifiable {
 
 struct DocRowFixture: Identifiable {
     let id = UUID()
-    let title: String
+    /// `var` so review can rename a line in place (#…, Isaac 2026-08-09).
+    /// Speech-to-text mishears a word about as often as it mishears a number,
+    /// and the description is what the client actually reads.
+    var title: String
     var sub: String
     var subWarn: Bool = false
     var hint: String? = nil

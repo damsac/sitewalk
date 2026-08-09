@@ -175,19 +175,9 @@ struct BoardView: View {
                 if model.sessionWalks.isEmpty {
                     // Fresh board — no walks at all yet.
                     SectionHead(left: "TODAY", right: "0 WALKS", rightColor: Theme.C.amberInk)
-                    // Honest empty state, same dashed-box idiom as the
-                    // vocabulary editor's.
-                    Text("No walks yet. Tap Start walk and talk through the job.")
-                        .font(Theme.F.ui(14, .medium))
-                        .foregroundStyle(Theme.C.ink60)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 26)
-                        // Filled, not dashed. Dashed reads "disabled" in app
-                        // language; a quiet filled panel reads "nothing here
-                        // yet", which is what this actually is.
-                        .background(Theme.C.paperDeep)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
+                    // One empty-state idiom, shared with JOBS directly below
+                    // — see `EmptyPanel`.
+                    EmptyPanel("No walks yet. Tap Start walk and talk through the job.")
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else if model.looseWalks.isEmpty {
@@ -196,18 +186,7 @@ struct BoardView: View {
                     // "TODAY"; this is also filing's payoff ("it moved under the
                     // job").
                     SectionHead(left: "UNFILED", right: "0 WALKS", rightColor: Theme.C.amberInk)
-                    Text("Everything's filed under a job below.")
-                        .font(Theme.F.mono(8.5))
-                        .tracking(0.8)
-                        .foregroundStyle(Theme.C.ink45)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 22)
-                        // Filled, not dashed. Dashed reads "disabled" in app
-                        // language; a quiet filled panel reads "nothing here
-                        // yet", which is what this actually is.
-                        .background(Theme.C.paperDeep)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
+                    EmptyPanel("Everything's filed under a job below.")
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else {
@@ -484,26 +463,23 @@ extension BoardView {
             }
 
             if activeJobs.isEmpty {
-                Text("No jobs yet. Add one and your walks will file under it.")
-                    .font(Theme.F.ui(14, .medium))
-                    .foregroundStyle(Theme.C.ink60)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 22)
-                    .background(Theme.C.sheet)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.S.radiusCard)
-                            .stroke(Theme.C.hairline, lineWidth: 1)
-                    )
+                EmptyPanel("No jobs yet. Add one and your walks will file under it.")
                     .padding(.horizontal, Theme.S.screenPad)
                     .padding(.top, 12)
+                    .padding(.bottom, 14)
             } else {
                 // Spaced, inset cards on a paperDeep bed — the container is
                 // what does the grouping now, so the cards need air between
                 // them and a darker ground to read as sheets ON something.
+                //
+                // The bed is on the CARDS, not on the section: without it,
+                // sheet-white cards on paper-white are invisible as
+                // containers and the grouping does nothing — but a bed under
+                // the header too made JOBS the one section head in the app
+                // sitting on grey while TODAY, two rows up, sat on paper, and
+                // when the list was empty it painted a grey slab grounding
+                // nothing (Isaac, 2026-08-09). The bed now appears exactly
+                // when there is something for it to ground.
                 VStack(spacing: 10) {
                     ForEach(activeJobs) { job in
                         OperatorJobCard(job: job, walks: walks(for: job.id)) { walk in
@@ -514,11 +490,10 @@ extension BoardView {
                 .padding(.horizontal, Theme.S.screenPad)
                 .padding(.top, 12)
                 .padding(.bottom, 14)
+                .frame(maxWidth: .infinity)
+                .background(Theme.C.paperDeep)
             }
         }
-        // The bed the cards sit on. Without it, sheet-white cards on paper-white
-        // are invisible as containers and the grouping does nothing.
-        .background(Theme.C.paperDeep)
         .onAppear(perform: loadJobs)
         // A SHEET, not an `.alert` (design review P1 #9). A TextField inside an
         // alert is a ~30pt target with no room for a real placeholder — the two

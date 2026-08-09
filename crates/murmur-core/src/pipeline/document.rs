@@ -14,6 +14,7 @@ use harness::{
 
 use crate::domain::{Artifact, CapturedItem, DocumentSchema, SchemaField, SessionStatus};
 use crate::error::CoreError;
+use crate::pipeline::spoken_price::{fold_spoken_prices, FoldedPrices};
 use crate::pipeline::{doc_kinds_for_template, is_pricing_kind};
 use crate::store::Store;
 
@@ -508,11 +509,30 @@ impl DocumentBuilder {
             .iter()
             .find(|s| s.kind == "line_items")
             .is_some_and(|s| s.priced);
-        let mut lines = render_lines(&items, GapPolicy::PerPricingKind, priced);
+
+        // Fold spoken prices onto the work they describe, BEFORE the render
+        // (Isaac's field report 2026-08-09 — "$200 mulch" was landing as its
+        // own line under "5 yards mulch"). Only for documents that HAVE an
+        // amount column: on an unpriced kind the amount lives nowhere but the
+        // title, so lifting it out would delete it. See `spoken_price`.
+        let folded =
+            if priced { fold_spoken_prices(&items) } else { FoldedPrices::unfolded(&items) };
+        let mut lines = render_lines(&folded.items, GapPolicy::PerPricingKind, priced);
+        // Spoken amounts land first and are never overwritten below: a price
+        // the operator said outranks a price the model inferred.
+        apply_prices(&folded.amounts, &mut lines);
         let mut usage = Usage::default();
         let mut queued = false;
 
-        if priced && !items.is_empty() {
+        // Only what is still unpriced goes to the model — it is cheaper, and
+        // it removes any chance of the pass contradicting the operator.
+        let unpriced: Vec<CapturedItem> = folded
+            .items
+            .iter()
+            .filter(|i| !folded.amounts.contains_key(&i.id))
+            .cloned()
+            .collect();
+        if priced && !unpriced.is_empty() {
             let hint = self.session_spoken_total(session_id)?;
             let memory_prompt = self
                 .memory
@@ -521,7 +541,7 @@ impl DocumentBuilder {
                 .to_prompt();
             match price_items(
                 &self.provider,
-                &items,
+                &unpriced,
                 hint,
                 &memory_prompt,
                 self.max_tokens,
@@ -854,6 +874,110 @@ mod tests {
             "exactly one 'document'-purpose row (the fixture's finish_session_processed \
              already logs its own 'processing' row separately)"
         );
+    }
+
+    /// Isaac's field report, 2026-08-09, end to end: the estimate came out
+    /// with six lines — three unpriced scope lines and three bare price lines
+    /// under them. The fold happens before the render, so the DOCUMENT is
+    /// four lines with the money in the amount column.
+    #[tokio::test]
+    async fn build_folds_spoken_prices_onto_the_work_they_describe() {
+        let (store, sid) = processed_session_with_items(&[
+            ("part", "5 yards mulch"),
+            ("part", "2 bags compost"),
+            ("todo", "redo all garden beds"),
+            ("price", "$500 labor"),
+            ("price", "$200 mulch"),
+            ("price", "$100 compost"),
+        ]);
+        let ids: Vec<String> =
+            store.list_items_for_session(&sid).unwrap().iter().map(|i| i.id.clone()).collect();
+        let store = Arc::new(Mutex::new(store));
+
+        // The model prices nothing extra — the beds stay an honest gap.
+        let provider =
+            Arc::new(MockProvider::new(vec![tool_use("price_items", serde_json::json!({"prices": []}))]));
+        let b = builder(store.clone(), provider.clone());
+
+        let outcome = b.build(&sid, "estimate").await.unwrap();
+        let store_guard = store.lock().unwrap();
+        let art = store_guard.get_artifact(&outcome.document_artifact_id).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
+        let lines = v["lines"].as_array().unwrap();
+
+        let titles: Vec<&str> = lines.iter().map(|l| l["title"].as_str().unwrap()).collect();
+        assert_eq!(
+            titles,
+            vec!["5 yards mulch", "2 bags compost", "redo all garden beds", "Labor"],
+            "the two price statements that named work folded into it"
+        );
+        let amount = |item_id: &str| {
+            lines.iter().find(|l| l["item_id"] == item_id).unwrap()["amount_cents"].clone()
+        };
+        assert_eq!(amount(&ids[0]), serde_json::json!(20000), "mulch carries its spoken price");
+        assert_eq!(amount(&ids[1]), serde_json::json!(10000), "compost too");
+        assert_eq!(amount(&ids[2]), serde_json::Value::Null, "the beds were never priced");
+        assert_eq!(
+            lines.iter().find(|l| l["item_id"] == ids[2]).unwrap()["is_gap"],
+            true,
+            "and say so — an unheard price is a gap, never a guess (R4)"
+        );
+        assert_eq!(amount(&ids[3]), serde_json::json!(50000), "labor prices itself");
+
+        // Only the beds were still open, so only the beds were sent to be
+        // priced — the pass can neither cost tokens on settled lines nor
+        // contradict the operator.
+        let asked = &provider.requests()[0].messages[0].content;
+        let asked = format!("{asked:?}");
+        assert!(asked.contains("redo all garden beds"));
+        assert!(!asked.contains("$200 mulch"), "a spoken price is never re-priced");
+        assert!(!asked.contains("Labor"));
+    }
+
+    /// The same walk as an INSPECTION (no amount column). Lifting a price out
+    /// of a title would delete it from the only place it can appear, so the
+    /// fold sits out entirely.
+    #[tokio::test]
+    async fn an_unpriced_kind_keeps_every_line_and_every_dollar_in_its_title() {
+        let (store, sid) =
+            processed_session_with_items(&[("part", "5 yards mulch"), ("price", "$200 mulch")]);
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider.clone());
+
+        let outcome = b.build(&sid, "work_order").await.unwrap();
+        let store = store.lock().unwrap();
+        let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
+        let titles: Vec<&str> =
+            v["lines"].as_array().unwrap().iter().map(|l| l["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, vec!["5 yards mulch", "$200 mulch"]);
+        assert!(provider.requests().is_empty(), "still zero calls for a non-pricing kind");
+    }
+
+    /// A walk whose every item priced itself needs no model call at all.
+    #[tokio::test]
+    async fn a_fully_spoken_walk_skips_the_pricing_call() {
+        let (store, sid) = processed_session_with_items(&[
+            ("part", "5 yards mulch"),
+            ("price", "$200 mulch"),
+        ]);
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider.clone());
+
+        let outcome = b.build(&sid, "estimate").await.unwrap();
+        assert!(!outcome.queued, "nothing to ask is not a degrade");
+        assert_eq!(outcome.usage, Usage::default());
+        assert!(provider.requests().is_empty(), "every line was priced by the operator");
+
+        let store = store.lock().unwrap();
+        let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
+        let lines = v["lines"].as_array().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["amount_cents"], 20000);
+        assert_eq!(lines[0]["is_gap"], false);
     }
 
     #[tokio::test]

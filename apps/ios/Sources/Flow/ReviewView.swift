@@ -7,6 +7,7 @@ import PhotosUI
 struct ReviewView: View {
     @Bindable var model: AppModel
     @FocusState private var amountFocused: Bool
+    @FocusState private var titleFocused: Bool
     // Photos (Plan 11) — functional-plain capture entry point + gallery.
     // sac: placement, layout, thumbnails, empty state are yours; this just
     // wires PhotosPicker → bytes → engine.attachPhoto.
@@ -65,7 +66,10 @@ struct ReviewView: View {
                             DocRowView(row: row)
                                 .contentShape(Rectangle())
                                 .onTapGesture { model.beginEdit(row) }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityHint("Edit this line")
                         }
+                        addLineButton
                         TotalRow(key: doc.totalKey, value: doc.totalValue, gaps: doc.gapCount)
                             .padding(.top, 2)
                         // Empty note = no bar. An empty amber block reads as a
@@ -278,41 +282,109 @@ struct ReviewView: View {
         }
     }
 
-    private var editSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SectionLabel("SET AMOUNT")
-            HStack(spacing: 4) {
-                Text("$")
-                    .font(Theme.F.mono(24, .semibold))
-                    .foregroundStyle(Theme.C.ink60)
-                TextField("0", text: $model.editText)
-                    .font(Theme.F.mono(28, .semibold))
-                    .keyboardType(.numberPad)
-                    .focused($amountFocused)
+    /// Adding a line back, in the operator's own hand.
+    ///
+    /// Under the last line rather than beside the header: an estimate is read
+    /// top to bottom and the next line goes at the bottom, so the control sits
+    /// where the thing it makes will appear. Quiet by design — it is an
+    /// occasional correction, not the screen's job, and it must not compete
+    /// with SEND.
+    private var addLineButton: some View {
+        Button { model.addLine() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                Text("ADD LINE")
+                    .font(Theme.F.mono(9, .semibold))
+                    .tracking(1.2)
             }
-            .padding(.bottom, 4)
-            .overlay(alignment: .bottom) { Theme.C.orangeDeep.frame(height: 2) }
+            .foregroundStyle(Theme.C.amberInk)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.S.radiusCard)
+                    .stroke(Theme.C.orangeDeep.opacity(0.45), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 10)
+        .accessibilityLabel("Add a line")
+    }
+
+    /// One sheet for everything a line can need: its words, its number, and
+    /// its removal.
+    ///
+    /// It used to be SET AMOUNT alone, which quietly said the only thing that
+    /// could be wrong on a document was a price. The description is what the
+    /// client actually reads, and speech-to-text mishears a word about as
+    /// often as it mishears a number (Isaac, 2026-08-09).
+    private var editSheet: some View {
+        let priced = model.document?.pricesShown ?? false
+        return VStack(alignment: .leading, spacing: 16) {
+            SectionLabel(model.editingRowIsNew ? "NEW LINE" : "EDIT LINE")
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("DESCRIPTION")
+                    .font(Theme.F.mono(8, .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.C.ink60)
+                TextField("What the work is", text: $model.editTitle, axis: .vertical)
+                    .font(Theme.F.ui(17, .semibold))
+                    .lineLimit(1...3)
+                    .focused($titleFocused)
+                    .padding(.bottom, 4)
+                    .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1.5) }
+            }
+
+            if priced {
+                VStack(alignment: .leading, spacing: 5) {
+                    // "Leave it empty" belongs on the LABEL, not in the field:
+                    // as placeholder text it set at the field's own 24pt and
+                    // read as a value someone had typed.
+                    Text("AMOUNT · LEAVE EMPTY FOR A GAP")
+                        .font(Theme.F.mono(8, .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(Theme.C.ink60)
+                    HStack(spacing: 4) {
+                        Text("$")
+                            .font(Theme.F.mono(24, .semibold))
+                            .foregroundStyle(Theme.C.ink60)
+                        TextField("0", text: $model.editText)
+                            .font(Theme.F.mono(24, .semibold))
+                            // Decimal, not number: a line can carry cents, so
+                            // the keyboard has to be able to type them back.
+                            .keyboardType(.decimalPad)
+                            .focused($amountFocused)
+                    }
+                    .padding(.bottom, 4)
+                    .overlay(alignment: .bottom) { Theme.C.orangeDeep.frame(height: 2) }
+                }
+            }
 
             Button { model.commitEdit() } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Theme.S.radius)
-                        .fill(Theme.C.orangeDeep)
-                        .offset(y: 3)
-                    RoundedRectangle(cornerRadius: Theme.S.radius)
-                        .fill(Theme.C.orange)
-                    Text("SET")
-                        .font(Theme.F.ui(15, .bold))
-                        .tracking(1.4)
-                        .foregroundStyle(Theme.C.onOrange)
-                }
-                .frame(height: Theme.S.buttonHeight)
+                BlockLabel("SET")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RaisedBlockStyle(height: Theme.S.buttonHeight, leadingDot: false))
+
+            // Ink, not red, and last: it removes a line from an unsent draft
+            // that can be added straight back, so dressing it as destructive
+            // would overstate it — the same call DISCARD makes on this screen.
+            Button { model.removeEditingLine() } label: {
+                Text(model.editingRowIsNew ? "Cancel" : "Remove this line")
+                    .font(Theme.F.ui(13, .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.wellChip)
         }
         .padding(Theme.S.screenPad)
-        .presentationDetents([.height(220)])
+        .presentationDetents([.height(priced ? 400 : 300)])
         .presentationBackground(Theme.C.paper)
-        .onAppear { amountFocused = true }
+        // A new line has nothing to say yet, so start in the words; an
+        // existing one is most often opened to fix its number.
+        .onAppear {
+            if model.editingRowIsNew || !priced { titleFocused = true } else { amountFocused = true }
+        }
     }
 }
 

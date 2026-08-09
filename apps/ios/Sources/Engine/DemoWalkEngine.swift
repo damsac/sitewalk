@@ -400,7 +400,8 @@ final class DemoWalkEngine: WalkEngine {
             staticTotal: priced ? trade.totalValue : "\(rows.count)",
             // The gap/price note only means anything on a priced document.
             note: priced ? trade.note : "",
-            send: "SEND \(DocKinds.label(for: kind).uppercased())"
+            send: "SEND \(DocKinds.label(for: kind).uppercased())",
+            pricesShown: priced
         )
     }
 

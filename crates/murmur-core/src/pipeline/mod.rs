@@ -13,6 +13,8 @@ pub mod notes;
 
 pub(crate) mod prompts;
 
+pub(crate) mod spoken_price;
+
 use std::sync::{Arc, Mutex};
 
 use harness::{

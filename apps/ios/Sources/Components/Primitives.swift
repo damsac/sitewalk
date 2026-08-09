@@ -53,6 +53,53 @@ struct SectionLabel: View {
     }
 }
 
+// MARK: - Empty panel (one idiom for "nothing here yet")
+
+/// The app's ONE way of saying a list is empty.
+///
+/// It had three. The board's walks list used a filled `paperDeep` slab, the
+/// jobs list directly beneath it used a white card with a hairline, and the
+/// document's photo well used a dashed outline — three answers to the same
+/// question, two of them stacked in the same scroll (Isaac's board shot,
+/// 2026-08-09: "the grey backdrop looks off when there are no walks"). Grey
+/// was the wrong one to keep: on a board whose section beds are also grey it
+/// stops reading as a card and starts reading as a hole in the layout.
+///
+/// A quiet white card with a hairline is what "nothing here yet" looks like
+/// in this app — the same sheet-on-paper grammar every real row uses, so an
+/// empty list reads as a list that is empty rather than as a different kind
+/// of surface. Dashed is deliberately NOT it: in app language dashed means
+/// disabled, and these lists are the opposite of disabled — they are waiting
+/// for the operator's first tap.
+///
+/// One documented exception: the photo well inside the rendered document
+/// (`ReviewView.photoGallery`) keeps its dashed outline, because this panel is
+/// sheet-white and the document it would sit on is too — an invisible card is
+/// not consistency. Dashed there also means what it says: a space waiting to
+/// be filled, on a page rather than in a list.
+struct EmptyPanel: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(Theme.F.ui(14, .medium))
+            .foregroundStyle(Theme.C.ink60)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 22)
+            .background(Theme.C.sheet)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.S.radiusCard)
+                    .stroke(Theme.C.hairline, lineWidth: 1)
+            )
+    }
+}
+
 // MARK: - Metadata strip (provenance: site, sync, signal state)
 
 struct MetaStrip: View {
