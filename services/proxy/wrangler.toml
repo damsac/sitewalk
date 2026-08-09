@@ -13,6 +13,29 @@ compatibility_date = "2026-07-25"
 DAILY_SPEND_CAP_USD = "25"
 PER_INSTALL_DAILY_CAP_USD = "2"
 
+# --- App Attest (Phase 2) --------------------------------------------------
+# `off` | `monitor` | `enforce`. Ships as `off`: the device half does not exist
+# yet, and even once it does, `enforce` before a `monitor` soak would lock out
+# every already-installed build. Anything unrecognised also means `off`.
+ATTEST_MODE = "off"
+
+# Required before ATTEST_MODE can leave `off`. Both are public values, so they
+# live here rather than in secrets — but the worker fails CLOSED without them.
+#
+# APP_ATTEST_APP_ID is "<TeamID>.<bundle id>". Note the real-core build uses
+# com.isaacwm.sitewalk; the demo project's id differs, and a mismatch shows up
+# as `app_id_mismatch` on every attestation.
+# APP_ATTEST_APP_ID = "TEAMID.com.isaacwm.sitewalk"
+#
+# APP_ATTEST_ROOT_CA is Apple's App Attest root, PEM. It is configured rather
+# than compiled in so it can be rotated without a code change:
+#   curl -O https://www.apple.com/certificateauthority/private/Apple_App_Attestation_Root_CA.pem
+#   wrangler secret put APP_ATTEST_ROOT_CA < Apple_App_Attestation_Root_CA.pem
+#
+# APP_ATTEST_ALLOW_DEVELOPMENT = "true" also accepts attestations from builds
+# signed with a development profile. Useful on a staging worker, never in
+# production — a development attestation is a far lower bar to clear.
+
 [[kv_namespaces]]
 binding = "METER"
 # Created 2026-07-26 via `wrangler kv namespace create METER`.

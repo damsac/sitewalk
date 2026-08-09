@@ -30,6 +30,18 @@ struct BoardView: View {
     /// screen — the complaint that prompted this.
     private static let collapsedWalkCount = 3
 
+    /// Maps the model's two flags onto the sheet's reason. Computed here rather
+    /// than on `AppModel` so the model never has to name a view type.
+    private var paywallReason: PaywallView.Reason {
+        if let blocked = model.blockedUsage {
+            return .blocked(used: blocked.used, limit: blocked.limit)
+        }
+        if let freeLeft = model.paywallOfferFreeLeft {
+            return .afterFirstWalk(freeLeft: freeLeft)
+        }
+        return .chosen
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
@@ -317,7 +329,7 @@ struct BoardView: View {
         // deliberate upgrade affordance in Customize. Never raised by a
         // background event, so it can't appear over a walk in progress.
         .sheet(isPresented: $model.showPaywall) {
-            PaywallView(model: model, blocked: model.blockedUsage)
+            PaywallView(model: model, reason: paywallReason)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Theme.C.paper)
@@ -548,10 +560,10 @@ extension BoardView {
             // purchasable product the gate declines to block (see
             // `WalkAllowance.decide`), so "2 LEFT" would be a lie — and a
             // discouraging one, since nothing runs out.
-            let used = WalkAllowance.usage(in: WalkMeter.load(), now: Date())
-            let left = max(0, WalkAllowance.freeMonthlyLimit - used)
+            let left = WalkAllowance.remaining(in: WalkMeter.load())
             Button {
                 model.blockedUsage = nil   // opened by choice, not refused
+                model.paywallOfferFreeLeft = nil   // an offer, not this
                 model.showPaywall = true
             } label: {
                 Text(left == 0 ? "0 left" : "\(left) left")

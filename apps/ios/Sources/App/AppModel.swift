@@ -188,10 +188,17 @@ final class AppModel {
     /// paywall can't appear over a walk in progress.
     var showPaywall = false
 
-    /// Usage at the moment the gate refused, so the paywall can say "you've used
-    /// all 5 of this month's walks" instead of a generic upsell. Nil until a
-    /// refusal.
+    /// Usage at the moment the gate refused, so the paywall can name the number
+    /// instead of running a generic upsell. Nil until a refusal.
     var blockedUsage: (used: Int, limit: Int)?
+
+    /// Free walks left at the moment the first-walk offer was raised, or nil
+    /// when the paywall is not that offer. Kept separate from `blockedUsage` so
+    /// the sheet can soften its copy and its dismiss button, and carried as a
+    /// number so the copy is accurate for both the practice walk (nothing spent
+    /// yet) and a real first walk (one spent) — without the model importing the
+    /// view layer to say so.
+    var paywallOfferFreeLeft: Int?
 
     /// Free walks left AFTER the one just started; nil for Pro. Read by the
     /// notes screen to nudge at the end of a walk rather than the start.
@@ -491,13 +498,13 @@ final class AppModel {
             switch WalkAllowance.decide(
                 isPro: entitlement.isPro,
                 record: WalkMeter.load(),
-                now: Date(),
                 // No purchasable product means no way out of the limit — so the
                 // limit does not apply. See WalkAllowance.decide.
                 canSubscribe: entitlement.canSubscribe
             ) {
             case .blocked(let used, let limit):
                 blockedUsage = (used: used, limit: limit)
+                paywallOfferFreeLeft = nil
                 showPaywall = true
                 isStartingWalk = false
                 return
@@ -1107,6 +1114,7 @@ final class AppModel {
     /// unlike `discardWalk()` (which cancels a still-live session). Just
     /// resets local UI state.
     func dismissNotes() {
+        let produced = notes
         isPracticeWalk = false
         restoreEngineAfterPractice()
         notes = nil
@@ -1117,6 +1125,7 @@ final class AppModel {
         notesBannerReason = .liveFinish
         phase = .board
         path = []
+        offerProAfterFirstWalk(produced)
     }
 
     /// Which doc kind is currently building (for a per-button spinner); nil
@@ -1573,10 +1582,57 @@ final class AppModel {
         DocumentLayout.save(updated)
     }
 
+    /// UserDefaults, not the keychain: re-showing this once after a reinstall is
+    /// a shrug, and the keychain is reserved for things a reinstall must not
+    /// reset (the walk meter, the install id).
+    private static let firstWalkOfferKey = "jefe.offeredProAfterFirstWalk"
+
+    /// Offer Pro once, the first time a walk has actually produced something and
+    /// the operator is heading back to the board.
+    ///
+    /// **Every exit from a finished walk calls this** — closing the notes, or
+    /// sending or discarding a document built from them, in a practice run or a
+    /// real one. Isaac, 2026-08-08: *"after they finish their first walk in any
+    /// way… if the user were to press the back arrow to go back to the home
+    /// screen they should get the offer."*
+    ///
+    /// The earlier version fired only after the practice walk, which is an
+    /// opt-in link under the primary button in onboarding — so the majority of
+    /// operators, who tap START MY FIRST WALK, would never have seen it at all.
+    ///
+    /// The decision itself is `FirstWalkOffer` — a pure function so the three
+    /// conditions are testable without a keychain, StoreKit or a walk. Catching
+    /// the operator on the way OUT is the point: the offer must never interrupt
+    /// the notes screen, which is the thing doing the selling.
+    private func offerProAfterFirstWalk(_ produced: NotesModel?) {
+        let defaults = UserDefaults.standard
+        guard FirstWalkOffer.shouldOffer(
+            isPro: entitlement.isPro,
+            produced: produced,
+            alreadyOffered: defaults.bool(forKey: Self.firstWalkOfferKey)
+        ) else { return }
+        defaults.set(true, forKey: Self.firstWalkOfferKey)
+
+        let freeLeft = WalkAllowance.remaining(in: WalkMeter.load())
+        Task { @MainActor in
+            // Let the board's transition settle first; a sheet raised mid-
+            // animation lands half-drawn.
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !self.entitlement.isPro else { return }
+            self.blockedUsage = nil
+            self.paywallOfferFreeLeft = freeLeft
+            self.showPaywall = true
+        }
+    }
+
     func completeSend() {
+        let produced = notes
         // A practice run shows the whole loop (incl. the share sheet) but is
         // never recorded — no board log, no job flip.
-        if exitPracticeIfActive() { return }
+        if exitPracticeIfActive() {
+            offerProAfterFirstWalk(produced)
+            return
+        }
         if let index = jobs.firstIndex(where: { !$0.done }) {
             let old = jobs[index]
             jobs[index] = JobFixture(
@@ -1594,6 +1650,7 @@ final class AppModel {
         notes = nil
         phase = .board
         path = []
+        offerProAfterFirstWalk(produced)
     }
 
     /// Abandon a reviewed document WITHOUT marking the job sent (issue #155:
@@ -1601,7 +1658,11 @@ final class AppModel {
     /// to SENT). The persisted core artifact is untouched — only the app-side
     /// review state resets.
     func discardDocument() {
-        if exitPracticeIfActive() { return }
+        let produced = notes
+        if exitPracticeIfActive() {
+            offerProAfterFirstWalk(produced)
+            return
+        }
         sessionWalks.append(WalkRecord(
             time: Self.clockNow(), docNo: trade.docNo, docKind: trade.docKind, sent: false,
             sessionId: currentSessionId ?? "", queued: notes?.queued ?? false,
@@ -1612,5 +1673,6 @@ final class AppModel {
         notes = nil
         phase = .board
         path = []
+        offerProAfterFirstWalk(produced)
     }
 }

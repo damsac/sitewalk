@@ -1,12 +1,29 @@
 import Foundation
 
-/// The free-tier walk meter: 5 finished walks per calendar month, then Jefe Pro.
+/// The free-tier walk meter: 5 finished walks, once, then Jefe Pro.
 ///
 /// Split deliberately into pure decision logic (`WalkAllowance`) and keychain
 /// persistence (`WalkMeter`). Everything that decides anything is a static
-/// function over explicit inputs, so the rules — month rollover, what counts,
-/// what happens at exactly the limit — are unit-testable without StoreKit, a
-/// keychain, or a wall clock. Those are the parts that will be wrong.
+/// function over explicit inputs, so the rules — what counts, what happens at
+/// exactly the limit — are unit-testable without StoreKit or a keychain. Those
+/// are the parts that will be wrong.
+///
+/// ## Why the allowance is lifetime, not monthly
+///
+/// It used to reset every calendar month (Isaac, 2026-07-26). Changed 2026-08-08
+/// because a recurring free tier leaks the middle of our own market: an operator
+/// doing five jobs a month gets the whole product free, forever, and that is not
+/// a light user we are nurturing — for a lot of small operators that *is* the
+/// job. Worse, free walks are billed to the same proxy spend cap as paying
+/// subscribers, so a permanently free tier spends paying customers' capacity in
+/// perpetuity rather than once.
+///
+/// What the free tier is *for* is evaluation: prove it works before paying. That
+/// job does not need to recur. Keeping the first five free preserves the thing
+/// that actually matters — someone reaches a finished document, and therefore
+/// the review prompt, without ever entering a card.
+///
+/// The close is the introductory offer on the paywall, not a monthly refill.
 ///
 /// ## What counts as a walk
 ///
@@ -31,49 +48,41 @@ import Foundation
 /// Phase 2 — App Attest. Treating an honest customer well matters more here than
 /// making a determined one impossible.
 enum WalkAllowance {
-    /// Finished walks per calendar month on the free tier (Isaac, 2026-07-26).
-    static let freeMonthlyLimit = 5
+    /// Free finished walks per install, for the life of the install.
+    static let freeWalkAllowance = 5
 
-    /// One month's usage. `month` is a "YYYY-MM" key, not a date, so a rollover
-    /// is a string comparison rather than date arithmetic across time zones.
+    /// Lifetime usage.
+    ///
+    /// Records written before 2026-08-08 also carried a `"month"` key. It is
+    /// deliberately absent here rather than decoded and discarded: `JSONDecoder`
+    /// ignores unknown keys, so an existing install's `count` **carries forward**
+    /// instead of resetting. That is the conservative direction — nobody is
+    /// silently handed a second free allowance by the migration — and it is why
+    /// this struct must never gain a non-optional field without a default.
     struct Record: Codable, Equatable {
-        var month: String
         var count: Int
 
-        static let empty = Record(month: "", count: 0)
+        static let empty = Record(count: 0)
     }
 
     enum Decision: Equatable {
         /// Start the walk. `remaining` is what will be left AFTER this one, for
-        /// the "1 walk left this month" nudge; nil for Pro (never counted).
+        /// the "1 free walk left" nudge; nil for Pro (never counted).
         case allowed(remaining: Int?)
-        /// Out of free walks this month — show the paywall instead of recording.
+        /// Out of free walks — show the paywall instead of recording.
         case blocked(used: Int, limit: Int)
     }
 
-    /// The month key a date falls in. Local calendar on purpose: an operator's
-    /// month is the one on their wall, not UTC's.
-    static func monthKey(for date: Date, calendar: Calendar = .current) -> String {
-        let parts = calendar.dateComponents([.year, .month], from: date)
-        guard let year = parts.year, let month = parts.month else { return "" }
-        return String(format: "%04d-%02d", year, month)
-    }
-
-    /// Usage for `now`'s month, treating a record from any earlier month as
-    /// zero. Rollover is therefore implicit — nothing has to run at midnight on
-    /// the 1st, which is the kind of thing that silently never fires.
-    static func usage(in record: Record, now: Date, calendar: Calendar = .current) -> Int {
-        record.month == monthKey(for: now, calendar: calendar) ? record.count : 0
-    }
-
-    /// The gate. Pro is unmetered and short-circuits before any date handling.
+    /// The gate. Pro is unmetered and short-circuits immediately.
     ///
     /// `canSubscribe` is whether a purchasable product actually loaded. **If we
     /// cannot sell someone a way out, we do not block them.** Refusing to take
     /// somebody's money and refusing to let them work is indefensible — and it
     /// is not hypothetical: until the App Store Connect product exists, no
     /// install can subscribe at all, so a hard gate would brick every TestFlight
-    /// tester at walk six with no recourse until the 1st of the month.
+    /// tester at walk six with no recourse *and no month rollover to wait for*.
+    /// That last clause is new: under the old monthly reset, failing closed cost
+    /// someone days. Under a lifetime allowance it would cost them the app.
     ///
     /// It also covers the ordinary failures — StoreKit unreachable, a network
     /// blip on a job site with no signal, agreements lapsing. The cost of
@@ -84,14 +93,12 @@ enum WalkAllowance {
     static func decide(
         isPro: Bool,
         record: Record,
-        now: Date,
-        calendar: Calendar = .current,
-        limit: Int = freeMonthlyLimit,
+        limit: Int = freeWalkAllowance,
         canSubscribe: Bool = true
     ) -> Decision {
         if isPro { return .allowed(remaining: nil) }
         if !canSubscribe { return .allowed(remaining: nil) }
-        let used = usage(in: record, now: now, calendar: calendar)
+        let used = max(0, record.count)
         // `>=`, not `==`: a limit that drops (or a record written by a build
         // with a higher limit) must still block rather than wrap into an
         // unbounded free tier.
@@ -99,20 +106,25 @@ enum WalkAllowance {
         return .allowed(remaining: limit - used - 1)
     }
 
-    /// The record after a walk finishes. Rolls the month over on write as well
-    /// as on read, so a stale month never accumulates.
-    static func recordingFinish(
-        in record: Record, now: Date, calendar: Calendar = .current
-    ) -> Record {
-        let key = monthKey(for: now, calendar: calendar)
-        let base = record.month == key ? record.count : 0
-        return Record(month: key, count: base + 1)
+    /// The record after a walk finishes.
+    static func recordingFinish(in record: Record) -> Record {
+        Record(count: max(0, record.count) + 1)
+    }
+
+    /// Free walks left, floored at zero. Used for the board's "2 LEFT" chip.
+    static func remaining(in record: Record, limit: Int = freeWalkAllowance) -> Int {
+        max(0, limit - max(0, record.count))
     }
 }
 
 /// Keychain-backed home for the meter. Keychain rather than `UserDefaults` so
 /// delete-and-reinstall is not a one-tap allowance reset (same reasoning as
 /// `InstallIdentity`, which shares the store).
+///
+/// This matters more than it used to. Under a monthly reset, wiping the meter
+/// bought someone at most the rest of the month. Under a lifetime allowance it
+/// buys them the product, so the keychain is now the only thing between
+/// reinstall-looping and a permanently free tier.
 enum WalkMeter {
     private static let service = "app.jefe.meter"
     private static let account = "free-walks"
@@ -134,7 +146,7 @@ enum WalkMeter {
         KeychainStore.write(data, service: service, account: account)
     }
 
-    static func recordFinishedWalk(now: Date = Date()) {
-        save(WalkAllowance.recordingFinish(in: load(), now: now))
+    static func recordFinishedWalk() {
+        save(WalkAllowance.recordingFinish(in: load()))
     }
 }

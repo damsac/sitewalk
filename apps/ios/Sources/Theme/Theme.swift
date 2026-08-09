@@ -98,7 +98,7 @@ enum Theme {
         ///
         /// Who is holding the phone settles it: the median US construction
         /// worker is 42, one in five is 55 or older, and the median trade
-        /// supervisor — the person paying $12.99/mo — is 46 and needs reading
+        /// supervisor — the person paying $19.99/mo — is 46 and needs reading
         /// glasses for 8pt mono. Type size is not a polish item for this
         /// audience; it is the product working or not working.
         ///

@@ -78,9 +78,7 @@ struct AppRoot: View {
         // screenshot run and no quick manual check can do. `meter=0` clears it.
         if let arg = args.first(where: { $0.hasPrefix("meter=") }),
            let count = Int(arg.dropFirst("meter=".count)) {
-            WalkMeter.save(WalkAllowance.Record(
-                month: WalkAllowance.monthKey(for: Date()), count: max(0, count)
-            ))
+            WalkMeter.save(WalkAllowance.Record(count: max(0, count)))
         }
         // QA hooks for the Letterhead Studio (parallel to autoprofile): stamp a
         // sample branding so headless screenshots exercise a customized letterhead.
@@ -199,8 +197,14 @@ struct AppRoot: View {
             // for the refused-at-the-limit copy.
             if ProcessInfo.processInfo.arguments.contains("paywall=1") {
                 model.blockedUsage = ProcessInfo.processInfo.arguments.contains("meter=5")
-                    ? (used: WalkAllowance.freeMonthlyLimit, limit: WalkAllowance.freeMonthlyLimit)
+                    ? (used: WalkAllowance.freeWalkAllowance, limit: WalkAllowance.freeWalkAllowance)
                     : nil
+                // firstwalkoffer=N renders the post-walk OFFER copy with N free
+                // walks left (5 = straight after the practice run, 4 = after a
+                // real first walk), since simctl cannot walk a job to reach it.
+                model.paywallOfferFreeLeft = ProcessInfo.processInfo.arguments
+                    .first { $0.hasPrefix("firstwalkoffer=") }
+                    .flatMap { Int($0.dropFirst("firstwalkoffer=".count)) }
                 model.showPaywall = true
             }
             // (Removed: the legacy SpeechSource permission ask for live=1.

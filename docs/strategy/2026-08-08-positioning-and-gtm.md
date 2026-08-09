@@ -418,3 +418,187 @@ That buyer exists in every trade, which is what the widened trade catalog
   solved it. Our editable-output work is aimed at the right wound; the missing
   half is **memory** of the correction. This is the one feature that would make
   us better rather than merely different.
+
+---
+
+# 9. Getting people to try it (2026-08-08)
+
+Isaac: *"how are we going to market this and get people trying it out? id like
+to spend as little as possible on paid ads."*
+
+Builds on §8. Price ($19.99), buyer (operator with no software) and centrepiece
+(App Store organic) are settled and not reopened here.
+
+## 9.0 The binding constraint is Isaac's calendar, not his budget
+
+He has a full-time consulting job. **Any channel that needs a weekly cadence
+will die quietly**, so this plan front-loads one-time work that compounds
+unattended and refuses anything requiring sustained presence. That rules out
+owning a Facebook group, a YouTube channel, and a content calendar — all of
+which are good advice for someone with 40 hours a week.
+
+Budget for **~5 hours/week**, with a ~15-hour setup block up front.
+
+## 9.1 The spine: one story, and it is not "voice"
+
+Voice is table stakes — Jobber shipped it Sept 2025, VoxTrade is a price twin,
+six new App Store entrants. Leading with it is competing on their ground.
+
+The only claim that is structurally ours:
+
+> **Every competitor uploads your customer's voice to a third-party AI vendor.
+> Jefe never sends the audio anywhere.**
+
+It earns its keep three ways at once, which is why it is the spine rather than
+a bullet:
+
+1. **Legal.** Eleven states require all-party consent to record. A contractor
+   recording a homeowner and shipping that audio to a vendor is a real exposure
+   nobody in the category talks about.
+2. **Apple.** On-device processing is Apple's own marketing narrative. This is
+   the kind of app they feature, and featuring is free.
+3. **The privacy nutrition label** renders the comparison for us, on Apple's
+   own pages, forever, at zero cost. Ours reads clean; theirs cannot.
+
+Everything below is a delivery mechanism for that one sentence.
+
+## 9.2 Three gates before any marketing
+
+Marketing a product nobody outside the building has finished a job with is how
+you spend your one launch on a bug. Two shipping-blockers this month
+(the START WALK crash, the trade-scoped schema bug) were both found by Isaac
+using it. Ten operators will find the next five.
+
+### Gate A — ten real operators on external TestFlight (~6 hrs)
+
+Not friends being nice. People who will walk a paying job and be annoyed.
+
+§5.1 found this is the *only* thing that worked for all five comparable
+companies — Jobber's first customer came from a personal introduction. Concrete
+Denver sources, in order of yield:
+
+- Trades Isaac has personally hired (roofer, plumber, landscaper)
+- Nextdoor and local Facebook "who do you recommend" threads — these enumerate
+  every active solo operator in a 5-mile radius
+- **Home Depot / Lowe's pro desk, 6:30–7:30am.** Where they actually are
+- SiteOne (landscape), Ferguson (plumbing) — trade supply counters
+
+Ask for one walk on one real job, then a 10-minute phone call. Nothing else.
+
+### Gate B — the listing is the marketing (~5 hrs, compounds forever)
+
+Highest-ROI hours in the entire plan, and mostly not written yet:
+
+- **Fix the description.** It currently reads *"Made for landscapers, property
+  managers and inspectors"* — stale since #312, and it tells a plumber the app
+  is not for them, which is the exact bounce Isaac asked to eliminate.
+- **Subtitle + keywords carry 100% of ASO load** because "Jefe" has zero keyword
+  value. Current keywords are single words (`estimate,invoice,contractor…`);
+  §5.3 found ranking comes from **string clusters** — `estimate maker for
+  contractors`, `home inspection report`, `work order app`. Head terms are
+  unwinnable (Invoice Simple: 122,658 ratings); the long tail is wide open —
+  "Estimate Maker for Contractors" ranks on 2,063 ratings and has not shipped
+  since May 2023.
+- **Screenshots must show the finished document, not the app.** The buyer needs
+  to see the estimate, not the mic button. First three are all most people see.
+- **Featuring nomination** (App Store Connect → Featuring). Free, ~30 min,
+  almost nobody submits one. On-device AI is exactly the pitch Apple amplifies.
+- **Enrol in the Small Business Program.** 15% vs 30% commission. At 224 subs
+  that is **$3,000/mo net versus $2,328** — a 22% swing for one form.
+
+### Gate C — the free tier will break the product if marketing works (~3 hrs)
+
+`WalkAllowance.freeMonthlyLimit = 5` is **5 walks per calendar month, forever** —
+a freemium tier, not a trial. §8 reasoned about it as a one-time allowance,
+which is not what is built. Two consequences:
+
+**It shares the paying customers' spend cap.** Free users cost ~$0.90/mo each in
+API. 1,000 free actives = **$900/mo, more than the entire $750/mo global cap.**
+The failure mode is precise and bad: a good week of installs burns the global
+cap and *paying subscribers get 503s mid-job.* Successful marketing is currently
+the thing that breaks the product.
+
+Fix before launch, cheapest first:
+1. Raise the global cap and re-derive it from paid subscriber count, not a
+   fixed $25/day.
+2. Give the free tier its own smaller pool, so free usage can never deny a
+   paying customer. Paying capacity must never be spendable by non-payers.
+
+**And add a trial at the paywall.** Keep 5/month for evaluation, then offer a
+**14-day free trial** as a StoreKit introductory offer at the paywall. 5 walks
+proves it works; 14 days unlimited builds the habit. This is ASC configuration
+plus paywall copy — no new app-side machinery.
+
+## 9.3 The channels, sized to ~3 hrs/week
+
+Ranked by yield per hour, given the constraint in §9.0:
+
+| # | Channel | Cost | Hours | Why |
+|---|---|---|---|---|
+| 1 | **Answer, don't post** — r/Contractor, r/HVAC, r/Plumbing, r/landscaping, trade FB groups | $0 | 1.5/wk | "How do you handle estimates" is asked constantly. Answer usefully, mention the app only when it is the answer. Slow, compounding, zero spend |
+| 2 | **The consent explainer** — *"Can you legally record a customer on a job site?"* state-by-state | $0 | 4 once | Ship as a free tool on getjefe.netlify.app, not a product page. Earns long-tail search, and gives Isaac a non-promotional reason to post anywhere |
+| 3 | **Review prompt** — `SKStoreReviewController` after the first successful export | $0 | 1 once | **Not implemented.** Ratings volume is the ASO flywheel; the long-tail competitor ranks on 2,063. Ask at the moment of relief, never at launch |
+| 4 | **The beta site** — finish the TestFlight link + Formspree id, then redeploy | $0 | 1 once | Already live and currently converting nobody |
+| 5 | **Podcast guest sweep** — dozens of shows at 1k–10k listeners, desperate for guests | $0 | 2/appearance | Real reach, but per-appearance cost is high on a 5-hr week. Do 3, not 15, and lead with the privacy angle |
+| ✗ | Product Hunt | — | — | Comparable indie privacy launches report 84 visitors / 0 sales |
+| ✗ | Franchise networks | — | — | All mandate their own software |
+
+InterNACHI ($49/mo) stays demoted per §8.5 — good channel pointing at buyers who
+already own tools.
+
+## 9.4 Paid ads: not yet, and the trigger is specific
+
+**Recommendation: spend nothing until 60 days of retention data exists.**
+
+Not caution — arithmetic. Net is ~$13.40/sub/mo after commission and API.
+
+| Monthly churn | Avg lifetime | LTV | Verdict at $40 CAC |
+|---|---|---|---|
+| 8% | 12.5 mo | ~$168 | works comfortably |
+| 15% | 6.7 mo | ~$90 | marginal |
+| 25% | 4 mo | ~$54 | loses money |
+
+**Churn is the single number that decides whether ads work, and it cannot be
+known before there are subscribers.** Spending now buys a number that cannot be
+evaluated. This is also why §8.5 put retention above acquisition: at 200 subs,
+10% churn means replacing 20 people every month forever.
+
+**Trigger to start:** 60 days post-launch, measured monthly churn under 10%.
+
+**Then, and only:** Apple Search Ads, exact-match long-tail only (`estimate
+maker for contractors`, not `contractor app`), $10/day hard cap, kill any
+keyword whose CAC exceeds $40. ASA is the one paid channel worth testing because
+it catches existing intent from a buyer with no vendor relationship to defend.
+No Meta, no Google — both sell interest, and we need intent.
+
+*Unverified: current ASA cost-per-tap on these terms. Not fetchable here. Treat
+the $40 ceiling as the decision rule, not the expected price.*
+
+## 9.5 Order of work
+
+**Setup (~15 hrs, before launch)**
+1. Free-tier spend isolation + raise the global cap (Gate C) — *the only true blocker*
+2. Rewrite description, subtitle, keywords; reshoot screenshots on the document
+3. Small Business Program enrolment; ASC product at $19.99 with a 14-day trial
+4. Review prompt after first export
+5. Featuring nomination
+
+**Weeks 1–3 (~6 hrs/wk)**
+6. Ten operators on external TestFlight; one call each
+7. Fix what they hit. Do not market past this gate
+
+**Launch, then ~3 hrs/wk**
+8. Publish the consent explainer; finish the beta site
+9. Answer questions in trade communities
+10. Three podcast appearances
+11. **Measure churn.** At day 60, decide on ASA
+
+## 9.6 What would make this wrong
+
+- **If the ten operators do not finish walks**, no channel matters and the
+  problem is product. That is the real function of Gate A.
+- **If churn runs above 20%**, this is not a subscription business at $19.99 and
+  the answer is the §8.6 memory feature, not more acquisition.
+- **If Apple features it**, everything above is noise for a month — which is
+  precisely why Gate C (the shared spend cap) must be fixed first. Being
+  featured with the current cap would take the product down.

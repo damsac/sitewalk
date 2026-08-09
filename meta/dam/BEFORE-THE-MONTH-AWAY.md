@@ -38,7 +38,7 @@ clause to revert.
 
 ### 1.2 Monetization exists now
 
-StoreKit 2, Jefe Pro at $12.99/mo, free tier 5 finished walks a month
+StoreKit 2, Jefe Pro at $19.99/mo, free tier 5 finished walks a month
 (#277, #279, #281).
 
 - Metered on **output**, not on tapping START — a walk that produces nothing is
@@ -191,7 +191,7 @@ becomes a sac-side feature that can ship in 1.1. Without them it waits a month.
 **This is the single highest-leverage hour of core work available.** If you
 think landing a capability with no consumer is wrong, say so on the issue.
 
-### 3.2 App Attest server half
+### 3.2 App Attest — server half DONE (#315), device half is yours (#316)
 
 Hard prerequisite for a **public** listing. Not for TestFlight.
 
@@ -202,7 +202,29 @@ State the exposure accurately: the **global $25/day cap holds**, so this is
 ~$750/month worst case, not unbounded. The real risk is **availability** — an
 abuser burning the global cap denies service to paying subscribers mid-job.
 
-Needs a device session; attestation cannot be exercised in the simulator.
+**Update 2026-08-08.** I wrote the server half — #315. Chain verification to
+Apple's root, the nonce/keyId/rpId/counter/aaguid checks, assertion counter
+replay protection, and an hourly token so the app asserts once an hour rather
+than once per message. It ships **inert**: `ATTEST_MODE=off`, and nothing on
+the device attests yet, so merging changes nothing about the running service.
+
+The device half is #316 — `DCAppAttestService`, the entitlement, token caching,
+and the `jefeA.` credential. Yours, because it touches app identity and
+provisioning.
+
+**The one thing I could not test.** The sandbox had no network, so I could not
+fetch Apple's real root CA, and I was not willing to paste in a certificate I
+could not verify. The tests build a synthetic chain with real ECDSA keys — that
+proves every check fires on every malformation I could construct (verified by
+mutation), but it means **the verifier has never seen a genuine Apple chain.**
+
+That closes only on a device: configure the worker, `ATTEST_MODE=monitor`, one
+real attestation from a TestFlight build, confirm `attest_ok` in the logs and
+not `chain_signature_invalid`. If it fails, the suspects are all in
+`services/proxy/src/der.ts` and all have unit tests to extend.
+
+Rollout is `off` → `monitor` → `enforce`, and `monitor` is not skippable —
+`enforce` before builds carry the device half locks out every install we have.
 
 ### 3.3 The device session you have been carrying
 
@@ -246,7 +268,7 @@ Options — create silently (manufactures records from a mishearing), suggest on
 the notes screen and let them confirm (R6-shaped), or nothing in v1. I lean
 suggest-and-confirm but the extraction pass is yours.
 
-### 3.6 The CI upload-quota guard (#304) — your call, my proposal
+### 3.6 The CI upload-quota guard (#304) — written, DRAFT PR #314, your call
 
 Rather than cancelling in-flight runs (`cancel-in-progress` is `false` and I
 read that as deliberate), **skip only the ASC upload when `github.sha` is no
@@ -263,8 +285,21 @@ longer the tip of main**:
 ```
 
 Nothing is ever cancelled mid-`altool`; ten rapid merges cost one slot; tags
-unaffected. **I did not change `release.yml` myself** — if I break it while you
-are away, nobody ships for four weeks.
+unaffected.
+
+**Update 2026-08-08.** I wrote it — **#314, left as a DRAFT on purpose.**
+`release.yml` is the one file that strands everyone if it breaks while you are
+away, and this is a convenience fix for a problem I caused, so the decision is
+yours rather than mine. Nothing changes until you click merge.
+
+Shipped version differs from the sketch above in two ways, both deliberate:
+`git ls-remote` instead of `rev-parse origin/main` (one network call, correct
+under `actions/checkout`'s shallow clone), and it **fails open** — if
+`ls-remote` returns nothing the guard is skipped, because burning a quota slot
+is a much better failure than silently not shipping. Guard is scoped to the
+`internal` lane only; tags and `workflow_dispatch` always upload.
+
+Rejecting it outright is a defensible answer. I will just keep batching merges.
 
 ---
 
@@ -332,7 +367,7 @@ walking 101 once.
 "photos vanish" half), #225, #228, #284, #289.
 
 **Isaac's, and they gate submission**: create the ASC subscription
-(`com.damsac.jefe.pro.monthly`, $12.99/mo) + Paid Apps agreements; the App
+(`com.damsac.jefe.pro.monthly`, $19.99/mo) + Paid Apps agreements; the App
 Privacy answers (exact clicks in `docs/store/SUBMISSION-KIT.md` §4); a sandbox
 purchase on device. **Nothing about billing has ever been observed working** —
 no product exists, so the paywall shows no price and the meter is untested in
