@@ -191,7 +191,7 @@ becomes a sac-side feature that can ship in 1.1. Without them it waits a month.
 **This is the single highest-leverage hour of core work available.** If you
 think landing a capability with no consumer is wrong, say so on the issue.
 
-### 3.2 App Attest — server half DONE (#315), device half is yours (#316)
+### 3.2 App Attest — server half is ON MAIN and UNREVIEWED; device half is yours (#316)
 
 Hard prerequisite for a **public** listing. Not for TestFlight.
 
@@ -202,7 +202,20 @@ State the exposure accurately: the **global $25/day cap holds**, so this is
 ~$750/month worst case, not unbounded. The real risk is **availability** — an
 abuser burning the global cap denies service to paying subscribers mid-job.
 
-**Update 2026-08-08.** I wrote the server half — #315. Chain verification to
+**Update 2026-08-08 — read the correction below before the description.**
+
+The server half is **already on main**, in `26f8cca`, and **you never reviewed
+it**. I cut the paywall branch off the attestation branch instead of off `main`,
+so squash-merging #317 swept it along; the squash also destroyed the commit
+message that explained it. PR **#315 is closed** but its body is intact and is
+the review document — the diff is `git show 26f8cca -- services/proxy`.
+
+Isaac's call was to leave it rather than churn main, on the basis that it cannot
+run: `ATTEST_MODE = "off"`, missing config fails closed, and no workflow deploys
+or tests the proxy. All three verified. **The review is still owed, and the
+device work below is untouched by any of it.**
+
+I wrote the server half — originally #315. Chain verification to
 Apple's root, the nonce/keyId/rpId/counter/aaguid checks, assertion counter
 replay protection, and an hourly token so the app asserts once an hour rather
 than once per message. It ships **inert**: `ATTEST_MODE=off`, and nothing on

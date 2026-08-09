@@ -18,16 +18,45 @@ If you have one hour: **§2.1** (my core change — it replaced a named test of
 yours), **§3.1** (#263), **§4.1** (the ASC key, which has now blocked me twice),
 **§4.2** (do the certs outlive the trip?).
 
-**Since then (2026-08-08), two of your queued items now have code waiting:**
+**Since then (2026-08-08), two of your queued items have code waiting — and one
+of them is already on main by mistake. Read this before you touch the proxy.**
 
-- **#315 — App Attest server half** (§3.2). Verification is written and tested;
-  ships inert behind `ATTEST_MODE=off`. Device half is #316, and it is yours.
-  The residual risk is that the verifier has never seen a *genuine* Apple chain
-  — the sandbox had no network to fetch the real root, so the tests use a
-  synthetic one. That closes with one real attestation in `monitor` mode.
-- **#314 — the CI upload guard** (§3.6). **Deliberately left a DRAFT.**
-  `release.yml` strands everyone if it breaks while you are away, and this is a
-  convenience fix for a problem I caused. Merge, change, or reject — your call.
+### App Attest: the server half is ON MAIN, unreviewed (§3.2, and #316 is yours)
+
+I cut the paywall branch off my App Attest branch instead of off `main`, so
+squash-merging #317 carried the whole attestation server half with it. It landed
+in `26f8cca`, under a commit titled *"store: lifetime free allowance, an annual
+plan, and a paywall that can sell both"* — which says nothing about attestation,
+because the squash ate that message. **My mistake, and Isaac's call to leave it
+rather than churn main.**
+
+- **It cannot run.** `ATTEST_MODE = "off"` in `wrangler.toml`, missing config
+  fails closed, and no workflow deploys *or tests* the proxy (`release.yml`
+  mentions `services/proxy` only in a comment). Verified, not assumed.
+- **It was never reviewed.** That is the actual cost, and it is the thing I am
+  asking you to fix. The full thinking is preserved on **closed PR #315** — read
+  that as the review document. The diff is `git show 26f8cca -- services/proxy`,
+  byte-identical to what the PR would have shown you.
+- **The one thing that needs YOU, not a review.** The verifier has never seen a
+  *genuine* Apple chain. My sandbox had no network to fetch Apple's real root CA
+  and I would not paste in a certificate I could not verify, so the 57 tests
+  build a synthetic chain with real ECDSA keys. That proves every check fires on
+  every malformation I could construct — it does not prove we accept Apple.
+  Closing it needs a device: configure the worker, `ATTEST_MODE=monitor`, one
+  real attestation from a TestFlight build, confirm `attest_ok` in the logs and
+  not `chain_signature_invalid`. If it fails, the suspects are all in
+  `services/proxy/src/der.ts` and all have unit tests to extend.
+- **Then the device half — #316.** `DCAppAttestService`, the entitlement, token
+  caching, the `jefeA.` credential. Yours. Nothing is enforceable until it lands.
+
+Rollout is `off` → `monitor` → `enforce`, and `monitor` is not skippable —
+`enforce` before builds carry the device half locks out every install we have.
+
+### #314 — the CI upload guard (§3.6)
+
+**Deliberately left a DRAFT.** `release.yml` strands everyone if it breaks while
+you are away, and this is a convenience fix for a problem I caused. Merge,
+change, or reject — your call.
 
 The sections below are the older, longer-form context. The handover doc
 supersedes them where they disagree.
