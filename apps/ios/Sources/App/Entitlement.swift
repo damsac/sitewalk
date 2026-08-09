@@ -26,6 +26,20 @@ final class Entitlement {
     /// checking first when the paywall looks wrong.
     static let proMonthlyID = "com.damsac.jefe.pro.monthly"
 
+    /// The annual plan. Same subscription group, so upgrading/downgrading is
+    /// Apple's problem rather than ours, and — importantly — introductory-offer
+    /// eligibility is shared across the group: someone who has already taken the
+    /// free trial on monthly is NOT eligible for it again on annual.
+    ///
+    /// Annual exists because churn is the number that decides whether this is a
+    /// business at all. A yearly plan converts a recurring retention problem
+    /// into a one-time sale, and puts the cash up front against the API cost the
+    /// subscriber is about to incur.
+    static let proAnnualID = "com.damsac.jefe.pro.annual"
+
+    /// Every product the paywall may offer, in display order.
+    static let allProductIDs = [proAnnualID, proMonthlyID]
+
     /// Whether this install currently has Jefe Pro.
     ///
     /// Starts `false` and is corrected by `refresh()` on launch. Starting
@@ -35,9 +49,32 @@ final class Entitlement {
     /// costs money.
     private(set) var isPro = false
 
-    /// The subscription product, once loaded. `nil` while loading or if the
-    /// lookup failed — the paywall must handle both without claiming a price.
-    private(set) var proProduct: Product?
+    /// The annual plan, once loaded. `nil` while loading or if the lookup
+    /// failed — the paywall must handle both without claiming a price.
+    private(set) var annualProduct: Product?
+
+    /// The monthly plan, once loaded.
+    private(set) var monthlyProduct: Product?
+
+    /// Whether an introductory offer (the free trial) is still available on this
+    /// Apple ID. Eligibility is per subscription GROUP, not per product, so this
+    /// is one flag rather than one per plan.
+    ///
+    /// Defaults to `false` and is corrected by `loadProducts()`. False-then-true
+    /// is the safe direction: briefly not advertising a trial someone is owed is
+    /// a missed sentence, whereas advertising one they cannot have is a promise
+    /// Apple's purchase sheet will visibly break.
+    private(set) var isEligibleForTrial = false
+
+    /// True once a product load has finished, whatever the outcome. The paywall
+    /// uses it to tell "still loading" apart from "loaded, and there is nothing
+    /// to sell" — which otherwise both render as an indefinite spinner.
+    private(set) var didAttemptLoad = false
+
+    /// The plan to select by default. Annual, when we have it: it is the better
+    /// outcome for both sides — cheaper per month for them, and it removes the
+    /// monthly churn decision that is the biggest risk to this working at all.
+    var defaultProduct: Product? { annualProduct ?? monthlyProduct }
 
     /// Whether a subscription can actually be bought right now.
     ///
@@ -46,7 +83,7 @@ final class Entitlement {
     /// StoreKit is simply unreachable. The free-tier gate reads this and
     /// declines to block when it's false — we do not refuse someone's money and
     /// their work at the same time. See `WalkAllowance.decide`.
-    var canSubscribe: Bool { proProduct != nil }
+    var canSubscribe: Bool { annualProduct != nil || monthlyProduct != nil }
 
     /// Set when a load or purchase failed in a way worth telling the operator
     /// about. `nil` for user-cancelled: cancelling is not an error.
@@ -95,13 +132,20 @@ final class Entitlement {
     }
 
     func loadProducts() async {
+        defer { didAttemptLoad = true }
         do {
-            let products = try await Product.products(for: [Self.proMonthlyID])
-            proProduct = products.first
-            if proProduct == nil {
+            let products = try await Product.products(for: Set(Self.allProductIDs))
+            annualProduct = products.first { $0.id == Self.proAnnualID }
+            monthlyProduct = products.first { $0.id == Self.proMonthlyID }
+            if !canSubscribe {
                 // Not fatal and not the operator's problem — but it means the
                 // paywall cannot show a price, so leave a breadcrumb.
-                log.error("no product returned for \(Self.proMonthlyID, privacy: .public) — check the ASC product id and that agreements are signed")
+                log.error("no products returned for \(Self.allProductIDs, privacy: .public) — check the ASC product ids and that agreements are signed")
+            }
+            // Ask about eligibility on whichever plan loaded; the answer is the
+            // group's, so either one gives the same result.
+            if let subscription = defaultProduct?.subscription {
+                isEligibleForTrial = await subscription.isEligibleForIntroOffer
             }
         } catch {
             log.error("product load failed: \(error, privacy: .public)")
@@ -115,16 +159,16 @@ final class Entitlement {
         for await result in Transaction.currentEntitlements {
             // .unverified is deliberately NOT trusted — see the type doc.
             guard case .verified(let transaction) = result else { continue }
-            guard transaction.productID == Self.proMonthlyID else { continue }
+            guard Self.allProductIDs.contains(transaction.productID) else { continue }
             if transaction.revocationDate == nil { entitled = true }
         }
         isPro = entitled
     }
 
-    /// Buys Jefe Pro. Returns true only on a verified, completed purchase.
+    /// Buys a specific plan. Returns true only on a verified, completed purchase.
     @discardableResult
-    func purchase() async -> Bool {
-        guard let product = proProduct else {
+    func purchase(_ product: Product?) async -> Bool {
+        guard let product else {
             purchaseError = "Can't reach the App Store right now. Try again in a minute."
             return false
         }

@@ -188,10 +188,15 @@ final class AppModel {
     /// paywall can't appear over a walk in progress.
     var showPaywall = false
 
-    /// Usage at the moment the gate refused, so the paywall can say "you've used
-    /// all 5 of this month's walks" instead of a generic upsell. Nil until a
-    /// refusal.
+    /// Usage at the moment the gate refused, so the paywall can name the number
+    /// instead of running a generic upsell. Nil until a refusal.
     var blockedUsage: (used: Int, limit: Int)?
+
+    /// True when the paywall is being *offered* after the practice walk rather
+    /// than blocking anything. Kept separate from `blockedUsage` so the sheet
+    /// can soften its copy and its dismiss button without the model importing
+    /// the view layer.
+    var paywallIsAfterPractice = false
 
     /// Free walks left AFTER the one just started; nil for Pro. Read by the
     /// notes screen to nudge at the end of a walk rather than the start.
@@ -491,13 +496,13 @@ final class AppModel {
             switch WalkAllowance.decide(
                 isPro: entitlement.isPro,
                 record: WalkMeter.load(),
-                now: Date(),
                 // No purchasable product means no way out of the limit — so the
                 // limit does not apply. See WalkAllowance.decide.
                 canSubscribe: entitlement.canSubscribe
             ) {
             case .blocked(let used, let limit):
                 blockedUsage = (used: used, limit: limit)
+                paywallIsAfterPractice = false
                 showPaywall = true
                 isStartingWalk = false
                 return
@@ -1573,10 +1578,45 @@ final class AppModel {
         DocumentLayout.save(updated)
     }
 
+    /// UserDefaults, not the keychain: re-showing this once after a reinstall is
+    /// a shrug, and the keychain is reserved for things a reinstall must not
+    /// reset (the walk meter, the install id).
+    private static let practiceOfferKey = "jefe.offeredProAfterPractice"
+
+    /// Offer Pro once, right after the practice walk finishes.
+    ///
+    /// This is the first moment the operator has *watched* a document come out
+    /// of talking, which is the only moment before their first real walk when
+    /// the claim has been proved rather than asserted. Asking earlier — at the
+    /// end of onboarding, say — asks them to buy on a promise.
+    ///
+    /// It is an offer, never a wall: the sheet says NOT NOW instead of CLOSE,
+    /// and nothing is withheld if they dismiss it. Fired only from
+    /// `completeSend`, never from `discardDocument` — someone who threw the
+    /// practice document away has told us what they think of it.
+    private func offerProAfterPractice() {
+        guard !entitlement.isPro else { return }
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.practiceOfferKey) else { return }
+        defaults.set(true, forKey: Self.practiceOfferKey)
+        Task { @MainActor in
+            // Let the board's transition settle first; a sheet raised mid-
+            // animation lands half-drawn.
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !self.entitlement.isPro else { return }
+            self.blockedUsage = nil
+            self.paywallIsAfterPractice = true
+            self.showPaywall = true
+        }
+    }
+
     func completeSend() {
         // A practice run shows the whole loop (incl. the share sheet) but is
         // never recorded — no board log, no job flip.
-        if exitPracticeIfActive() { return }
+        if exitPracticeIfActive() {
+            offerProAfterPractice()
+            return
+        }
         if let index = jobs.firstIndex(where: { !$0.done }) {
             let old = jobs[index]
             jobs[index] = JobFixture(

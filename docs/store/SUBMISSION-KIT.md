@@ -83,10 +83,12 @@ Big buttons that work with gloves on. Keeps recording with the screen locked.
 Your audio never leaves your phone. Jefe transcribes it right on the device.
 
 FREE AND PRO
-Five walks a month, free. Jefe Pro takes the limit off for $19.99/month.
+Your first five walks are free. Jefe Pro takes the limit off for $19.99 a month,
+or $199.99 a year. Try Pro free for two weeks.
 
-Made for landscapers, property managers and inspectors, and anyone who'd rather
-be on site than at a desk.
+Landscapers, plumbers, electricians, HVAC, roofers, painters, handymen,
+remodelers, inspectors, property managers. If you walk a job and write it up
+afterward, Jefe is for you.
 ```
 
 **Keywords (100 chars, comma-separated, no spaces):**
@@ -127,9 +129,14 @@ Required for real walks. The app also keeps recording with the screen locked
 the property. Without it, iOS suspends the app and the walk is lost mid-job.
 
 SUBSCRIPTION
-Jefe Pro, $19.99/month auto-renewing. The free tier is 5 completed walks per
-calendar month. The paywall shows the price, the renewal terms, and links to the
-Terms of Use and Privacy Policy. Restore Purchase is on the same screen.
+Jefe Pro, auto-renewing: $19.99/month or $199.99/year, both with a two-week free
+trial. The free tier is 5 completed walks per install, one time — it does not
+renew. The paywall shows the price, the renewal terms for the SELECTED plan, and
+links to the Terms of Use and Privacy Policy. Restore Purchase is on the same
+screen.
+
+To reach the paywall: complete five walks, or open it from the walk-count chip on
+the board at any time.
 
 NO ACCOUNT
 There is no sign-up and no login. Nothing to provide credentials for.
@@ -207,12 +214,35 @@ don't refuse someone's money and their work at the same time).
 - **Display name:** `Jefe Pro`
 - **Description:** `Unlimited walks. Talk through as many jobs as you want and
   Jefe writes up the paperwork.`
+- **Introductory offer:** Free trial, **2 weeks** (ASC offers fixed durations — "2 weeks", not "14 days")
+
+**Second product — the annual plan.** Same subscription group, so Apple handles
+upgrades between them and the free trial can only be taken once across both.
+
+- **Product ID:** `com.damsac.jefe.pro.annual` — must match `Entitlement.proAnnualID`
+- **Type:** Auto-renewable subscription · **Group:** `Jefe` · **Duration:** 1 year
+- **Price:** $199.99 USD — deliberately 10x the monthly, i.e. two months free.
+  The paywall computes and displays the saving from the two live prices, so a
+  price that isn't 10x will silently change the badge rather than break it.
+- **Display name:** `Jefe Pro (Yearly)`
+- **Introductory offer:** Free trial, **2 weeks**
+
+**Why annual exists:** churn is the number that decides whether this is a
+business. A yearly plan converts a recurring retention problem into a one-time
+sale and puts cash up front against the API cost the subscriber is about to
+incur. It is the default selection on the paywall.
 - **Also required:** Paid Apps agreement signed, and banking + tax details
   completed under Business. Products stay in "Missing Metadata" until these are
   done.
 
 **Flip this deliberately.** The moment it goes live the 5-walk limit starts
-enforcing for everyone, including testers who have been walking freely.
+enforcing for everyone, including testers who have been walking freely — and
+since 2026-08-08 that allowance is **lifetime, not monthly**, so there is no
+rollover to wait for. Existing testers keep whatever count they had accrued
+(the record carries forward rather than resetting), which means anyone who has
+already finished five walks is blocked the moment the product goes live.
+
+Tell the testers before flipping it, not after.
 
 ---
 

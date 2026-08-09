@@ -84,10 +84,7 @@ final class StartWalkLatchTests: XCTestCase {
         // A voice-mode model so the meter gate is not exempted, with the meter
         // exhausted and a purchasable product so the gate actually blocks.
         let model = AppModel(engine: DemoWalkEngine(), forcedMode: .voice)
-        WalkMeter.save(WalkAllowance.Record(
-            month: WalkAllowance.monthKey(for: Date()),
-            count: WalkAllowance.freeMonthlyLimit
-        ))
+        WalkMeter.save(WalkAllowance.Record(count: WalkAllowance.freeWalkAllowance))
         defer { WalkMeter.save(.empty) }
 
         // Without a loaded StoreKit product the gate deliberately fails OPEN
