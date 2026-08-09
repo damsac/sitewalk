@@ -36,7 +36,10 @@ struct BoardView: View {
         if let blocked = model.blockedUsage {
             return .blocked(used: blocked.used, limit: blocked.limit)
         }
-        return model.paywallIsAfterPractice ? .afterPractice : .chosen
+        if let freeLeft = model.paywallOfferFreeLeft {
+            return .afterFirstWalk(freeLeft: freeLeft)
+        }
+        return .chosen
     }
 
     var body: some View {
@@ -560,7 +563,7 @@ extension BoardView {
             let left = WalkAllowance.remaining(in: WalkMeter.load())
             Button {
                 model.blockedUsage = nil   // opened by choice, not refused
-                model.paywallIsAfterPractice = false
+                model.paywallOfferFreeLeft = nil   // an offer, not this
                 model.showPaywall = true
             } label: {
                 Text(left == 0 ? "0 left" : "\(left) left")

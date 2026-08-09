@@ -21,9 +21,11 @@ struct PaywallView: View {
         case blocked(used: Int, limit: Int)
         /// The operator opened it themselves from the board.
         case chosen
-        /// Offered once, right after the practice walk — the first moment they
-        /// have watched the thing actually produce a document.
-        case afterPractice
+        /// Offered once, on the way out of the first walk that produced
+        /// anything — the first moment they have watched talking become
+        /// written-up work. `freeLeft` is the allowance remaining, which
+        /// differs between a practice walk (nothing spent) and a real one.
+        case afterFirstWalk(freeLeft: Int)
     }
 
     @Bindable var model: AppModel
@@ -95,7 +97,7 @@ struct PaywallView: View {
             SectionLabel("JEFE PRO")
             Spacer()
             Button { dismiss() } label: {
-                Text(reason == .afterPractice ? "NOT NOW" : "CLOSE")
+                Text(isOffer ? "NOT NOW" : "CLOSE")
                     .font(Theme.F.mono(9, .semibold))
                     .tracking(1.0)
                     .foregroundStyle(Theme.C.ink60)
@@ -123,12 +125,25 @@ struct PaywallView: View {
         .padding(.top, 22)
     }
 
+    /// True when this sheet is an offer rather than a wall. Drives the dismiss
+    /// wording — someone who was refused is closing a door; someone being sold
+    /// to is declining, and the button should say so.
+    private var isOffer: Bool {
+        if case .afterFirstWalk = reason { return true }
+        return false
+    }
+
     private var title: String {
         switch reason {
         case .blocked(_, let limit):
             return "That was your \(limit)th free walk."
-        case .afterPractice:
-            return "That's the whole job, start to finish."
+        case .afterFirstWalk:
+            // Deliberately not "that's the whole job, start to finish" — the
+            // most common path here is closing the NOTES screen, where no
+            // document has been built yet. Claiming more than they just saw is
+            // the fastest way to lose someone at the exact moment they were
+            // impressed.
+            return "That's your walk, written up."
         case .chosen:
             return "Walk as many jobs as you want."
         }
@@ -140,8 +155,13 @@ struct PaywallView: View {
             // No "they reset on the 1st" any more — they don't. Saying plainly
             // that the free ones are spent beats implying a refill never comes.
             return "The free ones are used up. Pro takes the limit off for good."
-        case .afterPractice:
-            return "Your first \(WalkAllowance.freeWalkAllowance) real walks are free. Pro doesn't count them at all."
+        case .afterFirstWalk(let freeLeft):
+            // After the practice walk nothing has been spent, so "your first 5
+            // are free" is right. After a real walk one is gone and the same
+            // sentence would be a lie the board's own chip contradicts.
+            return freeLeft >= WalkAllowance.freeWalkAllowance
+                ? "Your first \(freeLeft) walks are free. Pro stops counting them altogether."
+                : "\(freeLeft) free walks left. Pro stops counting them altogether."
         case .chosen:
             return "Free gets you \(WalkAllowance.freeWalkAllowance) walks. Pro doesn't count them."
         }

@@ -199,8 +199,12 @@ struct AppRoot: View {
                 model.blockedUsage = ProcessInfo.processInfo.arguments.contains("meter=5")
                     ? (used: WalkAllowance.freeWalkAllowance, limit: WalkAllowance.freeWalkAllowance)
                     : nil
-                model.paywallIsAfterPractice =
-                    ProcessInfo.processInfo.arguments.contains("practiceoffer=1")
+                // firstwalkoffer=N renders the post-walk OFFER copy with N free
+                // walks left (5 = straight after the practice run, 4 = after a
+                // real first walk), since simctl cannot walk a job to reach it.
+                model.paywallOfferFreeLeft = ProcessInfo.processInfo.arguments
+                    .first { $0.hasPrefix("firstwalkoffer=") }
+                    .flatMap { Int($0.dropFirst("firstwalkoffer=".count)) }
                 model.showPaywall = true
             }
             // (Removed: the legacy SpeechSource permission ask for live=1.
