@@ -83,7 +83,7 @@ Big buttons that work with gloves on. Keeps recording with the screen locked.
 Your audio never leaves your phone. Jefe transcribes it right on the device.
 
 FREE AND PRO
-Five walks a month, free. Jefe Pro takes the limit off for $12.99/month.
+Five walks a month, free. Jefe Pro takes the limit off for $19.99/month.
 
 Made for landscapers, property managers and inspectors, and anyone who'd rather
 be on site than at a desk.
@@ -127,7 +127,7 @@ Required for real walks. The app also keeps recording with the screen locked
 the property. Without it, iOS suspends the app and the walk is lost mid-job.
 
 SUBSCRIPTION
-Jefe Pro, $12.99/month auto-renewing. The free tier is 5 completed walks per
+Jefe Pro, $19.99/month auto-renewing. The free tier is 5 completed walks per
 calendar month. The paywall shows the price, the renewal terms, and links to the
 Terms of Use and Privacy Policy. Restore Purchase is on the same screen.
 
@@ -203,7 +203,7 @@ don't refuse someone's money and their work at the same time).
 - **Type:** Auto-renewable subscription
 - **Subscription group:** `Jefe`
 - **Duration:** 1 month
-- **Price:** $12.99 USD
+- **Price:** $19.99 USD
 - **Display name:** `Jefe Pro`
 - **Description:** `Unlimited walks. Talk through as many jobs as you want and
   Jefe writes up the paperwork.`

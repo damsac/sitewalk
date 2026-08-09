@@ -100,7 +100,7 @@ struct PaywallView: View {
             if let product = entitlement.proProduct {
                 // The price comes from StoreKit, never hardcoded — it is
                 // localized, and it is the number Apple will actually charge.
-                // A hardcoded "$12.99" would be wrong in every other currency
+                // A hardcoded "$19.99" would be wrong in every other currency
                 // and would silently lie after any price change.
                 Text(product.displayPrice)
                     .font(Theme.F.serif(30, .bold))
@@ -142,7 +142,7 @@ struct PaywallView: View {
     ///
     /// The renewal sentence is Apple's own required substance, in plain words:
     /// billing is on the Apple ID, it renews unless cancelled, and cancellation
-    /// is 24 hours before the period ends. Anyone paying $12.99 a month deserves
+    /// is 24 hours before the period ends. Anyone paying $19.99 a month deserves
     /// to read that before paying rather than discover it after.
     private var legalBlock: some View {
         VStack(alignment: .leading, spacing: 8) {

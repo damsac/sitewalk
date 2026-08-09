@@ -38,7 +38,7 @@ clause to revert.
 
 ### 1.2 Monetization exists now
 
-StoreKit 2, Jefe Pro at $12.99/mo, free tier 5 finished walks a month
+StoreKit 2, Jefe Pro at $19.99/mo, free tier 5 finished walks a month
 (#277, #279, #281).
 
 - Metered on **output**, not on tapping START — a walk that produces nothing is
@@ -367,7 +367,7 @@ walking 101 once.
 "photos vanish" half), #225, #228, #284, #289.
 
 **Isaac's, and they gate submission**: create the ASC subscription
-(`com.damsac.jefe.pro.monthly`, $12.99/mo) + Paid Apps agreements; the App
+(`com.damsac.jefe.pro.monthly`, $19.99/mo) + Paid Apps agreements; the App
 Privacy answers (exact clicks in `docs/store/SUBMISSION-KIT.md` §4); a sandbox
 purchase on device. **Nothing about billing has ever been observed working** —
 no product exists, so the paywall shows no price and the meter is untested in

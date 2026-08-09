@@ -289,7 +289,7 @@ Merged since the last handover: **#277** (StoreKit 2 + the free-tier meter +
 **#267**, which I rebased onto main and merged — a filed walk was still showing
 twice and that was the real half of the "random walks" report.
 
-**Monetization** is Jefe Pro at $12.99/mo, free tier 5 finished walks a month.
+**Monetization** is Jefe Pro at $19.99/mo, free tier 5 finished walks a month.
 Metering is on OUTPUT, not on tapping START; the gate runs at `startWalk()` so a
 refusal can never destroy a recording already made. Practice and demo walks are
 exempt — neither costs anything, and metering demo would break autoflow QA at

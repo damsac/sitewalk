@@ -222,7 +222,7 @@ Ordered by what blocks what, not by size.
 | 1.1 | StoreKit 2 products + purchase + **restore** | sac | **done (#277)** |
 | 1.2 | 5-walks/month meter | sac | **done (#277)** — keychain-backed, 16 tests |
 | 1.3 | Paywall at the limit | sac | **done (#277, #279)** |
-| 1.4 | Create the ASC subscription product | **Isaac** | `com.damsac.jefe.pro.monthly`, $12.99/mo, + Paid Apps agreements. Until this exists the paywall shows no price |
+| 1.4 | Create the ASC subscription product | **Isaac** | `com.damsac.jefe.pro.monthly`, **$19.99/mo** (superseded the $12.99 below on 2026-08-08 — see the GTM doc §8.3), + Paid Apps agreements. Until this exists the paywall shows no price |
 | 1.5 | Sandbox purchase on a device | **Isaac** | the one path no simulator can prove |
 | 1.6 | Proxy-side entitlement enforcement | sac/dam | **deliberately deferred** — v1 gates on-device. Pairs with App Attest (§5); the dollar caps bound the abuse until then |
 
