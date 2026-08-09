@@ -15,6 +15,36 @@
 
 import { authenticate, type AuthFailure } from './auth';
 import { costUsd, type Usage } from './pricing';
+import {
+  AttestError,
+  CHALLENGE_TTL_SECONDS,
+  TOKEN_TTL_SECONDS,
+  claimChallenge,
+  fromBase64,
+  isPlausibleKeyId,
+  issueChallenge,
+  loadAttestedKey,
+  mintToken,
+  saveAttestedKey,
+  verifyAssertion,
+  verifyAttestation,
+  verifyToken,
+} from './attest';
+
+/**
+ * How hard attestation is enforced.
+ *
+ * `off`     — the credential's token, if any, is ignored entirely.
+ * `monitor` — tokens are verified and the outcome is logged, but a failure
+ *             never blocks a request.
+ * `enforce` — `/v1/messages` requires a valid token.
+ *
+ * Deployed as `off` and moved forward one notch at a time. Going straight to
+ * `enforce` would brick every already-installed build the moment it lands,
+ * including the testers' — attestation has to be observed working on real
+ * devices before it is allowed to say no.
+ */
+export type AttestMode = 'off' | 'monitor' | 'enforce';
 
 export interface Env {
   /** Secret. The real `sk-ant-…` key. Never leaves this worker. */
@@ -29,6 +59,15 @@ export interface Env {
   PER_INSTALL_DAILY_CAP_USD?: string;
   /** Override for tests / staging. Defaults to Anthropic. */
   UPSTREAM_BASE_URL?: string;
+
+  /** `off` | `monitor` | `enforce`. Anything unrecognised means `off`. */
+  ATTEST_MODE?: string;
+  /** `TEAMID.bundle.id`. Required once attestation is anything but `off`. */
+  APP_ATTEST_APP_ID?: string;
+  /** Apple's App Attest root CA, PEM. Public data, but configured not pinned. */
+  APP_ATTEST_ROOT_CA?: string;
+  /** `"true"` to also accept development attestations. Never in production. */
+  APP_ATTEST_ALLOW_DEVELOPMENT?: string;
 }
 
 const DEFAULT_DAILY_CAP_USD = 25;
@@ -87,6 +126,149 @@ async function addSpend(kv: KVNamespace, key: string, delta: number): Promise<vo
   await kv.put(key, String(current + delta), { expirationTtl: COUNTER_TTL_SECONDS });
 }
 
+// ------------------------------------------------------------- attestation
+
+export function attestMode(env: Env): AttestMode {
+  const raw = env.ATTEST_MODE?.trim().toLowerCase();
+  if (raw === 'monitor' || raw === 'enforce') return raw;
+  // Anything else — unset, a typo, an empty string — is `off`. A misspelled
+  // mode must not fail into rejecting every request in the field.
+  return 'off';
+}
+
+/**
+ * The attestation config, or `null` if it is incomplete.
+ *
+ * Incomplete config in `enforce` mode is a hard 500 at the call site rather
+ * than a silent downgrade: an operator who asked for enforcement and quietly
+ * got none is strictly worse off than one whose deploy visibly fails.
+ */
+function attestConfig(env: Env) {
+  if (!env.APP_ATTEST_APP_ID || !env.APP_ATTEST_ROOT_CA) return null;
+  return {
+    appId: env.APP_ATTEST_APP_ID,
+    rootCaPem: env.APP_ATTEST_ROOT_CA,
+    allowDevelopment: env.APP_ATTEST_ALLOW_DEVELOPMENT === 'true',
+  };
+}
+
+function json(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/** Bodies here are tiny control-plane JSON — never walk content. See the header. */
+async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+  const text = await request.text();
+  if (text.length > 128 * 1024) throw new AttestError('body too large', 'too_large');
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
+    return parsed as Record<string, unknown>;
+  } catch {
+    throw new AttestError('body is not a JSON object', 'malformed_body');
+  }
+}
+
+function stringField(body: Record<string, unknown>, name: string): string {
+  const value = body[name];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new AttestError(`missing "${name}"`, 'missing_field');
+  }
+  return value;
+}
+
+async function handleAttestRoute(
+  path: string,
+  request: Request,
+  env: Env,
+  installId: string
+): Promise<Response> {
+  const config = attestConfig(env);
+  if (!config) {
+    return errorResponse(503, 'api_error', 'attestation is not configured on this deployment');
+  }
+
+  try {
+    if (path === '/v1/attest/challenge') {
+      const challenge = await issueChallenge(env.METER, installId);
+      return json(200, { challenge, expires_in: CHALLENGE_TTL_SECONDS });
+    }
+
+    const body = await readJsonBody(request);
+    const keyId = stringField(body, 'key_id');
+    const challenge = stringField(body, 'challenge');
+    if (!isPlausibleKeyId(keyId)) {
+      throw new AttestError('key id is not a base64 SHA-256', 'bad_key_id');
+    }
+
+    // Claimed BEFORE any expensive verification, so a flood of bogus
+    // attestations can't be used to burn CPU on a challenge that was never
+    // issued to this install.
+    if (!(await claimChallenge(env.METER, challenge, installId))) {
+      throw new AttestError('challenge is unknown, expired, or not yours', 'bad_challenge');
+    }
+    const challengeBytes = new TextEncoder().encode(challenge);
+
+    if (path === '/v1/attest/attest') {
+      const attestation = fromBase64(stringField(body, 'attestation'));
+      const verified = await verifyAttestation(
+        attestation,
+        fromBase64(keyId),
+        challengeBytes,
+        config
+      );
+      await saveAttestedKey(env.METER, keyId, {
+        spki: btoa(String.fromCharCode(...verified.spki)),
+        curve: verified.curve,
+        counter: 0,
+        installId,
+        attestedAt: Date.now(),
+      });
+      console.log(JSON.stringify({ event: 'attest_ok', installId, curve: verified.curve }));
+      return json(200, { ok: true });
+    }
+
+    if (path === '/v1/attest/assert') {
+      const stored = await loadAttestedKey(env.METER, keyId);
+      if (!stored) throw new AttestError('key has not been attested', 'unknown_key');
+      // A key belongs to the install that attested it. Without this, one
+      // attested device could mint tokens for every install id it likes and
+      // spread its spend across everyone else's caps.
+      if (stored.installId !== installId) {
+        throw new AttestError('key belongs to a different install', 'key_install_mismatch');
+      }
+
+      const assertion = fromBase64(stringField(body, 'assertion'));
+      const { counter } = await verifyAssertion(
+        assertion,
+        challengeBytes,
+        { spki: fromBase64(stored.spki), curve: stored.curve, counter: stored.counter },
+        config.appId
+      );
+      await saveAttestedKey(env.METER, keyId, { ...stored, counter });
+
+      const token = await mintToken(env.APP_SECRET, installId, keyId);
+      return json(200, { token, expires_in: TOKEN_TTL_SECONDS });
+    }
+
+    return errorResponse(404, 'not_found_error', 'unknown route');
+  } catch (error) {
+    if (error instanceof AttestError) {
+      // The code is a fixed enum, so this leaks nothing about the caller.
+      console.warn(JSON.stringify({ event: 'attest_failed', installId, code: error.code }));
+      return json(403, {
+        type: 'error',
+        error: { type: 'permission_error', message: error.message, code: error.code },
+      });
+    }
+    console.error(JSON.stringify({ event: 'attest_error', installId }));
+    return errorResponse(500, 'api_error', 'attestation check failed');
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -98,11 +280,15 @@ export default {
       });
     }
 
-    if (request.method !== 'POST' || url.pathname !== '/v1/messages') {
+    const isAttestRoute = url.pathname.startsWith('/v1/attest/');
+    if (request.method !== 'POST' || (url.pathname !== '/v1/messages' && !isAttestRoute)) {
       return errorResponse(404, 'not_found_error', 'unknown route');
     }
 
-    if (!env.ANTHROPIC_API_KEY || !env.APP_SECRET) {
+    // The attestation routes never call upstream, so they need the app secret
+    // but not the Anthropic key. Requiring both here would make attestation
+    // undeployable to a staging worker that has no key.
+    if (!env.APP_SECRET || (!isAttestRoute && !env.ANTHROPIC_API_KEY)) {
       // Misconfiguration must fail loudly and CLOSED. Forwarding without a key
       // would 401 confusingly; running without APP_SECRET would accept anyone.
       return errorResponse(500, 'api_error', 'proxy is not configured');
@@ -112,7 +298,43 @@ export default {
     if (!auth.ok) {
       return errorResponse(401, 'authentication_error', AUTH_FAILURE_MESSAGE[auth.reason]);
     }
-    const { installId } = auth.credential;
+    const { installId, attestToken } = auth.credential;
+
+    // Enrolment happens under Phase 1 auth alone — it has to, since a device
+    // cannot present an attestation token before it has attested.
+    if (isAttestRoute) {
+      return handleAttestRoute(url.pathname, request, env, installId);
+    }
+
+    const mode = attestMode(env);
+    if (mode !== 'off') {
+      if (!attestConfig(env)) {
+        // Asked to enforce, unable to. Fail closed and loudly rather than
+        // serving traffic an operator believes is being checked.
+        console.error(JSON.stringify({ event: 'attest_misconfigured', mode }));
+        return errorResponse(500, 'api_error', 'proxy is not configured');
+      }
+      const result = attestToken
+        ? await verifyToken(env.APP_SECRET, attestToken, installId)
+        : ({ ok: false, reason: 'malformed' } as const);
+
+      if (!result.ok) {
+        console.warn(
+          JSON.stringify({ event: 'attest_token_rejected', installId, mode, reason: result.reason }),
+        );
+        if (mode === 'enforce') {
+          // 401 rather than 403: the app's recovery is to re-attest and retry,
+          // which is what a client does with an authentication failure.
+          return errorResponse(
+            401,
+            'authentication_error',
+            'device attestation required; re-attest and retry',
+          );
+        }
+        // `monitor` — observed, counted, allowed through. This is the mode
+        // that tells us whether enforcement would have been safe.
+      }
+    }
 
     const today = dayKey(new Date());
     const globalKey = `spend:global:${today}`;

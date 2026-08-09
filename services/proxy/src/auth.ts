@@ -28,11 +28,31 @@
  */
 const PREFIX = 'jefe.';
 
+/**
+ * Phase 2 wire format: `jefeA.<installId>.<attestToken>~<appSecret>`.
+ *
+ * Same one-field constraint, one more value to carry. The `~` separator is
+ * deliberate rather than another dot: the token is itself dotted
+ * (`jat.<payload>.<mac>`), so a pure-dot format would need the parser to know
+ * the token's internal shape to find the secret. `~` appears in neither
+ * base64url nor an install id, so the boundary is unambiguous no matter how
+ * the token is later restructured.
+ *
+ * `jefe.` credentials keep working. Attestation is additive — a build that
+ * predates it must not stop being able to talk to the proxy.
+ */
+const PREFIX_ATTESTED = 'jefeA.';
+
 /** UUID-ish: hex and dashes, bounded so a huge value can't be used as a KV-key DoS. */
 const INSTALL_ID_RE = /^[a-zA-Z0-9-]{8,64}$/;
 
+/** Bounds the token before any crypto touches it. */
+const MAX_TOKEN_LENGTH = 512;
+
 export interface Credential {
   installId: string;
+  /** Present only on `jefeA.` credentials. Unverified at this layer. */
+  attestToken?: string;
 }
 
 export type AuthFailure = 'missing' | 'malformed' | 'bad_secret';
@@ -70,19 +90,35 @@ function timingSafeEqual(a: string, b: string): boolean {
 export function authenticate(headers: Headers, appSecret: string): AuthResult {
   const raw = readRawCredential(headers);
   if (!raw) return { ok: false, reason: 'missing' };
-  if (!raw.startsWith(PREFIX)) return { ok: false, reason: 'malformed' };
 
-  // Split off the prefix, then take the FIRST separator as the id/secret
-  // boundary — the secret itself may legitimately contain dots.
-  const rest = raw.slice(PREFIX.length);
+  // Check the longer prefix first — `jefeA.` also starts with `jefe`, though
+  // not with `jefe.`, so order is belt-and-braces rather than load-bearing.
+  const attested = raw.startsWith(PREFIX_ATTESTED);
+  if (!attested && !raw.startsWith(PREFIX)) return { ok: false, reason: 'malformed' };
+
+  // Split off the prefix, then take the FIRST separator as the id boundary —
+  // the secret itself may legitimately contain dots.
+  const rest = raw.slice((attested ? PREFIX_ATTESTED : PREFIX).length);
   const sep = rest.indexOf('.');
   if (sep <= 0) return { ok: false, reason: 'malformed' };
 
   const installId = rest.slice(0, sep);
-  const secret = rest.slice(sep + 1);
+  let remainder = rest.slice(sep + 1);
   if (!INSTALL_ID_RE.test(installId)) return { ok: false, reason: 'malformed' };
-  if (secret.length === 0) return { ok: false, reason: 'malformed' };
-  if (!timingSafeEqual(secret, appSecret)) return { ok: false, reason: 'bad_secret' };
 
-  return { ok: true, credential: { installId } };
+  let attestToken: string | undefined;
+  if (attested) {
+    const tilde = remainder.indexOf('~');
+    if (tilde <= 0) return { ok: false, reason: 'malformed' };
+    attestToken = remainder.slice(0, tilde);
+    remainder = remainder.slice(tilde + 1);
+    if (attestToken.length > MAX_TOKEN_LENGTH) return { ok: false, reason: 'malformed' };
+  }
+
+  if (remainder.length === 0) return { ok: false, reason: 'malformed' };
+  // The secret is still checked on attested credentials. Attestation adds a
+  // layer; it does not replace the one underneath it.
+  if (!timingSafeEqual(remainder, appSecret)) return { ok: false, reason: 'bad_secret' };
+
+  return { ok: true, credential: { installId, attestToken } };
 }

@@ -36,10 +36,74 @@ becomes downloadable by anyone rather than by testers you invited.
 the app asks the Secure Enclave for a hardware-backed key plus an attestation
 blob; the server validates that blob against Apple's certificate chain and
 pins the key id; every later request carries an assertion signed by that key.
-The seam for it is `authenticate()` in `src/auth.ts` — Phase 2 replaces that
-function's body and adds a key-id store. Nothing else in the worker changes.
 
-Until then, **the daily spend cap is the thing protecting you.** Keep it low.
+### Status: server half done, device half not
+
+`src/attest.ts` implements the verification, and it is wired in behind
+`ATTEST_MODE`, which ships as `off`. **Nothing about the running service has
+changed yet.** What is missing is the iOS side: `DCAppAttestService` key
+generation, the enrolment calls, token caching, and the credential change.
+
+Until the device half lands and has been soaked in `monitor`, **the daily spend
+cap is still the thing protecting you.** Keep it low.
+
+### The exchange
+
+```
+1.  app → POST /v1/attest/challenge        (Phase 1 credential)
+    srv → { challenge, expires_in }        one-time, 5 minutes
+
+2.  app   generates a Secure Enclave key, attests it over the challenge
+    app → POST /v1/attest/attest           { key_id, challenge, attestation }
+    srv   verifies the chain to Apple's root, stores the public key
+
+3.  app → POST /v1/attest/assert           { key_id, challenge, assertion }
+    srv → { token, expires_in }            1 hour
+
+4.  app → POST /v1/messages                credential carries the token
+```
+
+Steps 1–3 run once an hour, not once per message — asserting per request would
+double the round trips on the cellular link this app actually runs on.
+
+### The credential change
+
+`/v1/messages` has nowhere to put a token except the credential field itself,
+because the Rust provider sends `config.api_key` as the only caller-controlled
+header. So Phase 2 adds a second wire format alongside the first:
+
+```
+jefe.<installId>.<appSecret>                     # Phase 1, still accepted
+jefeA.<installId>.<attestToken>~<appSecret>      # Phase 2
+```
+
+The app secret is still checked on attested credentials. Attestation adds a
+layer; it does not remove the one underneath.
+
+### Rolling it out
+
+Move one notch at a time, and never skip `monitor`:
+
+| `ATTEST_MODE` | Behaviour |
+|---|---|
+| `off` (default) | Tokens ignored entirely. |
+| `monitor` | Tokens verified and logged; failures never block a request. |
+| `enforce` | `/v1/messages` requires a valid token. |
+
+`monitor` is what tells you whether `enforce` is safe. Watch for
+`attest_token_rejected` in the logs; the count should fall to roughly zero as
+builds carrying the device half roll out. Going straight to `enforce` bricks
+every already-installed build the moment it lands, testers included.
+
+Anything unrecognised in `ATTEST_MODE` means `off`, so a typo cannot lock the
+fleet out. But `monitor`/`enforce` with missing config is a hard 500 — asking
+for enforcement and quietly getting none is worse than a visibly failed deploy.
+
+### What is deliberately not implemented
+
+The attestation `receipt` is parsed but never sent to Apple for risk metrics or
+key-refresh checks. That is a separate Apple endpoint with its own auth, it is
+optional, and half-shipping it would be worse than not shipping it.
 
 ---
 
@@ -141,6 +205,18 @@ Covers pricing (including the deliberate over-estimate for unknown models),
 credential parsing and rejection, the credential-for-key swap, byte-identical
 body forwarding, both caps refusing *before* upstream is called, fail-closed on
 misconfiguration, and upstream error pass-through.
+
+The attestation tests build a **real certificate chain with real ECDSA keys**
+(`test/appattest-fixtures.ts`) rather than replaying a captured attestation.
+That is the point: holding the private keys means a test can change exactly one
+thing — the challenge, the counter, the aaguid, the signing CA — and assert
+that *that specific check* is what rejects it. A recorded blob can only ever
+prove one happy path, and every negative test against it degenerates into
+"garbage in, error out", which a verifier that rejects everything would also
+pass.
+
+What the synthetic chain cannot prove is that we accept **Apple's** real root.
+That is the residual risk, and the reason the rollout starts in `monitor`.
 
 These are **not** wired into the repo's GitHub Actions CI, which is Rust +
 iOS only. Run them locally before deploying.
