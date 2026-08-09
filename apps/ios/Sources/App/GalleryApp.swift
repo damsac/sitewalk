@@ -72,10 +72,12 @@ struct AppRoot: View {
                 licenseNumber: "44-1234", tradeKey: "landscape"
             ))
         }
-        // meter=N seeds the free-tier walk meter for the CURRENT month (parallel
-        // to autoprofile). The blocked-at-the-limit paywall is otherwise
-        // reachable only by finishing five real walks, which no headless
-        // screenshot run and no quick manual check can do. `meter=0` clears it.
+        // meter=N seeds the free-tier walk meter (parallel to autoprofile).
+        // The blocked-at-the-limit paywall is otherwise reachable only by
+        // finishing five real walks, which no headless screenshot run and no
+        // quick manual check can do. `meter=0` clears it — which is also the
+        // way to undo a lifetime allowance spent while testing, since the
+        // keychain survives delete-and-reinstall by design.
         if let arg = args.first(where: { $0.hasPrefix("meter=") }),
            let count = Int(arg.dropFirst("meter=".count)) {
             WalkMeter.save(WalkAllowance.Record(count: max(0, count)))
@@ -249,6 +251,21 @@ struct AppRoot: View {
                 if model.phase == .notes {
                     model.buildPrimaryDocument()
                     try? await Task.sleep(for: .seconds(2))
+                }
+            }
+            // editline=1 opens review's line editor on the first line (and
+            // editline=new on a freshly added one). Same reason as `newjob=1`:
+            // simctl cannot tap, and shipping an unseen UI surface is how the
+            // inline FILE chip ended up 130pt tall.
+            if autoflowRounds > 0, model.phase == .review,
+               let arg = ProcessInfo.processInfo.arguments.first(where: {
+                   $0.hasPrefix("editline=")
+               }) {
+                try? await Task.sleep(for: .seconds(1))
+                if arg == "editline=new" {
+                    model.addLine()
+                } else if let first = model.document?.rows.first {
+                    model.beginEdit(first)
                 }
             }
             // Screenshot-automation hook: render the PDF unattended.

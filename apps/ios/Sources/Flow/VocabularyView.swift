@@ -98,21 +98,15 @@ struct VocabularyView: View {
 
             // Terms
             if model.vocabulary.isEmpty {
-                Text("No terms yet. Add the words your crew actually says.\n\u{201C}boxwood\u{201D} · \u{201C}GFCI\u{201D} · \u{201C}Hollis\u{201D}")
-                    .font(Theme.F.mono(8.5))
-                    .tracking(0.6)
-                    .foregroundStyle(Theme.C.ink45)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(5)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 26)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.S.radiusCard)
-                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                            .foregroundStyle(Theme.C.ink45)
-                    )
-                    .padding(.horizontal, Theme.S.screenPad)
-                    .padding(.top, 16)
+                // The board's idiom, not a third one — see `EmptyPanel`. This
+                // was the dashed box the board's own comment used to cite as
+                // the house style while the board did something else.
+                EmptyPanel(
+                    "No terms yet. Add the words your crew actually says — "
+                        + "\u{201C}boxwood\u{201D}, \u{201C}GFCI\u{201D}, \u{201C}Hollis\u{201D}."
+                )
+                .padding(.horizontal, Theme.S.screenPad)
+                .padding(.top, 16)
             } else {
                 ScrollView {
                     VStack(spacing: 0) {

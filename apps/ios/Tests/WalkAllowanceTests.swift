@@ -148,6 +148,54 @@ final class WalkAllowanceTests: XCTestCase {
         )
     }
 
+    // MARK: What a finished walk spends
+
+    func testAWalkIsNotCountedWhileThereIsNothingToSell() {
+        // The defect: the meter ran through the whole pre-launch window, so
+        // every TestFlight tester was silently burning a LIFETIME allowance
+        // against a product that could not be bought — and would have hit
+        // zero, having never had a free evaluation, the day the product went
+        // live. Isaac's first walk after a reinstall reported "0 free walks
+        // left" (2026-08-09) while the same sheet said walks weren't limited.
+        XCTAssertFalse(
+            WalkAllowance.shouldCount(isPro: false, canSubscribe: false, isMeteredWalk: true)
+        )
+    }
+
+    func testAWalkIsCountedOnceTheLimitIsRealAgain() {
+        // The counting half must be conditional, not off: the same walk counts
+        // the moment a product is purchasable, or the free tier is unbounded.
+        XCTAssertTrue(
+            WalkAllowance.shouldCount(isPro: false, canSubscribe: true, isMeteredWalk: true)
+        )
+    }
+
+    func testProAndUnmeteredWalksNeverCount() {
+        XCTAssertFalse(
+            WalkAllowance.shouldCount(isPro: true, canSubscribe: true, isMeteredWalk: true),
+            "Pro is unmetered — no reason to keep a count nobody reads"
+        )
+        XCTAssertFalse(
+            WalkAllowance.shouldCount(isPro: false, canSubscribe: true, isMeteredWalk: false),
+            "practice runs and demo mode cost nothing the free tier exists to bound"
+        )
+    }
+
+    /// The two halves agree: a walk is only spent under exactly the conditions
+    /// that would have refused it. Drift here is invisible — it shows up
+    /// months later as an allowance that ran out without ever being enforced.
+    func testCountingAndBlockingAgreeOnWhetherTheLimitIsInForce() {
+        for canSubscribe in [true, false] {
+            let counted = WalkAllowance.shouldCount(
+                isPro: false, canSubscribe: canSubscribe, isMeteredWalk: true
+            )
+            let enforced = WalkAllowance.decide(
+                isPro: false, record: record(5), limit: 5, canSubscribe: canSubscribe
+            ) == .blocked(used: 5, limit: 5)
+            XCTAssertEqual(counted, enforced, "canSubscribe=\(canSubscribe)")
+        }
+    }
+
     // MARK: Recording a finish
 
     func testFinishIncrements() {

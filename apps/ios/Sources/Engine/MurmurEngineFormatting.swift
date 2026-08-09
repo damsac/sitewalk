@@ -37,16 +37,13 @@ extension MurmurEngine {
         }
     }
 
-    private static let centsFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter
-    }()
-
+    /// Cents → "$285" / "$125.50". Shared with the total (`DocumentModel.money`)
+    /// so a line and the sum underneath it can never disagree about how money
+    /// is written — and so a price with cents renders both digits instead of
+    /// the "$125.5" a bare decimal formatter produces.
     static func amountString(_ cents: Int64?) -> String {
         guard let cents else { return "——" }
-        let dollars = Double(cents) / 100.0
-        return "$" + (centsFormatter.string(from: NSNumber(value: dollars)) ?? "\(dollars)")
+        return DocumentModel.money(cents: Int(cents))
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -119,7 +116,14 @@ extension MurmurEngine {
             subWarn: line.isGap,
             hint: nil, // Deferred 4: price-book autofill hint
             qty: line.qty,
-            amount: amountString(line.amountCents),
+            // No amount and not a gap = this document has no money story for
+            // this line, so the column stays EMPTY rather than showing "——".
+            // A dash means "a number is missing here"; on a work order —
+            // which must never carry prices — nothing is missing, and a
+            // column of dashes read as a document that had failed to price
+            // itself. (The demo engine has always stripped these; the real
+            // one didn't, so the two engines disagreed on the same document.)
+            amount: line.amountCents.map(amountString) ?? (line.isGap ? "——" : ""),
             isEdit: false, // Deferred 4: pre-filled-from-history affordance
             isGap: line.isGap,
             itemId: line.itemId
@@ -132,12 +136,21 @@ extension MurmurEngine {
             totalKey: totalLabel(payload.totalLabelKey),
             staticTotal: payload.staticTotalCents.map(amountString) ?? "——",
             note: note(for: payload.docKind, queued: payload.queued),
-            send: sendLabel(for: payload.docKind)
+            send: sendLabel(for: payload.docKind),
+            // Built-in kinds answer directly; a custom schema (Plan 19) is
+            // priced iff core actually rendered money onto it — an amount or
+            // a gap on any line. Guessing from the kind name alone would tell
+            // an operator's own document type what it is allowed to be.
+            pricesShown: DocKinds.isPricingKind(payload.docKind)
+                || payload.lines.contains { $0.amountCents != nil || $0.isGap }
         )
     }
 
     static func emptyDocument() -> DocumentModel {
-        DocumentModel(rows: [], totalKey: "TOTAL", staticTotal: "——", note: "", send: "SEND")
+        DocumentModel(
+            rows: [], totalKey: "TOTAL", staticTotal: "——", note: "", send: "SEND",
+            pricesShown: false
+        )
     }
 
     // MARK: - Notes mapping (Plan 13 D2/D3; Plan 14 D2-14 grows it with buckets)

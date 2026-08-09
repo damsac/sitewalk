@@ -296,6 +296,16 @@ final class AppModel {
     var document: DocumentModel?
     var editingRowID: UUID?
     var editText = ""
+    /// The line's description, edited alongside its amount. Isaac, 2026-08-09:
+    /// "the user should be able to edit the name of any of the lines, and also
+    /// delete or add a line should they choose." A transcript gets a word
+    /// wrong roughly as often as it gets a number wrong, and until now only
+    /// the number could be fixed on the paper.
+    var editTitle = ""
+    /// True while the row being edited was just added by ADD LINE and has
+    /// never had a description. Dismissing without typing one must leave no
+    /// blank line behind on the document.
+    var editingRowIsNew = false
     var shareURL: URL?
 
     // Not fully `private`: read from AppModel+Photos.swift (a same-module
@@ -827,9 +837,15 @@ final class AppModel {
             // Metered on OUTPUT, not on tapping START: the count moves only
             // once a walk has actually produced notes. Someone who starts a
             // walk, realizes they're at the wrong address, and discards it has
-            // received nothing and must not be charged for it. Pro is unmetered
-            // — no reason to keep a count nobody reads.
-            if metered && !self.entitlement.isPro {
+            // received nothing and must not be charged for it. The rest of the
+            // rule — Pro, practice, demo, and the `canSubscribe` clause that
+            // stops a whole TestFlight cohort burning its allowance against a
+            // product nobody can buy — is `WalkAllowance.shouldCount`.
+            if WalkAllowance.shouldCount(
+                isPro: self.entitlement.isPro,
+                canSubscribe: self.entitlement.canSubscribe,
+                isMeteredWalk: metered
+            ) {
                 WalkMeter.recordFinishedWalk()
             }
             // A FINISHED walk is a walk, whether or not a document was ever
@@ -1520,33 +1536,131 @@ final class AppModel {
 
     // MARK: Review interactions
 
+    /// Provenance for a line the operator added at review, kept off the walk's
+    /// own vocabulary ("NOT HEARD", "FILLED BY YOU") because it is a different
+    /// claim: this line was never spoken at all.
+    static let addedLineNote = "ADDED BY YOU"
+
     func beginEdit(_ row: DocRowFixture) {
         editingRowID = row.id
-        editText = row.amount.hasPrefix("$") ? String(row.amount.dropFirst()) : ""
+        editTitle = row.title
+        editingRowIsNew = false
+        // Grouping separator stripped: the field is a decimal pad, which has
+        // no comma key, so leaving one in gives the operator a value they
+        // cannot retype.
+        editText = row.amount.hasPrefix("$")
+            ? row.amount.dropFirst().replacingOccurrences(of: ",", with: "")
+            : ""
     }
 
+    /// Appends a blank line and opens it for editing.
+    ///
+    /// The line is added to the document immediately rather than on commit so
+    /// there is only ever one code path that writes a row — but it is marked
+    /// `editingRowIsNew`, so a sheet dismissed without a description takes the
+    /// blank row back out with it. An operator who taps ADD LINE and changes
+    /// their mind should not have to then delete something.
+    func addLine() {
+        guard var doc = document else { return }
+        let row = DocRowFixture(
+            title: "",
+            sub: Self.addedLineNote,
+            subWarn: false,
+            qty: "",
+            amount: doc.pricesShown ? "——" : "",
+            isGap: doc.pricesShown
+        )
+        doc.rows.append(row)
+        document = doc
+        editingRowID = row.id
+        editTitle = ""
+        editText = ""
+        editingRowIsNew = true
+    }
+
+    /// Removes the line being edited. Deliberately not a swipe: this screen is
+    /// read on a job site with gloves on, and a swipe that deletes a line off
+    /// an estimate is too easy to do by accident while scrolling.
+    func removeEditingLine() {
+        guard let id = editingRowID, var doc = document else { return }
+        doc.rows.removeAll { $0.id == id }
+        document = doc
+        editingRowID = nil
+        editingRowIsNew = false
+    }
+
+    /// Writes the sheet back onto the line.
+    ///
+    /// Both fields are optional edits, and each one's EMPTY case is a real
+    /// instruction rather than a no-op:
+    /// - An emptied description on an existing line keeps the old one (there
+    ///   is no such thing as an untitled line on a document); on a line just
+    ///   added it means "never mind", and the line goes.
+    /// - An emptied amount returns the line to an honest gap. Silently
+    ///   keeping the old number would be the one failure this screen exists
+    ///   to prevent — a price on a sent estimate that nobody agreed to.
     func commitEdit() {
         guard let id = editingRowID, var doc = document,
               let index = doc.rows.firstIndex(where: { $0.id == id }) else {
             editingRowID = nil
+            editingRowIsNew = false
             return
         }
-        let cleaned = editText.replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespaces)
-        if let value = Int(cleaned), value > 0 {
-            let old = doc.rows[index]
-            doc.rows[index] = DocRowFixture(
-                title: old.title,
-                sub: old.isGap ? "FILLED BY YOU" : old.sub,
-                subWarn: false,
-                hint: old.hint,
-                qty: old.qty,
-                amount: "$\(value)",
-                isEdit: false,
-                isGap: false
-            )
-            document = doc
+        let title = editTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty && editingRowIsNew {
+            removeEditingLine()
+            return
         }
+        let old = doc.rows[index]
+        var row = old
+        row.title = title.isEmpty ? old.title : title
+        row.isEdit = false
+
+        // A document that carries no money keeps its amount column empty
+        // whatever is typed — a work order handed to a crew must not grow a
+        // price (the same rule `DemoWalkEngine.buildDocument` documents), so
+        // the sheet doesn't offer the field and this ignores it.
+        if doc.pricesShown {
+            let cleaned = editText
+                .replacingOccurrences(of: ",", with: "")
+                .replacingOccurrences(of: "$", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            // A line the operator added themselves keeps saying so through
+            // every edit. "FILLED BY YOU" and "NOT HEARD" are both claims
+            // about what the WALK produced, and neither is true of a line the
+            // walk never produced.
+            let added = old.sub == Self.addedLineNote
+            // Parsed as a decimal, not an Int: a line that already carries
+            // cents ("$125.50") has to survive being opened and re-saved, and
+            // an Int parse silently refused it.
+            if let dollars = Double(cleaned), dollars > 0 {
+                row.amount = DocumentModel.money(cents: Int((dollars * 100).rounded()))
+                row.isGap = false
+                row.subWarn = false
+                if old.isGap && !added { row.sub = "FILLED BY YOU" }
+            } else if cleaned.isEmpty {
+                // Erased on purpose. Back to an honest gap — keeping the old
+                // number would be the one failure this screen exists to
+                // prevent, a price on a sent estimate nobody agreed to.
+                row.amount = "——"
+                row.isGap = true
+                if !added {
+                    row.sub = "NOT HEARD — TAP OR SAY IT"
+                    row.subWarn = true
+                }
+            }
+            // Anything else typed (letters, a stray symbol) leaves the amount
+            // exactly as it was: we cannot read it, so we do not act on it.
+        }
+
+        // `itemId` rides along on the copy. The old code rebuilt the row field
+        // by field and dropped it, which detached the row from the photos
+        // taken against that item mid-walk (`ReviewView.photos(for:)` joins on
+        // it) — so filling one gap quietly emptied that row's contact sheet.
+        doc.rows[index] = row
+        document = doc
         editingRowID = nil
+        editingRowIsNew = false
     }
 
     // MARK: Send

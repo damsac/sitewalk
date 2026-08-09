@@ -150,6 +150,17 @@ struct PaywallView: View {
     }
 
     private var subtitle: String {
+        // With nothing purchasable, the gate declines to block and the meter
+        // declines to count (see `WalkAllowance.decide` and `AppModel`'s
+        // finish path), so ANY remaining-walks number here is a claim about a
+        // limit that is not in force. Isaac's TestFlight shot, 2026-08-09:
+        // "0 free walks left" sitting directly above this same sheet's "Your
+        // walks aren't limited while this is down." One of those was a lie,
+        // and it was this one. The board's plan chip already hides itself on
+        // exactly this condition — this is the second surface catching up.
+        guard entitlement.canSubscribe else {
+            return "Pro stops counting walks altogether."
+        }
         switch reason {
         case .blocked:
             // No "they reset on the 1st" any more — they don't. Saying plainly
