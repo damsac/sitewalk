@@ -357,6 +357,17 @@ struct ReviewView: View {
                 BlockLabel("SET")
             }
             .buttonStyle(RaisedBlockStyle(height: Theme.S.buttonHeight, leadingDot: false))
+
+            // Removing is not the same as clearing, and the copy has to say
+            // so: clearing leaves a gap you owe a value to, this takes the
+            // block off the document. Ink rather than red, and last —
+            // the same call DISCARD makes on this screen.
+            Button { model.removeEditingField() } label: {
+                Text("Remove this block")
+                    .font(Theme.F.ui(13, .semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.wellChip)
             Spacer(minLength: 0)
         }
         .padding(Theme.S.screenPad)

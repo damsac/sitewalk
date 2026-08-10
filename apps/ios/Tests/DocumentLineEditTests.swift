@@ -223,6 +223,97 @@ final class DocumentLineEditTests: XCTestCase {
         XCTAssertEqual(model.document?.rows[0].amount, "$125.50")
     }
 
+    // MARK: The authored blocks
+
+    private func modelWithSections() -> AppModel {
+        let model = model()
+        model.document?.sections = [
+            DocSectionFixture(key: "scope", label: "SCOPE OF WORK", fields: [
+                DocFieldFixture(
+                    key: "scope_summary", label: "Scope of work",
+                    value: "Refresh the front beds.", isGap: false, isParagraph: true
+                ),
+            ]),
+            DocSectionFixture(key: "site", label: "SITE NOTES", fields: [
+                DocFieldFixture(
+                    key: "access", label: "Access", value: "Gate code 4412.",
+                    isGap: false, isParagraph: true
+                ),
+                DocFieldFixture(
+                    key: "safety", label: "Safety", value: nil, isGap: true, isParagraph: true
+                ),
+            ]),
+        ]
+        return model
+    }
+
+    func testASummaryBlockIsEditable() {
+        let model = modelWithSections()
+        let section = model.document!.sections[0]
+        model.beginFieldEdit(section: section, field: section.fields[0])
+        XCTAssertEqual(model.editTitle, "Refresh the front beds.")
+
+        model.editTitle = "Refresh the front beds and re-cut the edging."
+        model.commitFieldEdit()
+
+        XCTAssertEqual(
+            model.document?.sections[0].fields[0].value,
+            "Refresh the front beds and re-cut the edging."
+        )
+        XCTAssertFalse(model.document!.sections[0].fields[0].isGap)
+        XCTAssertNil(model.editingField, "the sheet closes")
+    }
+
+    func testAnEmptiedBlockGoesBackToAGapRatherThanVanishing() {
+        let model = modelWithSections()
+        let section = model.document!.sections[0]
+        model.beginFieldEdit(section: section, field: section.fields[0])
+        model.editTitle = "   "
+        model.commitFieldEdit()
+
+        XCTAssertNil(model.document?.sections[0].fields[0].value)
+        XCTAssertTrue(
+            model.document!.sections[0].fields[0].isGap,
+            "cleared means 'I still owe this a value', not 'delete it'"
+        )
+        XCTAssertEqual(model.document?.sections.count, 2, "the block is still on the document")
+    }
+
+    func testABlockCanBeRemovedOutright() {
+        let model = modelWithSections()
+        let site = model.document!.sections[1]
+        model.beginFieldEdit(section: site, field: site.fields[1]) // Safety
+        model.removeEditingField()
+
+        XCTAssertEqual(model.document?.sections[1].fields.map(\.key), ["access"])
+        XCTAssertEqual(model.document?.sections.count, 2, "the section survives its sibling")
+        XCTAssertNil(model.editingField)
+    }
+
+    func testASectionGoesWithItsLastField() {
+        let model = modelWithSections()
+        let scope = model.document!.sections[0]
+        model.beginFieldEdit(section: scope, field: scope.fields[0])
+        model.removeEditingField()
+
+        XCTAssertEqual(
+            model.document?.sections.map(\.key), ["site"],
+            "an empty heading is the one thing the operator cannot fix any other way"
+        )
+    }
+
+    func testTheTwoEditorsAreMutuallyExclusive() {
+        // Both sheets are bound to their own property; leaving the other set
+        // presents them on top of each other.
+        let model = modelWithSections()
+        let section = model.document!.sections[0]
+        model.beginFieldEdit(section: section, field: section.fields[0])
+        XCTAssertNil(model.editingRowID)
+
+        model.beginEdit(model.document!.rows[0])
+        XCTAssertNil(model.editingField)
+    }
+
     func testTheTotalFollowsEveryEdit() {
         let model = model()
         XCTAssertEqual(model.document?.totalValue, "$200")
