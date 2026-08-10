@@ -374,6 +374,25 @@ fn walk_field(key: &str, kind: &str, label: &str, hint: &str) -> SchemaField {
     }
 }
 
+/// One field the OPERATOR completes at review. Never offered to the model,
+/// and blank is a perfectly good final state.
+///
+/// Isaac, 2026-08-10: *"have the AI fill in everything it's confident in and
+/// present optional fields to be filled in by the user before sending."* That
+/// is this fill mode, which Plan 19 defined and nothing had used — the
+/// difference between a document that is INCOMPLETE and one that simply has
+/// somewhere for you to type.
+fn manual_field(key: &str, kind: &str, label: &str) -> SchemaField {
+    SchemaField {
+        key: key.into(),
+        kind: kind.into(),
+        label: label.into(),
+        fill: "manual".into(),
+        static_value: None,
+        hint: None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn builtin_schema(
     id: &str,
@@ -444,12 +463,17 @@ pub fn builtin_schemas() -> Vec<DocumentSchema> {
         builtin_schema(
             BUILTIN_SCHEMA_ID_ESTIMATE, "estimate", "Estimate", "EST", None, true,
             ("sum", "total"), "inclusion",
-            vec![filled("scope", "Scope of Work", vec![walk_field(
+            vec![
+                filled("client", "Prepared For", vec![manual_field(
+                    "prepared_for", "long_text", "Prepared for",
+                )]),
+                filled("scope", "Scope of Work", vec![walk_field(
                 "scope_summary", "long_text", "Scope of work",
                 "2-3 plain sentences a client can read, in FUTURE tense: what will be done, \
                  where on the property, and anything notable about how or in what order. \
                  No prices — they are on the lines.",
-            )])],
+                )]),
+            ],
         ),
         // INVOICE — the same document after the fact, and the difference is
         // not cosmetic: an estimate offers, an invoice demands. Past tense,
@@ -457,11 +481,16 @@ pub fn builtin_schemas() -> Vec<DocumentSchema> {
         builtin_schema(
             BUILTIN_SCHEMA_ID_INVOICE, "invoice", "Invoice", "INV", None, true,
             ("sum", "amount_due"), "inclusion",
-            vec![filled("work", "Work Performed", vec![walk_field(
+            vec![
+                filled("client", "Prepared For", vec![manual_field(
+                    "prepared_for", "long_text", "Prepared for",
+                )]),
+                filled("work", "Work Performed", vec![walk_field(
                 "work_summary", "long_text", "Work performed",
                 "2-3 plain sentences in PAST tense: what was actually done, where, and \
                  anything the client should know about the finished work. No prices.",
-            )])],
+                )]),
+            ],
         ),
         // WORK ORDER — the only one of these written for the crew, and the
         // reason it carries no money: a sub who sees the client price bids

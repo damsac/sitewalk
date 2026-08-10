@@ -1600,7 +1600,11 @@ final class AppModel {
         }
         let value = editTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         doc.sections[sectionIndex].fields[fieldIndex].value = value.isEmpty ? nil : value
-        doc.sections[sectionIndex].fields[fieldIndex].isGap = value.isEmpty
+        // An emptied OPTIONAL field goes back to "TAP TO ADD", not to a
+        // warning gap — the operator declining to name a client has not left
+        // the document incomplete.
+        doc.sections[sectionIndex].fields[fieldIndex].isGap =
+            value.isEmpty && !doc.sections[sectionIndex].fields[fieldIndex].isOptional
         document = doc
         editingField = nil
     }

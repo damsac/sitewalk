@@ -163,7 +163,10 @@ extension MurmurEngine {
                 key: field.key,
                 label: field.label,
                 value: field.value,
-                isGap: field.isGap,
+                // A manual field is never "missing" — nothing was expected to
+                // fill it but the operator.
+                isGap: field.isGap && field.fill != "manual",
+                isOptional: field.fill == "manual",
                 isParagraph: field.kind == "long_text"
             ))
         }

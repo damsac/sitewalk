@@ -55,7 +55,12 @@ struct DocSectionFixture: Identifiable {
     /// A section with nothing written in it at all is not rendered — an
     /// all-gap block is a heading over an empty box, which reads as a broken
     /// screen rather than as an honest blank.
-    var hasContent: Bool { fields.contains { !$0.isGap } }
+    ///
+    /// Keyed on a real VALUE rather than the gap flag: an unfilled OPTIONAL
+    /// field is not a gap (blank is a fine final state for it) but it is also
+    /// not content, and a PREPARED FOR heading over nothing is exactly the
+    /// empty box this guard exists to prevent.
+    var hasContent: Bool { fields.contains { !($0.value ?? "").isEmpty } }
 }
 
 struct DocFieldFixture: Identifiable {
@@ -65,6 +70,14 @@ struct DocFieldFixture: Identifiable {
     /// `nil` = a truthful gap: nothing about this was said on the walk.
     var value: String?
     var isGap: Bool
+    /// The operator fills this one, not the walk (`fill: "manual"`).
+    ///
+    /// Blank is a perfectly good FINAL state for these, which is why they are
+    /// not gaps: a gap says the document is incomplete and nags accordingly,
+    /// while an optional field is just somewhere to type. Isaac, 2026-08-10:
+    /// *"have the AI fill in everything it's confident in and present optional
+    /// fields to be filled in by the user before sending."*
+    var isOptional: Bool = false
     /// `long_text` sets its own paragraph; `text` sits inline beside its label.
     var isParagraph: Bool
 }
