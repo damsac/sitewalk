@@ -196,10 +196,25 @@ pub(crate) async fn price_items(
          themselves in seconds. Omitting an item is always correct. You may price only items \
          from the given list, by their exact item_id.{memory_block}"
     );
+    // The total is a CEILING TO CHECK AGAINST, never a budget to allocate.
+    //
+    // It used to say "allocate line prices consistent with this", which is an
+    // instruction to invent: on Isaac's walk (2026-08-10) the operator stated
+    // four line prices summing to $1,250 and the pass put $1,250 — the whole
+    // total — on "Prune five pear trees", a line he never priced. It defeated
+    // the narrowed rule above single-handedly, because the rule says where
+    // prices come from and this sentence said to make some up.
+    //
+    // A stated total is still worth sending: it catches a line priced far
+    // beyond what the whole job was quoted at. It just must not become a pot
+    // to distribute.
     let hint_block = spoken_total_cents
         .map(|cents| {
             format!(
-                "\n\nOperator's stated target total: ${:.2} — allocate line prices consistent with this.",
+                "\n\nThe operator quoted ${:.2} for the whole job. Use this ONLY as a \
+                 sanity check on prices you already have grounds for — never as a budget to \
+                 distribute across the lines, and never as a reason to price a line you would \
+                 otherwise leave alone.",
                 cents as f64 / 100.0
             )
         })
@@ -788,7 +803,24 @@ impl DocumentBuilder {
             .cloned()
             .collect();
         if priced && !unpriced.is_empty() {
-            let hint = self.session_spoken_total(session_id)?;
+            // The stated grand total is deliberately NOT sent (Plan 13 D5a's
+            // hint, retired 2026-08-10). Its only job was allocation — "spread
+            // line prices consistent with this" — and allocation is exactly
+            // the invention Isaac ruled out: *"the prices should only get
+            // filled in if it's spoken by the user or we have the price the
+            // user has used in the past."*
+            //
+            // Rewording it to "sanity check only" was not enough: across four
+            // real runs of the same walk it still put the entire $1,250 total
+            // onto a line the operator never priced, once. A number that wrong
+            // on a client's estimate one time in four is not a hint, and no
+            // prompt sentence outranks a number sitting in the context.
+            //
+            // The capture itself stays (`session_spoken_total` /
+            // `session_meta`): it is honest data, and a future ceiling check —
+            // "this line alone exceeds the whole quoted job" — is a real use
+            // that does not create prices.
+            let hint = None;
             let memory_prompt = self
                 .memory
                 .lock()
@@ -899,6 +931,13 @@ impl DocumentBuilder {
     /// on success and returns its `spoken_total_cents` scalar. `None` when no
     /// meta artifact exists, or it exists but the field is absent (no total
     /// was clearly stated, R6).
+    ///
+    /// Caller-less since the pricing hint was retired (2026-08-10) — kept, not
+    /// deleted, because the CAPTURE is still live: `process()` writes the
+    /// artifact, and reading it back is the seam a future ceiling check would
+    /// use ("this one line exceeds the whole quoted job"). That is a real use
+    /// that does not create prices, unlike the hint that was removed.
+    #[allow(dead_code)]
     fn session_spoken_total(&self, session_id: &str) -> Result<Option<i64>, CoreError> {
         let artifacts = self.locked()?.list_artifacts_for_session(session_id)?;
         let meta: Option<&Artifact> = artifacts.iter().rev().find(|a| a.kind == "session_meta");
@@ -1416,19 +1455,33 @@ mod tests {
         assert!(docs.is_empty(), "empty walk must not persist a document artifact");
     }
 
+    /// The stated grand total never reaches the pricing prompt (Plan 13 D5a's
+    /// hint, retired 2026-08-10 — see the call site). It was an instruction to
+    /// allocate, and allocation is invention: across four real runs of the
+    /// same walk it put the operator's whole $1,250 quote onto a line he never
+    /// priced, once. The capture itself is untouched and still readable.
     #[tokio::test]
-    async fn build_threads_the_spoken_total_hint_and_absence_when_no_meta_artifact() {
-        let (store, sid) = processed_session_with_items(&[("todo", "mulch"), ("safety", "loose railing")]);
+    async fn the_stated_total_never_reaches_the_pricing_prompt() {
+        let (store, sid) =
+            processed_session_with_items(&[("todo", "mulch"), ("safety", "loose railing")]);
         let a1 = store.list_items_for_session(&sid).unwrap()[0].id.clone();
         store
-            .add_artifact(&sid, "session_meta", "meta", &serde_json::json!({"spoken_total_cents": 120000}).to_string())
+            .add_artifact(
+                &sid,
+                "session_meta",
+                "meta",
+                &serde_json::json!({"spoken_total_cents": 120000}).to_string(),
+            )
             .unwrap();
         let store = Arc::new(Mutex::new(store));
 
-        let provider = Arc::new(MockProvider::new(vec![tool_use(
-            "price_items",
-            serde_json::json!({"prices": [{"item_id": a1, "amount_cents": 95000}]}),
-        )]));
+        let provider = Arc::new(MockProvider::new(vec![
+            tool_use(
+                "price_items",
+                serde_json::json!({"prices": [{"item_id": a1, "amount_cents": 95000}]}),
+            ),
+            compose_response(serde_json::json!([]), serde_json::json!([])),
+        ]));
         let b = builder(store.clone(), provider.clone());
         b.build(&sid, "estimate").await.unwrap();
 
@@ -1436,23 +1489,19 @@ mod tests {
         let ContentBlock::Text { text } = &reqs[0].messages[0].content[0] else {
             panic!("expected text content");
         };
-        assert!(text.contains("1200.00"), "the spoken total hint reaches the pricing prompt: {text}");
+        assert!(!text.contains("1200.00"), "the total must not reach the pricing prompt: {text}");
+        assert!(!text.to_lowercase().contains("total"), "nor any framing of it: {text}");
 
-        // A session with no session_meta artifact gets no hint line at all.
-        let (store2, sid2) = processed_session_with_items(&[("todo", "haul")]);
-        let a2 = store2.list_items_for_session(&sid2).unwrap()[0].id.clone();
-        let store2 = Arc::new(Mutex::new(store2));
-        let provider2 = Arc::new(MockProvider::new(vec![tool_use(
-            "price_items",
-            serde_json::json!({"prices": [{"item_id": a2, "amount_cents": 5000}]}),
-        )]));
-        let b2 = builder(store2, provider2.clone());
-        b2.build(&sid2, "estimate").await.unwrap();
-        let reqs2 = provider2.requests();
-        let ContentBlock::Text { text: text2 } = &reqs2[0].messages[0].content[0] else {
-            panic!("expected text content");
-        };
-        assert!(!text2.contains("stated target total"), "no hint line without a meta artifact: {text2}");
+        // The capture still works — it is honest data, and a future ceiling
+        // check is a real use that does not create prices.
+        let guard = store.lock().unwrap();
+        let meta = guard
+            .list_artifacts_for_session(&sid)
+            .unwrap()
+            .into_iter()
+            .find(|a| a.kind == "session_meta")
+            .expect("the artifact is still written");
+        assert!(meta.body.contains("120000"));
     }
 
     // ---- Plan 19 Stage 4: schema-driven build (launch-safety) -----------
