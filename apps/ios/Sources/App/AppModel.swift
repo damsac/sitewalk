@@ -1582,6 +1582,11 @@ final class AppModel {
 
     func beginEdit(_ row: DocRowFixture) {
         editingRowID = row.id
+        // Mutually exclusive with the field editor, in BOTH directions: the
+        // two sheets are bound to these two properties independently, so
+        // leaving the other set would present them on top of each other.
+        // `beginFieldEdit` already clears this one.
+        editingField = nil
         editTitle = row.title
         editingRowIsNew = false
         // Grouping separator stripped: the field is a decimal pad, which has

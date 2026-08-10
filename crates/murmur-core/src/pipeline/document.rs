@@ -312,29 +312,46 @@ fn compose_document_tool_spec(wants_lines: bool, wants_assignee: bool) -> ToolSp
 /// price, "strip the old bark before laying — watch the irrigation heads"
 /// for the crew doing it, and "south slope, three shingles lifted at the
 /// ridge" for whoever reads the record next year.
-fn line_brief(line_detail: &str) -> Option<&'static str> {
-    match line_detail {
-        "inclusion" => Some(
+fn line_brief(line_detail: &str) -> Option<String> {
+    // The rule that stops this pass padding, appended to every brief so it
+    // cannot drift out of one of them.
+    //
+    // It is here because the first real-API run produced it: handed the item
+    // "Strip old bark from front beds", the model wrote back "Strip old bark
+    // from front beds before mulching." — new words, no new information, on
+    // every single line. That is worse than a blank second line. It doubles
+    // the length of the document AND teaches the reader that the second line
+    // is noise, so they skim past the one line that actually carries a
+    // warning. Mocks cannot catch this: the shape was perfect.
+    const NOTHING_TO_ADD: &str = " If the line's own title already says everything you would \
+         write, OMIT that line entirely — a second line that restates the first is padding, and \
+         a document that pads is one a reader stops trusting. Never restate the title in other \
+         words. Write only where you are ADDING something the title does not say.";
+
+    let brief = match line_detail {
+        "inclusion" => {
             "For each line, write what that line COVERS — quantity, material, and what is \
              included in its price (delivered? hauled away? how many coats?). A short phrase, \
              not a sentence. It is read by a client deciding whether the number beside it is \
-             fair, so it must justify the number without repeating it.",
-        ),
-        "directive" => Some(
+             fair, so it must justify the number without repeating it."
+        }
+        "directive" => {
             "This is a WORK ORDER: the crew reads it, standing at the site, to do the job \
-             without calling anyone. For each line write what to actually DO and anything they \
-             must watch out for — one or two short imperative sentences, in trade language, in \
-             the order the work happens. Where the operator named a person for a line, set \
-             `assignee` to that name exactly as spoken.",
-        ),
-        "observation" => Some(
+             without calling anyone. For each line write ONLY what the title does not already \
+             tell them — the order to work in, the technique, the thing to watch out for, the \
+             spec to match. One short imperative sentence, in trade language. Where the \
+             operator named a person for a line, set `assignee` to that name exactly as \
+             spoken; a line nobody was named for gets no assignee."
+        }
+        "observation" => {
             "For each line, write what was actually OBSERVED — where it is, how bad, how much, \
-             what condition. One or two short phrases. This is a record that may be read \
-             months from now by someone who was not there (a tenant disputing a deduction, a \
-             buyer, an adjuster), so specifics beat adjectives.",
-        ),
-        _ => None,
-    }
+             what condition. One or two short phrases. This is a record that may be read months \
+             from now by someone who was not there (a tenant disputing a deduction, a buyer, an \
+             adjuster), so specifics beat adjectives."
+        }
+        _ => return None,
+    };
+    Some(format!("{brief}{NOTHING_TO_ADD}"))
 }
 
 /// Renders the coordination notes the walk already produced as context.
@@ -362,6 +379,30 @@ fn format_notes_context(buckets: &[NotesEntry]) -> String {
     // No trailing newline — every block in the user message supplies its own
     // leading separator, so one here doubles up.
     out.trim_end().to_string()
+}
+
+/// The output budget for one compose call, scaled to the document.
+///
+/// The pricing pass writes an integer per line and fits in a flat budget
+/// forever. This one writes PROSE — a paragraph per field plus a sentence or
+/// two per line — so a flat budget is a cliff: the model runs out mid-tool-call,
+/// the JSON is truncated, the parse fails, and the whole pass degrades to
+/// `queued` with every field a gap and every line bare.
+///
+/// That failure is silent and lands hardest on exactly the walks worth the
+/// most — a thirty-item walk on a big job blows a 1024-token budget while a
+/// four-item walk sails through, so the operator experiences it as "the long
+/// ones don't work" with no error to report. Hence: budget by the size of the
+/// thing being written, floored at the caller's value so no document gets
+/// LESS room than before, and capped so a runaway item list cannot authorize
+/// an unbounded spend.
+fn compose_budget(floor: u32, field_count: usize, item_count: usize, writes_lines: bool) -> u32 {
+    const PER_FIELD: u32 = 128; // a long_text field is a short paragraph
+    const PER_LINE: u32 = 64; // one or two short sentences, plus JSON overhead
+    const CEILING: u32 = 8192;
+    let lines = if writes_lines { item_count as u32 * PER_LINE } else { 0 };
+    let wanted = 256 + (field_count as u32 * PER_FIELD) + lines;
+    wanted.clamp(floor, CEILING)
 }
 
 /// The document's prose, in one call.
@@ -421,7 +462,8 @@ pub(crate) async fn compose_document(
             .join("\n");
         format!("\n\nFields to write:\n{rendered}")
     };
-    let lines_block = brief.map(|b| format!("\n\nThe lines:\n{b}")).unwrap_or_default();
+    let lines_block =
+        brief.as_deref().map(|b| format!("\n\nThe lines:\n{b}")).unwrap_or_default();
     let items_block = format_pricing_items(items);
     let notes_block = format_notes_context(notes);
     let summary_block = if summary.trim().is_empty() {
@@ -439,7 +481,7 @@ pub(crate) async fn compose_document(
             system,
             messages: vec![Message::user_text(user_message)],
             tools: vec![compose_document_tool_spec(brief.is_some(), wants_assignee)],
-            max_tokens,
+            max_tokens: compose_budget(max_tokens, fields.len(), items.len(), brief.is_some()),
             tool_choice: Some(COMPOSE_DOCUMENT.to_string()),
             // Single-shot — see the PRICE_ITEMS note above.
             cache_prefix: false,
@@ -2061,6 +2103,24 @@ mod tests {
             v["lines"][1]["is_gap"], true,
             "an unpriced deduction is an open question, not a free pass"
         );
+    }
+
+    /// A flat output budget is a cliff for a pass that writes prose: the
+    /// model runs out mid-tool-call, the JSON truncates, and the document
+    /// degrades to all-gaps — silently, and only on the longest walks.
+    #[test]
+    fn the_compose_budget_grows_with_the_document() {
+        // A four-item walk with one field is small; the caller's floor holds.
+        assert_eq!(compose_budget(1024, 1, 4, true), 1024);
+        // A thirty-item work order with four fields needs real room — under a
+        // flat 1024 this is the walk that would have come back empty.
+        assert!(compose_budget(1024, 4, 30, true) > 2000);
+        // No per-line writing, no per-line budget.
+        assert!(compose_budget(256, 1, 30, false) < compose_budget(256, 1, 30, true));
+        // Bounded: a runaway item list cannot authorize an unbounded spend.
+        assert_eq!(compose_budget(1024, 4, 100_000, true), 8192);
+        // And never LESS room than the caller asked for.
+        assert!(compose_budget(4096, 1, 1, false) >= 4096);
     }
 
     /// The contrast pin: the call SUCCEEDED but omitted a field — a truthful
