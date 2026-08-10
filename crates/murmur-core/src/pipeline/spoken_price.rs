@@ -115,6 +115,28 @@ pub(crate) fn fold_spoken_prices(items: &[CapturedItem]) -> FoldedPrices {
             Reading::SelfPriced { cents, title } => {
                 amounts.insert(items[index].id.clone(), *cents);
                 titles.insert(items[index].id.clone(), title.clone());
+                // A self-priced line that fully COVERS a bare line already on
+                // the board absorbs it.
+                //
+                // Isaac's flagstone estimate (2026-08-10) had the pair:
+                // "Poison oak removal" (no price) sitting orphaned directly
+                // above "Regular poison oak removal — $200". Extraction is
+                // asked for both the work and the price, and the fold merges
+                // them — except this price's label ran to four words, so it
+                // read as a line item in its own right rather than a price
+                // statement, and no merge happened. The client sees the same
+                // job twice, once with a gap.
+                //
+                // Only when the bare line adds NOTHING the priced one lacks
+                // (every one of its words is already there), and the RICHER
+                // title survives — so "5 yards of mulch installed, $450"
+                // absorbing a bare "Mulch" keeps the yards and the installed.
+                if let Some(covered) =
+                    fully_covered_by(&tokenize(title), items, &readings, &claimed)
+                {
+                    claimed.insert(covered);
+                    folded_away.insert(items[covered].id.clone());
+                }
             }
             Reading::Statement { cents, title, label_tokens } => {
                 match target_for(label_tokens, items, &readings, &claimed) {
@@ -149,14 +171,23 @@ pub(crate) fn fold_spoken_prices(items: &[CapturedItem]) -> FoldedPrices {
 }
 
 /// The item a price statement belongs to: the FIRST unclaimed work line that
-/// shares a content word with the price's label.
+/// shares a content word with the price's label — and, among those, the line
+/// the price is most ABOUT.
 ///
-/// First rather than best-scoring, on purpose. Items are in spoken order, and
-/// a tradesperson pricing a walk goes down the list in the order they walked
-/// it; when two lines both say "mulch", the earlier one is the one being
-/// priced. A similarity score would be more clever and less predictable, and
-/// the failure it buys — the price on the wrong mulch line — is invisible on
-/// the finished paper.
+/// This was "the first line that shares a word", earliest-wins, on the theory
+/// that items are in spoken order and the earlier mention is the intended one.
+/// Isaac's estimate (2026-08-10) is the counter-example: he said "three
+/// hundred for the flagstone", and the earliest line mentioning flagstone was
+/// **"Grade and weed path area for flagstones"** — a prep task that merely
+/// referred to the material. His $300 for stone landed on grading, and the
+/// stone itself had no price at all.
+///
+/// So: score each candidate by how much of it the label accounts for
+/// (shared tokens ÷ the line's own tokens). "Flagstone" is the whole of a line
+/// called "Flagstone" (1.0) and one word in six of "Grade and weed path area
+/// for flagstones" (0.17). The most-about line wins; spoken order breaks ties,
+/// which preserves the old behaviour exactly whenever candidates are equally
+/// about the thing (two lines both simply called "mulch").
 fn target_for(
     label_tokens: &[String],
     items: &[CapturedItem],
@@ -167,11 +198,52 @@ fn target_for(
         return None;
     }
     let wanted: HashSet<&str> = label_tokens.iter().map(String::as_str).collect();
+    let mut best: Option<(usize, f64)> = None;
+    for (index, item) in items.iter().enumerate() {
+        if claimed.contains(&index) || !matches!(readings[index], Reading::Plain) {
+            continue;
+        }
+        let tokens = tokenize(&item.text);
+        if tokens.is_empty() {
+            continue;
+        }
+        let shared = tokens.iter().filter(|t| wanted.contains(t.as_str())).count();
+        if shared == 0 {
+            continue;
+        }
+        let aboutness = shared as f64 / tokens.len() as f64;
+        // Strictly greater: the earliest of equally-about lines keeps winning.
+        if best.is_none_or(|(_, top)| aboutness > top) {
+            best = Some((index, aboutness));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
+/// The first unclaimed bare line whose every word already appears in
+/// `tokens` — i.e. one that would add nothing to the document that the
+/// caller's own line does not already say.
+///
+/// Deliberately total containment, not the `target_for` "most about" score: a
+/// partial overlap means the bare line carries something of its own, and
+/// absorbing it would delete that. "Poison oak removal" ⊆ "Regular poison oak
+/// removal" absorbs; "Front bed mulch" ⊄ "5 yards of mulch" does not.
+fn fully_covered_by(
+    tokens: &[String],
+    items: &[CapturedItem],
+    readings: &[Reading],
+    claimed: &HashSet<usize>,
+) -> Option<usize> {
+    if tokens.is_empty() {
+        return None;
+    }
+    let have: HashSet<&str> = tokens.iter().map(String::as_str).collect();
     items.iter().enumerate().position(|(index, item)| {
         if claimed.contains(&index) || !matches!(readings[index], Reading::Plain) {
             return false;
         }
-        tokenize(&item.text).iter().any(|t| wanted.contains(t.as_str()))
+        let theirs = tokenize(&item.text);
+        !theirs.is_empty() && theirs.iter().all(|t| have.contains(t.as_str()))
     })
 }
 
@@ -410,6 +482,46 @@ mod tests {
         assert_eq!(folded.amounts.get("i3"), None, "the beds were never priced — still a gap");
     }
 
+    /// Isaac's flagstone estimate, 2026-08-10: "Poison oak removal" sat
+    /// orphaned and unpriced directly above "Regular poison oak removal —
+    /// $200". Same job, twice, one of them looking like a gap.
+    #[test]
+    fn a_self_priced_line_absorbs_the_bare_line_it_already_covers() {
+        let items = vec![
+            item("i1", "todo", "Poison oak removal"),
+            item("i2", "price", "$200 regular poison oak removal"),
+            item("i3", "price", "$100 hazard pay poison oak"),
+        ];
+        let folded = fold_spoken_prices(&items);
+        let titles: Vec<&str> = folded.items.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["Regular poison oak removal", "Hazard pay poison oak"],
+            "the bare duplicate is gone; hazard pay stays its own line"
+        );
+        assert_eq!(folded.amounts.get("i2"), Some(&20000));
+        assert_eq!(folded.amounts.get("i3"), Some(&10000));
+    }
+
+    /// Absorption must never delete detail: a bare line is only absorbed when
+    /// every word of it is already present in the priced line.
+    #[test]
+    fn absorption_keeps_the_richer_title_and_spares_a_line_with_its_own_words() {
+        let items = vec![
+            item("i1", "part", "Mulch"),
+            item("i2", "part", "Front bed edging"),
+            item("i3", "price", "$450 five yards of mulch installed"),
+        ];
+        let folded = fold_spoken_prices(&items);
+        let titles: Vec<&str> = folded.items.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["Front bed edging", "Five yards of mulch installed"],
+            "bare Mulch absorbed into the richer line; the edging is untouched"
+        );
+        assert_eq!(folded.amounts.get("i3"), Some(&45000));
+    }
+
     #[test]
     fn an_item_that_carries_its_own_price_keeps_its_line() {
         let items = vec![item("i1", "part", "5 yards of mulch installed $450")];
@@ -442,11 +554,42 @@ mod tests {
     }
 
     #[test]
-    fn earliest_matching_line_wins_in_spoken_order() {
+    fn earliest_matching_line_wins_when_they_are_equally_about_it() {
         let items = vec![
             item("i1", "part", "front bed mulch"),
             item("i2", "part", "back bed mulch"),
             item("i3", "price", "$200 mulch"),
+        ];
+        let folded = fold_spoken_prices(&items);
+        assert_eq!(folded.amounts.get("i1"), Some(&20000));
+        assert_eq!(folded.amounts.get("i2"), None);
+    }
+
+    /// Isaac's estimate, 2026-08-10: "three hundred for the flagstone" landed
+    /// on "Grade and weed path area for flagstones" — the earliest line that
+    /// merely MENTIONED the material — and the stone itself went unpriced.
+    #[test]
+    fn a_price_lands_on_the_line_it_is_most_about_not_the_first_mention() {
+        let items = vec![
+            item("i1", "todo", "Grade and weed path area for flagstones"),
+            item("i2", "part", "Flagstone"),
+            item("i3", "todo", "Flagstone path labor"),
+            item("i4", "price", "$300 flagstone"),
+        ];
+        let folded = fold_spoken_prices(&items);
+        assert_eq!(folded.amounts.get("i2"), Some(&30000), "the stone is priced");
+        assert_eq!(folded.amounts.get("i1"), None, "not the prep task that mentions it");
+        assert_eq!(folded.amounts.get("i3"), None, "and not the labor line either");
+    }
+
+    /// The tie-break still runs in spoken order, so a walk with no
+    /// distinguishing line behaves exactly as it did before.
+    #[test]
+    fn aboutness_never_beats_an_exact_single_word_line() {
+        let items = vec![
+            item("i1", "part", "Gravel"),
+            item("i2", "todo", "Spread gravel over the graded path area"),
+            item("i3", "price", "$200 gravel"),
         ];
         let folded = fold_spoken_prices(&items);
         assert_eq!(folded.amounts.get("i1"), Some(&20000));
