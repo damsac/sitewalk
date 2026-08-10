@@ -172,11 +172,29 @@ pub(crate) async fn price_items(
     } else {
         format!("\n\nWhat you know about this user:\n{memory_prompt}")
     };
+    // R6 / CORE.md #4, stated as narrowly as it can be: a price comes from
+    // what THIS operator has charged, or it does not exist.
+    //
+    // The previous wording — "an item whose value you can reasonably infer
+    // from its text" — was a licence to price from general market knowledge,
+    // and it took it: on Isaac's own walk (2026-08-10) the operator stated
+    // four prices totalling $1,250 and the pass returned $3,300, having
+    // invented $750 for pruning, $750 for tomato plants and $1,250 for
+    // artichokes. Numbers he never said, on a document a client signs, in the
+    // product whose core promise is "unheard ≠ invented, ever".
+    //
+    // A gap is recoverable in five seconds — the operator taps it and types
+    // the number they already know. An invented price is recoverable only if
+    // somebody notices it, and the person best placed to notice is the client.
     let system = format!(
         "You price items from a field-work session for a tradesperson's estimate/invoice. \
-         Put a price only on an item whose value you can reasonably infer from its text and \
-         what you know about this user's pricing history — never guess wildly. You may price \
-         only items from the given list, by their exact item_id.{memory_block}"
+         Put a price on an item ONLY when this specific operator's own pricing history tells \
+         you what they charge for it. You have no other source of prices: you do not know this \
+         trade's going rate, this region's rates, or what these materials cost, and a plausible \
+         number is worse than no number — it is a commitment the operator never made, on a \
+         document their client may sign. Leave everything else unpriced; they will fill it in \
+         themselves in seconds. Omitting an item is always correct. You may price only items \
+         from the given list, by their exact item_id.{memory_block}"
     );
     let hint_block = spoken_total_cents
         .map(|cents| {
@@ -223,7 +241,14 @@ pub(crate) async fn price_items(
             };
             // First-wins dedup; unknown/hallucinated ids are dropped — never
             // fail the whole pass over one bad row.
-            if valid_ids.contains(id) && !map.contains_key(id) {
+            //
+            // Zero and negative are dropped too. A model that returns 0 has no
+            // price for that line, and rendering "$0" states a price to the
+            // client — Isaac's EST-0005 went out with a "$0" line on it. An
+            // honest gap says "this needs a number"; "$0" says "this is free",
+            // which is a commitment nobody made. An operator who really means
+            // no-charge can type it on the line.
+            if amount > 0 && valid_ids.contains(id) && !map.contains_key(id) {
                 map.insert(id.to_string(), amount);
             }
         }
@@ -2103,6 +2128,37 @@ mod tests {
             v["lines"][1]["is_gap"], true,
             "an unpriced deduction is an open question, not a free pass"
         );
+    }
+
+    /// "$0" on a client's estimate states a price nobody committed to.
+    #[tokio::test]
+    async fn a_zero_price_is_no_price_not_a_free_line() {
+        let (store, sid) =
+            processed_session_with_items(&[("todo", "mulch three beds"), ("todo", "prune")]);
+        let ids: Vec<String> =
+            store.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![
+            tool_use(
+                "price_items",
+                serde_json::json!({"prices": [
+                    {"item_id": ids[0], "amount_cents": 30000},
+                    {"item_id": ids[1], "amount_cents": 0}
+                ]}),
+            ),
+            compose_response(serde_json::json!([]), serde_json::json!([])),
+        ]));
+        let b = builder(store.clone(), provider);
+
+        let outcome = b.build(&sid, "estimate").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["lines"][0]["amount_cents"], 30000);
+        assert_eq!(
+            v["lines"][1]["amount_cents"],
+            serde_json::Value::Null,
+            "a zero is the model having no price — not a free line"
+        );
+        assert_eq!(v["lines"][1]["is_gap"], true, "so it stays an honest gap");
     }
 
     /// A flat output budget is a cliff for a pass that writes prose: the

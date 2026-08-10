@@ -48,6 +48,81 @@ impl MemoryStore for NullMemoryStore {
     }
 }
 
+/// Isaac's own EST-0005 walk, verbatim in shape: he names people against
+/// tasks and rattles off materials. The line titles are what this pins —
+/// that build produced "Juan to do mulching and composting" as a priced
+/// line on a client's estimate.
+const ESTIMATE_TRANSCRIPT: &str = "Alright, three beds here. We're going to weed them, \
+compost them, and mulch them, get them ready for planting. Ten peppers, ten tomatoes, \
+five artichokes going into those beds. Juan is going to do the mulching and the \
+composting. Christos is going to prune the five pear trees in the backyard. Two hundred \
+for the weeding and compost, three hundred for the mulch, two fifty for the plants, and \
+five hundred labor.";
+
+#[tokio::test]
+#[ignore = "hits the real API; set ANTHROPIC_API_KEY and run with --ignored"]
+async fn a_real_estimates_lines_read_like_line_items() {
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .expect("set ANTHROPIC_API_KEY to run the real-provider document smoke test");
+    let provider = Arc::new(AnthropicProvider::from_env(api_key, MODEL));
+
+    let store = Store::open_in_memory("smoke-device").unwrap();
+    let session = store.start_session_with_template(None, "landscape").unwrap();
+    store.append_transcript(&session.id, ESTIMATE_TRANSCRIPT).unwrap();
+    store.end_and_record_session(&session.id).unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    SessionProcessor::new(
+        provider.clone(),
+        store.clone(),
+        Arc::new(Mutex::new(Memory::default())),
+        Arc::new(NullMemoryStore),
+    )
+    .process(&session.id)
+    .await
+    .expect("processing failed");
+
+    let builder = DocumentBuilder::new(
+        provider,
+        store.clone(),
+        Arc::new(Mutex::new(Memory::default())),
+        Arc::new(NullMemoryStore),
+    );
+    let outcome = builder.build(&session.id, "estimate").await.expect("build failed");
+
+    let guard = store.lock().unwrap();
+    let artifact = guard.get_artifact(&outcome.document_artifact_id).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&artifact.body).unwrap();
+
+    println!("\n===== ESTIMATE =====");
+    for field in doc["fields"].as_array().unwrap() {
+        println!("[{}] {}", field["label"].as_str().unwrap_or(""), field["value"].as_str().unwrap_or("—— (gap)"));
+    }
+    for line in doc["lines"].as_array().unwrap() {
+        println!(
+            "  {:<52} {}",
+            line["title"].as_str().unwrap_or(""),
+            line["amount_cents"]
+        );
+    }
+    println!("====================\n");
+
+    for line in doc["lines"].as_array().unwrap() {
+        let title = line["title"].as_str().unwrap();
+        // A person's name on a line means an assignment sentence became a
+        // line item — the EST-0005 defect.
+        for name in ["Juan", "Christos"] {
+            assert!(
+                !title.contains(name),
+                "an assignment sentence became a line item: {title:?}"
+            );
+        }
+        assert!(!title.contains(" to "), "a line reads as a sentence: {title:?}");
+        // "$0" on a client's estimate states a price nobody committed to.
+        assert_ne!(line["amount_cents"], serde_json::json!(0), "a zero-dollar line: {title:?}");
+    }
+}
+
 #[tokio::test]
 #[ignore = "hits the real API; set ANTHROPIC_API_KEY and run with --ignored"]
 async fn real_walk_becomes_a_work_order() {
