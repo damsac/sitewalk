@@ -107,7 +107,7 @@ impl Tool for AddItemTool {
     }
 
     fn description(&self) -> &str {
-        "Record one clearly-stated item from the session. Only extract what was actually said — fewer, confident items beat many guessed ones. Never invent assignees, prices, or dates."
+        "Record ONE piece of work or ONE material from the session, named as a short noun phrase the way it would read as a line on paperwork (\"Mulch, three beds\", \"Ten pepper plants\"). Not a sentence about the job, not who is doing it, not a site or access detail. Only what was actually said — fewer, confident items beat many guessed ones. Never invent assignees, prices, or dates."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -117,7 +117,11 @@ impl Tool for AddItemTool {
                 // Built from the shared const (Plan 16 Task 2) — the advertised
                 // enum can never drift from the `execute` validation below.
                 "kind": { "type": "string", "enum": VALID_ITEM_KINDS, "minLength": 1 },
-                "text": { "type": "string", "minLength": 1, "description": "one short item, in the speaker's own terms" }
+                // "in the speaker's own terms" still governs the WORDS — their
+                // trade vocabulary, never ours. What changed on 2026-08-10 is
+                // the FORM: a line on a client's estimate is a noun phrase, and
+                // "Juan to do the mulching" was reaching one (Isaac's EST-0005).
+                "text": { "type": "string", "minLength": 1, "description": "one piece of work or one material, as a short noun phrase in the speaker's own trade words — \"Mulch, three beds\", not \"Juan is going to mulch the beds\"" }
             },
             "required": ["kind", "text"]
         })

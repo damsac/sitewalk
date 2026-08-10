@@ -30,6 +30,18 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
          guessed ones — one invented assignee or price costs more trust than three \
          missed todos. When unsure, skip it.\n\
          - Use add_item for todos, decisions, notes, safety issues, parts, prices.\n\
+         - An item is ONE PIECE OF WORK OR ONE MATERIAL, named the way it would \
+         appear as a line on paperwork: a short noun phrase. \"Mulch, three beds\", \
+         \"Weed and compost, three beds\", \"Ten pepper plants\", \"Prune five pear \
+         trees\". NOT a sentence about the job: not \"Juan is going to do the \
+         mulching\", not \"we should probably weed those beds first\".\n\
+         - WHO does the work is never an item. A person assigned to a task belongs \
+         in the notes (scope_of_work), not on a line of its own — a line reading \
+         \"Juan to do the mulching\" duplicates the work item it refers to and lands \
+         on a client's estimate. Same for WHEN it happens.\n\
+         - Site conditions and access details are never items either — gate codes, \
+         parking, dogs, working hours, hazards. They belong in the notes. An item is \
+         something the operator does or buys.\n\
          - Use upsert_contact for people mentioned with a role (sub, client, supplier).\n\
          - Call write_report at most once, and only if the session has enough \
          substance for a report worth sharing.\n\
@@ -185,6 +197,10 @@ pub(crate) fn live_extraction_system_prompt(memory_prompt: &str) -> String {
          transcript: when a thought is mid-sentence, cut off, or unclear, SKIP it — \
          the end-of-session pass is the source of truth and will catch it. Bias hard \
          toward fewer items.\n\
+         - An item is ONE PIECE OF WORK OR ONE MATERIAL, named as a short noun \
+         phrase, the way it would appear as a line on paperwork: \"Mulch, three \
+         beds\", \"Ten pepper plants\". Never a sentence about the job, never WHO is \
+         doing it, never a site or access detail.\n\
          - NEVER repeat anything under 'already captured'. When unsure whether it is \
          a duplicate, skip it.\n\
          - Never invent assignees, prices, dates, or details that were not spoken.\n\
@@ -211,6 +227,36 @@ mod tests {
         assert!(p.contains("at most once"), "report budget");
         assert!(p.contains("french drain"), "memory is injected");
         assert!(p.contains("update_memory"));
+    }
+
+    /// An item becomes a LINE on a client's estimate, so it has to be shaped
+    /// like one. Isaac's EST-0005 went out with "Juan to do mulching and
+    /// composting" as a priced line — an assignment sentence, duplicating the
+    /// mulch and compost lines above it, with a person's name on the copy the
+    /// client reads.
+    #[test]
+    fn both_extraction_prompts_ask_for_line_shaped_items() {
+        for p in [
+            extraction_system_prompt(""),
+            live_extraction_system_prompt(""),
+        ] {
+            assert!(p.contains("noun phrase"), "items must be shaped like lines");
+            assert!(
+                p.contains("ONE PIECE OF WORK OR ONE MATERIAL"),
+                "an item is labor or materials, not commentary"
+            );
+        }
+    }
+
+    /// Who does the work, and the site's own facts, have their own homes now
+    /// — an assignee column and the notes buckets. Left as items they become
+    /// duplicate lines on the paperwork.
+    #[test]
+    fn the_end_of_session_prompt_keeps_people_and_site_facts_off_the_lines() {
+        let p = extraction_system_prompt("");
+        assert!(p.contains("WHO does the work is never an item"));
+        assert!(p.contains("scope_of_work"), "it says where they go instead");
+        assert!(p.contains("gate codes"), "site and access details are named");
     }
 
     #[test]
