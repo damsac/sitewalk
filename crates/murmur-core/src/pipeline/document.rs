@@ -368,27 +368,48 @@ fn line_brief(line_detail: &str) -> Option<String> {
          a document that pads is one a reader stops trusting. Never restate the title in other \
          words. Write only where you are ADDING something the title does not say.";
 
+    // Two things a second line must never contain, whatever the document.
+    //
+    // MONEY, because the amount has its own column two inches to the right.
+    // A figure here can only repeat it or contradict it, and on Isaac's
+    // estimate (2026-08-10) it did both: "$200 material" under a $200 line,
+    // and — worse — "William on weed whacker, $200 labor plus $10 gas" printed
+    // against an amount of $10. A client reading that cannot tell what the
+    // line costs, which is the one thing a line exists to say.
+    const NO_MONEY: &str = " NEVER write a price, a rate, or any dollar figure. The amount has \
+         its own column beside this text; a figure here either repeats it or contradicts it. A \
+         work order carries no money at all.";
+
+    // WHO, because that is a work-order fact. Isaac: *"I don't want them to
+    // include names of the laborers in the report, that should only be
+    // included in work orders."* A client is buying an outcome and does not
+    // need the crew list; the work order has an assignee column for exactly
+    // this, and putting names on the client's copy is how a private staffing
+    // decision becomes something to negotiate about.
+    const NO_CREW: &str = " NEVER name the person doing the work — that belongs on a work \
+         order, not on this document.";
+
     let brief = match line_detail {
-        "inclusion" => {
-            "For each line, write what that line COVERS — quantity, material, and what is \
-             included in its price (delivered? hauled away? how many coats?). A short phrase, \
-             not a sentence. It is read by a client deciding whether the number beside it is \
-             fair, so it must justify the number without repeating it."
-        }
-        "directive" => {
+        "inclusion" => format!(
+            "For each line, write only what a client needs in order to judge the number beside \
+             it: what the line covers and what is included in it (delivered? hauled away? how \
+             many coats? what area?). A short phrase, not a sentence, and only where it is not \
+             already obvious from the title.{NO_MONEY}{NO_CREW}"
+        ),
+        "directive" => format!(
             "This is a WORK ORDER: the crew reads it, standing at the site, to do the job \
              without calling anyone. For each line write ONLY what the title does not already \
              tell them — the order to work in, the technique, the thing to watch out for, the \
              spec to match. One short imperative sentence, in trade language. Where the \
-             operator named a person for a line, set `assignee` to that name exactly as \
-             spoken; a line nobody was named for gets no assignee."
-        }
-        "observation" => {
+             operator named a person for a line, set `assignee` to that name exactly as spoken \
+             (NOT in the text) — a line nobody was named for gets no assignee.{NO_MONEY}"
+        ),
+        "observation" => format!(
             "For each line, write what was actually OBSERVED — where it is, how bad, how much, \
              what condition. One or two short phrases. This is a record that may be read months \
              from now by someone who was not there (a tenant disputing a deduction, a buyer, an \
-             adjuster), so specifics beat adjectives."
-        }
+             adjuster), so specifics beat adjectives.{NO_MONEY}{NO_CREW}"
+        ),
         _ => return None,
     };
     Some(format!("{brief}{NOTHING_TO_ADD}"))

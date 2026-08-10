@@ -71,6 +71,85 @@ composting. Christos is going to prune the five pear trees in the backyard. Two 
 for the weeding and compost, three hundred for the mulch, two fifty for the plants, and \
 five hundred labor.";
 
+/// Isaac's flagstone walk (2026-08-10), the one that produced the estimate
+/// with "Jose and John, $300" under a line and his $300 of stone attached to
+/// the grading task. Every price here is stated; nothing should be invented,
+/// no crew name should reach the page, and no dollar figure should appear in
+/// a description.
+const FLAGSTONE_TRANSCRIPT: &str = "We're putting a flagstone path in the existing area \
+here. Grade and weed the path area first to get it flat, then lay the gravel down, then \
+the flagstone goes in. Three hundred for the flagstone, two hundred for the gravel, three \
+hundred for the labor — Jose and John are on the flagstone path. Then the backyard \
+perimeter needs weed whacking, William's on the weed whacker, two hundred labor plus ten \
+dollars of gas. And the poison oak has to come out, that's two hundred regular plus a \
+hundred hazard pay.";
+
+#[tokio::test]
+#[ignore = "hits the real API; set ANTHROPIC_API_KEY and run with --ignored"]
+async fn a_real_estimate_carries_only_what_an_estimate_needs() {
+    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("set ANTHROPIC_API_KEY");
+    let provider = Arc::new(AnthropicProvider::from_env(api_key, model()));
+
+    let store = Store::open_in_memory("smoke-device").unwrap();
+    let session = store.start_session_with_template(None, "landscape").unwrap();
+    store.append_transcript(&session.id, FLAGSTONE_TRANSCRIPT).unwrap();
+    store.end_and_record_session(&session.id).unwrap();
+    let store = Arc::new(Mutex::new(store));
+
+    SessionProcessor::new(
+        provider.clone(),
+        store.clone(),
+        Arc::new(Mutex::new(Memory::default())),
+        Arc::new(NullMemoryStore),
+    )
+    .process(&session.id)
+    .await
+    .expect("processing failed");
+
+    let outcome = DocumentBuilder::new(
+        provider,
+        store.clone(),
+        Arc::new(Mutex::new(Memory::default())),
+        Arc::new(NullMemoryStore),
+    )
+    .build(&session.id, "estimate")
+    .await
+    .expect("build failed");
+
+    let guard = store.lock().unwrap();
+    let artifact = guard.get_artifact(&outcome.document_artifact_id).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&artifact.body).unwrap();
+
+    println!("\n===== FLAGSTONE ESTIMATE =====");
+    let mut total = 0i64;
+    for line in doc["lines"].as_array().unwrap() {
+        let cents = line["amount_cents"].as_i64();
+        total += cents.unwrap_or(0);
+        println!(
+            "  {:<46} {}\n      {}",
+            line["title"].as_str().unwrap_or(""),
+            cents.map_or("——".to_string(), |c| format!("${}", c / 100)),
+            line["detail"].as_str().unwrap_or("")
+        );
+    }
+    println!("  TOTAL ${}\n==============================\n", total / 100);
+
+    for line in doc["lines"].as_array().unwrap() {
+        let title = line["title"].as_str().unwrap();
+        let detail = line["detail"].as_str().unwrap_or("");
+        // A crew name is a work-order fact — never on the client's copy.
+        for name in ["Jose", "John", "William"] {
+            assert!(!detail.contains(name), "a crew name reached the estimate: {detail:?}");
+            assert!(!title.contains(name), "a crew name reached a line title: {title:?}");
+        }
+        // The amount has its own column; a figure in the text repeats or
+        // contradicts it (Isaac saw "$200 labor plus $10 gas" against $10).
+        assert!(!detail.contains('$'), "a dollar figure in a description: {detail:?}");
+        assert!(!title.contains('$'), "a dollar figure in a line title: {title:?}");
+        assert_ne!(line["amount_cents"], serde_json::json!(0), "a zero-dollar line: {title:?}");
+    }
+}
+
 #[tokio::test]
 #[ignore = "hits the real API; set ANTHROPIC_API_KEY and run with --ignored"]
 async fn a_real_estimates_lines_read_like_line_items() {

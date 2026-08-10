@@ -41,13 +41,22 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
          tomatoes, 5 artichokes\"), not three. Splitting it puts their one price on \
          one line and leaves the others blank, which is worse paperwork than the way \
          they said it. Match the grain of their pricing.\n\
-         - ALWAYS KEEP A SPOKEN AMOUNT IN THE TEXT, exactly as a figure: \"$200 \
-         weeding and compost\", \"$500 labor\". This is the one place the noun-phrase \
-         rule does not shorten anything — the amount is the whole content of that \
-         item, and a later step reads the figure out of the text and attaches it to \
-         the work it names. An item that drops the number loses the price entirely: \
-         nothing downstream can recover it, and the operator's own stated price never \
-         reaches their estimate.\n\
+         - When the operator states a PRICE, record it as its own item with the \
+         figure kept exactly as spoken: \"$200 weeding and compost\", \"$500 labor\", \
+         \"$300 flagstone\". This is the one place the noun-phrase rule does not \
+         shorten anything — the amount is the whole content of that item, and a later \
+         step reads the figure out and attaches it to the work it names. An item that \
+         drops the number loses the price entirely; nothing downstream can recover it.\n\
+         - But a WORK or MATERIAL item never carries a price in its own title. \
+         \"Poison oak removal\" — not \"Poison oak removal, $200 regular + $100 hazard \
+         pay\". The money is a separate price item; the work item is just the work, or \
+         the amount ends up printed twice on the paperwork, once in the description \
+         and once in the amount column.\n\
+         - A material the operator names IS an item, even when they mention it only \
+         while pricing it. \"Three hundred for the flagstone, two hundred for the \
+         gravel\" names two materials: record \"Flagstone\" and \"Gravel\" as items \
+         alongside the two price items, or their prices have no line to land on and \
+         attach themselves to whatever else happens to mention that word.\n\
          - WHO does the work is never an item. A person assigned to a task belongs \
          in the notes (scope_of_work), not on a line of its own — a line reading \
          \"Juan to do the mulching\" duplicates the work item it refers to and lands \
