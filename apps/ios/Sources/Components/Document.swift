@@ -218,12 +218,22 @@ struct DocSectionView: View {
 
     @ViewBuilder
     private func valueText(_ field: DocFieldFixture) -> some View {
-        if let value = field.value, !field.isGap {
+        if let value = field.value, !value.isEmpty {
             Text(value)
                 .font(Theme.F.ui(12, .medium))
                 .foregroundStyle(Theme.C.ink)
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if field.isOptional {
+            // An INVITATION, not a warning. Nothing was expected to fill this
+            // but the operator, so blank is a perfectly good final state and
+            // the yellow gap treatment would be nagging about a defect that
+            // does not exist. Amber, the app's "you can act here" colour.
+            Text("TAP TO ADD")
+                .font(Theme.F.mono(8, .semibold))
+                .tracking(1.0)
+                .foregroundStyle(Theme.C.amberInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(OperatorNote.gap)

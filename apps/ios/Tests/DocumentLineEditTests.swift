@@ -314,6 +314,84 @@ final class DocumentLineEditTests: XCTestCase {
         XCTAssertNil(model.editingField)
     }
 
+    // MARK: Optional fields — the operator fills these, not the walk
+
+    private func modelWithOptional() -> AppModel {
+        let model = model()
+        model.document?.sections = [
+            DocSectionFixture(key: "client", label: "PREPARED FOR", fields: [
+                DocFieldFixture(
+                    key: "prepared_for", label: "Prepared for", value: nil,
+                    isGap: false, isOptional: true, isParagraph: true
+                ),
+            ]),
+        ]
+        return model
+    }
+
+    /// Isaac, 2026-08-10: *"have the AI fill in everything it's confident in
+    /// and present optional fields to be filled in by the user before
+    /// sending."* Blank is a perfectly good FINAL state for those, so an
+    /// unfilled optional is not a gap and must not nag like one.
+    func testAnUnfilledOptionalIsNotAGap() {
+        let model = modelWithOptional()
+        let field = model.document!.sections[0].fields[0]
+        XCTAssertFalse(field.isGap, "nothing was expected to fill it but the operator")
+        XCTAssertTrue(field.isOptional)
+        XCTAssertEqual(
+            model.document?.gapCount, 1,
+            "only the walk's own unpriced line counts as a gap"
+        )
+    }
+
+    func testAnOptionalFieldTakesAValueAndGivesItBack() {
+        let model = modelWithOptional()
+        let section = model.document!.sections[0]
+        model.beginFieldEdit(section: section, field: section.fields[0])
+        model.editTitle = "Mary Hollis\n1418 Alder Ct, Denver CO"
+        model.commitFieldEdit()
+
+        XCTAssertEqual(
+            model.document?.sections[0].fields[0].value,
+            "Mary Hollis\n1418 Alder Ct, Denver CO"
+        )
+        XCTAssertFalse(model.document!.sections[0].fields[0].isGap)
+    }
+
+    func testClearingAnOptionalReturnsItToTapToAddNotToAGap() {
+        let model = modelWithOptional()
+        let section = model.document!.sections[0]
+        model.beginFieldEdit(section: section, field: section.fields[0])
+        model.editTitle = "Mary Hollis"
+        model.commitFieldEdit()
+
+        let filled = model.document!.sections[0]
+        model.beginFieldEdit(section: filled, field: filled.fields[0])
+        model.editTitle = ""
+        model.commitFieldEdit()
+
+        let after = model.document!.sections[0].fields[0]
+        XCTAssertNil(after.value)
+        XCTAssertFalse(after.isGap, "declining to name a client is not an incomplete document")
+        XCTAssertTrue(after.isOptional)
+    }
+
+    /// An unfilled optional must not print a heading over nothing, and must
+    /// never print "TAP TO ADD" — that is an instruction to the operator.
+    func testAnUnfilledOptionalSectionIsNotPrinted() {
+        let model = modelWithOptional()
+        let section = model.document!.sections[0]
+        XCTAssertFalse(section.hasContent, "a PREPARED FOR heading over nothing is an empty box")
+        XCTAssertTrue(DocumentPDF.printableSection(section).fields.isEmpty)
+
+        model.beginFieldEdit(section: section, field: section.fields[0])
+        model.editTitle = "Mary Hollis"
+        model.commitFieldEdit()
+        let filled = model.document!.sections[0]
+        XCTAssertTrue(filled.hasContent, "once filled it is real content and prints")
+        XCTAssertEqual(DocumentPDF.printableSection(filled).fields.count, 1)
+    }
+
     func testTheTotalFollowsEveryEdit() {
         let model = model()
         XCTAssertEqual(model.document?.totalValue, "$200")

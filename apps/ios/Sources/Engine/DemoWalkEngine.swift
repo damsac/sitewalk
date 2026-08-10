@@ -458,16 +458,27 @@ final class DemoWalkEngine: WalkEngine {
                 key: key, label: label, value: value, isGap: value == nil, isParagraph: false
             )
         }
+        /// The operator fills this one at review — never the walk.
+        func optional(_ key: String, _ label: String) -> DocFieldFixture {
+            DocFieldFixture(
+                key: key, label: label, value: nil, isGap: false, isOptional: true,
+                isParagraph: true
+            )
+        }
+        let preparedFor = DocSectionFixture(
+            key: "client", label: "PREPARED FOR",
+            fields: [optional("prepared_for", "Prepared for")]
+        )
         switch kind {
         case "estimate":
-            return [DocSectionFixture(key: "scope", label: "SCOPE OF WORK", fields: [para(
+            return [preparedFor, DocSectionFixture(key: "scope", label: "SCOPE OF WORK", fields: [para(
                 "scope_summary", "Scope of work",
                 "Refresh the front beds and walkway line: three yards of premium bark mulch "
                     + "delivered and installed, boxwood trimmed and clippings hauled, sixty feet "
                     + "of bed edging re-cut, and the zone 2 irrigation head replaced."
             )])]
         case "invoice":
-            return [DocSectionFixture(key: "work", label: "WORK PERFORMED", fields: [para(
+            return [preparedFor, DocSectionFixture(key: "work", label: "WORK PERFORMED", fields: [para(
                 "work_summary", "Work performed",
                 "Installed three yards of premium bark mulch across the front beds, trimmed the "
                     + "boxwood along the walkway and hauled the clippings, re-cut sixty feet of "

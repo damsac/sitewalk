@@ -11,7 +11,10 @@ enum DocumentPDF {
     /// is a message to the operator, and the operator is not who reads this.
     static func printableSection(_ section: DocSectionFixture) -> DocSectionFixture {
         var out = section
-        out.fields = section.fields.filter { !$0.isGap }
+        // Anything with no value comes off, whether it is a gap the walk left
+        // or an optional the operator chose not to fill. "TAP TO ADD" is an
+        // instruction to the person holding the phone.
+        out.fields = section.fields.filter { !($0.value ?? "").isEmpty }
         return out
     }
 
