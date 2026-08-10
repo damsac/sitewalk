@@ -249,7 +249,17 @@ struct AppRoot: View {
                 // reaches ReviewView for the existing PDF/send screenshot
                 // hooks below.
                 if model.phase == .notes {
-                    model.buildPrimaryDocument()
+                    // doc=<kind> builds a specific document instead of the
+                    // template's lead one. Seven kinds now have seven
+                    // genuinely different shapes, and simctl cannot tap the
+                    // button that picks them — so without this, six of them
+                    // can only be seen by a person with a device in hand.
+                    if let arg = ProcessInfo.processInfo.arguments
+                        .first(where: { $0.hasPrefix("doc=") }) {
+                        model.buildDocument(kind: String(arg.dropFirst("doc=".count)))
+                    } else {
+                        model.buildPrimaryDocument()
+                    }
                     try? await Task.sleep(for: .seconds(2))
                 }
             }

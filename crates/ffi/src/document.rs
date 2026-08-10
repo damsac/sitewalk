@@ -18,6 +18,15 @@ pub struct DocLine {
     /// total/rollup lines, or an old document body written before Plan 12.
     /// Additive; never derived by the FFI layer.
     pub item_id: Option<String>,
+    /// Who is doing this line — `directive` documents (the work order) only,
+    /// and only where the operator actually named someone.
+    ///
+    /// It rides in the column the amount would occupy, because a work order
+    /// carries no money and that space is exactly where the crew looks.
+    /// `None` everywhere else, including on a work order line nobody was
+    /// named for: an unassigned task is a real state, and inventing an owner
+    /// for it would put a person's name against work they never agreed to.
+    pub assignee: Option<String>,
 }
 
 /// One authored `filled`/`static` schema field of a built document (Plan 19

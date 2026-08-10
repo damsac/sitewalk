@@ -74,10 +74,18 @@ struct DocRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.title)
                     .font(Theme.F.cond(12.5, .semibold))
-                Text(row.sub)
-                    .font(Theme.F.mono(8, row.subWarn ? .semibold : .regular))
-                    .tracking(0.3)
-                    .foregroundStyle(row.subWarn ? Theme.C.yellowTag : Theme.C.ink60)
+                // The second line: what the line covers, what the crew must
+                // do, or what was observed. It sets as SENTENCES, not as a
+                // stamp — a directive like "strip the old bark first, watch
+                // the irrigation heads" is read, not scanned, and 8pt mono
+                // all-caps is unreadable at two paragraphs.
+                if !row.sub.isEmpty {
+                    Text(row.sub)
+                        .font(row.subWarn ? Theme.F.mono(8, .semibold) : Theme.F.ui(11, .medium))
+                        .tracking(row.subWarn ? 0.3 : 0)
+                        .foregroundStyle(row.subWarn ? Theme.C.yellowTag : Theme.C.ink60)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let hint = row.hint {
                     Text(hint)
                         .font(Theme.F.mono(8))
@@ -99,7 +107,20 @@ struct DocRowView: View {
 
     @ViewBuilder
     private var amount: some View {
-        if row.isEdit {
+        // A work order carries no money, so the column the price would
+        // occupy is where the crew's name goes — the exact spot a foreman's
+        // eye already travels to on every other document they read.
+        if let assignee = row.assignee, !assignee.isEmpty {
+            Text(assignee.uppercased())
+                .font(Theme.F.mono(9, .semibold))
+                .tracking(0.8)
+                .foregroundStyle(Theme.C.amberInk)
+                .padding(.horizontal, 6)
+                .padding(.top, 3)
+                .padding(.bottom, 2)
+                .background(Theme.C.orangeTint)
+                .lineLimit(1)
+        } else if row.isEdit {
             HStack(spacing: 1) {
                 Text(row.amount)
                     .font(Theme.F.mono(12, .semibold))
@@ -117,6 +138,99 @@ struct DocRowView: View {
             Text(row.amount)
                 .font(Theme.F.mono(12, .semibold))
                 .foregroundStyle(Theme.C.ink)
+        }
+    }
+}
+
+// MARK: - Authored section (the prose blocks a trade document is expected to carry)
+
+/// One authored block — ASSIGNMENT, SITE NOTES, SCOPE OF WORK, SUMMARY.
+///
+/// This is what makes each document type recognizable as itself rather than
+/// as the same list under a different heading. A crew reads ASSIGNMENT and
+/// SITE NOTES before they read a single line item; a client reads SCOPE OF
+/// WORK and may never read the lines at all.
+///
+/// Gaps show rather than hide. An operator scanning before sending needs to
+/// see that nothing was said about safety, in the place the safety note would
+/// have been — a silently absent field is indistinguishable from a field that
+/// was never on the document, and the whole point is that they can fill it.
+struct DocSectionView: View {
+    let section: DocSectionFixture
+    /// Tapping a field opens it for editing, like a line.
+    var onEdit: ((DocFieldFixture) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(section.label)
+                .font(Theme.F.mono(8, .semibold))
+                .tracking(1.6)
+                .foregroundStyle(Theme.C.ink60)
+                .padding(.bottom, 1)
+                .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1) }
+
+            ForEach(section.fields) { field in
+                fieldView(field)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onEdit?(field) }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Edit \(field.label)")
+            }
+        }
+        .padding(.top, 14)
+    }
+
+    /// A section holding ONE paragraph is already named by its own heading —
+    /// SCOPE OF WORK over a field labelled "Scope of work" is the heading
+    /// said twice. Sections with more than one field keep their labels,
+    /// because there the labels are what tell Access apart from Safety.
+    private var labelsAreRedundant: Bool {
+        section.fields.count == 1 && section.fields[0].isParagraph
+    }
+
+    @ViewBuilder
+    private func fieldView(_ field: DocFieldFixture) -> some View {
+        if field.isParagraph {
+            VStack(alignment: .leading, spacing: 3) {
+                if !labelsAreRedundant {
+                    Text(field.label.uppercased())
+                        .font(Theme.F.mono(7.5, .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(Theme.C.ink45)
+                }
+                valueText(field)
+            }
+        } else {
+            // Short fields sit inline — "ASSIGNED TO   Jose, Michael" reads
+            // as a form field, which is exactly what it is.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(field.label.uppercased())
+                    .font(Theme.F.mono(7.5, .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.C.ink45)
+                    // Wide enough for "ASSIGNED TO" on one line — a wrapped
+                    // two-word label reads as a layout accident.
+                    .frame(width: 104, alignment: .leading)
+                valueText(field)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func valueText(_ field: DocFieldFixture) -> some View {
+        if let value = field.value, !field.isGap {
+            Text(value)
+                .font(Theme.F.ui(12, .medium))
+                .foregroundStyle(Theme.C.ink)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(OperatorNote.gap)
+                .font(Theme.F.mono(8, .semibold))
+                .tracking(0.3)
+                .foregroundStyle(Theme.C.yellowTag)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

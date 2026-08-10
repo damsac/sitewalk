@@ -121,15 +121,43 @@ mod tests {
         (engine, sid)
     }
 
+    /// A work order comes back with no money and WITH its assignment block —
+    /// the whole point of the document. The field keys validate (they are
+    /// authored, so the response can pre-know them); the per-line write
+    /// cannot, since item ids are minted at runtime (the Plan 12 C2 pattern),
+    /// and dropping it is exactly the echo-validation working.
     #[tokio::test]
-    async fn build_document_non_pricing_kind_returns_the_structure_only_document() {
-        let (engine, sid) = processed_landscape_session(vec![]).await;
+    async fn build_document_work_order_carries_its_assignment_and_no_money() {
+        let (engine, sid) = processed_landscape_session(vec![tool_use(
+            "compose_document",
+            serde_json::json!({
+                "fields": [
+                    {"key": "crew", "value": "Jose, Michael"},
+                    {"key": "access", "value": "Gate code 4412; park on the street."}
+                ],
+                "lines": [{"item_id": "placeholder", "detail": "Pick up from the yard first.",
+                           "assignee": "Jose"}]
+            }),
+        )])
+        .await;
 
         let payload = engine.build_document(sid.clone(), "work_order".into()).await.unwrap();
         assert_eq!(payload.doc_kind, "work_order");
         assert_eq!(payload.doc_number, 1, "a fresh mint for this build_document call");
         assert_eq!(payload.lines.len(), 1, "the one authoritative item survives finish()'s swap");
         assert_eq!(payload.lines[0].title, "order lumber");
+        assert_eq!(payload.lines[0].amount_cents, None, "a work order carries no money");
+        assert_eq!(
+            payload.lines[0].assignee, None,
+            "the placeholder id degrades — a name is never attached to a line we cannot match"
+        );
+        let crew = payload.fields.iter().find(|f| f.key == "crew").expect("crew field");
+        assert_eq!(crew.value.as_deref(), Some("Jose, Michael"));
+        assert!(!crew.is_gap);
+        let access = payload.fields.iter().find(|f| f.key == "access").expect("access field");
+        assert_eq!(access.value.as_deref(), Some("Gate code 4412; park on the street."));
+        let safety = payload.fields.iter().find(|f| f.key == "safety").expect("safety field");
+        assert!(safety.is_gap, "nothing was said about hazards — a truthful gap, not filler");
         assert!(!payload.queued);
 
         // Exactly one document artifact for the session: phase B is gone, so
@@ -195,16 +223,28 @@ mod tests {
         // (Plan 12's C2 pattern), so it echoes a placeholder that will fail
         // echo-validation — proving the wiring (a price_items request was
         // made, fed the real id) without needing to pre-script it.
-        let (engine, sid) = processed_landscape_session(vec![tool_use(
-            "price_items",
-            serde_json::json!({"prices": [{"item_id": "placeholder", "amount_cents": 28500}]}),
-        )])
+        let (engine, sid) = processed_landscape_session(vec![
+            tool_use(
+                "price_items",
+                serde_json::json!({"prices": [{"item_id": "placeholder", "amount_cents": 28500}]}),
+            ),
+            // Pricing first, then the prose — an estimate now writes its scope
+            // paragraph in a second, separate call.
+            tool_use(
+                "compose_document",
+                serde_json::json!({"fields": [
+                    {"key": "scope_summary", "value": "Deck lumber ordered and delivered."}
+                ]}),
+            ),
+        ])
         .await;
 
         let payload = engine.build_document(sid, "estimate".into()).await.unwrap();
         assert_eq!(payload.doc_kind, "estimate");
         assert_eq!(payload.lines.len(), 1);
         assert_eq!(payload.lines[0].amount_cents, None, "placeholder id degrades, never crashes");
+        let scope = payload.fields.iter().find(|f| f.key == "scope_summary").expect("scope field");
+        assert_eq!(scope.value.as_deref(), Some("Deck lumber ordered and delivered."));
         assert!(!payload.queued, "the pricing call itself succeeded (a validation miss, not R7)");
     }
 }

@@ -395,14 +395,125 @@ final class DemoWalkEngine: WalkEngine {
         // "findings") shape for an inspection.
         let counted = kind == "inspection"
         return DocumentModel(
-            rows: rows,
-            totalKey: priced ? trade.totalKey : (counted ? "FINDINGS" : "ITEMS"),
+            rows: kind == "work_order" ? Self.assigned(rows) : rows,
+            totalKey: DocKinds.totalLabel(for: kind),
             staticTotal: priced ? trade.totalValue : "\(rows.count)",
             // The gap/price note only means anything on a priced document.
             note: priced ? trade.note : "",
             send: "SEND \(DocKinds.label(for: kind).uppercased())",
+            sections: Self.demoSections(for: kind),
+            // The demo mints a matching per-kind number so a demo work order
+            // does not go out unnumbered while the real one does.
+            docNumber: Self.demoDocNumber(for: kind, fallback: trade.docNo),
+            docKindLabel: DocKinds.label(for: kind).uppercased(),
             pricesShown: priced
         )
+    }
+
+    /// The demo's per-kind document number. The fixture number ("EST-0047")
+    /// only fits the trade's lead kind; the others keep its digits and take
+    /// their own prefix, so a demo work order is WO-0047 rather than blank.
+    private static func demoDocNumber(for kind: String, fallback: String) -> String {
+        let digits = fallback.split(separator: "-").last.map(String.init) ?? "0001"
+        let prefix: String
+        switch kind {
+        case "estimate": prefix = "EST"
+        case "invoice": prefix = "INV"
+        case "work_order": prefix = "WO"
+        case "inspection": prefix = "IR"
+        case "condition": prefix = "COND"
+        case "move_out": prefix = "MO"
+        default: prefix = "DOC"
+        }
+        return "\(prefix)-\(digits)"
+    }
+
+    /// The demo's crew names, so a demo work order shows the column a real one
+    /// has. Round-robin rather than random: a screenshot run must produce the
+    /// same document twice.
+    private static func assigned(_ rows: [DocRowFixture]) -> [DocRowFixture] {
+        let crew = ["Jose", "Michael"]
+        return rows.enumerated().map { index, row in
+            var out = row
+            out.assignee = crew[index % crew.count]
+            return out
+        }
+    }
+
+    /// The authored blocks each kind carries in the REAL pipeline, written out
+    /// for the demo.
+    ///
+    /// The demo has to show what the product does, not less: the fixtures are
+    /// what onboarding teaches from and what an App Store reviewer sees, and
+    /// a demo estimate with no SCOPE OF WORK would be advertising the version
+    /// of this product that existed yesterday. (The reverse of that mismatch —
+    /// a demo promising a deposit total the real move-out report could not
+    /// produce — is what prompted this whole pass.)
+    private static func demoSections(for kind: String) -> [DocSectionFixture] {
+        func para(_ key: String, _ label: String, _ value: String) -> DocFieldFixture {
+            DocFieldFixture(key: key, label: label, value: value, isGap: false, isParagraph: true)
+        }
+        func line(_ key: String, _ label: String, _ value: String?) -> DocFieldFixture {
+            DocFieldFixture(
+                key: key, label: label, value: value, isGap: value == nil, isParagraph: false
+            )
+        }
+        switch kind {
+        case "estimate":
+            return [DocSectionFixture(key: "scope", label: "SCOPE OF WORK", fields: [para(
+                "scope_summary", "Scope of work",
+                "Refresh the front beds and walkway line: three yards of premium bark mulch "
+                    + "delivered and installed, boxwood trimmed and clippings hauled, sixty feet "
+                    + "of bed edging re-cut, and the zone 2 irrigation head replaced."
+            )])]
+        case "invoice":
+            return [DocSectionFixture(key: "work", label: "WORK PERFORMED", fields: [para(
+                "work_summary", "Work performed",
+                "Installed three yards of premium bark mulch across the front beds, trimmed the "
+                    + "boxwood along the walkway and hauled the clippings, re-cut sixty feet of "
+                    + "bed edging, and replaced the zone 2 irrigation head."
+            )])]
+        case "work_order":
+            return [
+                DocSectionFixture(key: "assignment", label: "ASSIGNMENT", fields: [
+                    line("crew", "Assigned to", "Jose, Michael"),
+                    line("schedule", "Scheduled", "Thursday, first thing"),
+                ]),
+                DocSectionFixture(key: "site", label: "SITE NOTES", fields: [
+                    para(
+                        "access", "Access",
+                        "Gate code 4412 on the side yard. Park on the street — the driveway is "
+                            + "being sealed. Dog is in the back until eight."
+                    ),
+                    para(
+                        "safety", "Safety",
+                        "Irrigation lines run shallow along the walkway bed — hand-dig within a "
+                            + "foot of the heads."
+                    ),
+                ]),
+            ]
+        case "condition", "move_out":
+            return [DocSectionFixture(key: "summary", label: "SUMMARY", fields: [para(
+                "summary", "Summary",
+                "Unit 12, walked at move-out. Overall condition is good with normal wear to the "
+                    + "walls throughout. Two items fall outside normal wear and are itemized "
+                    + "below; the water heater serial was logged for the file."
+            )])]
+        case "inspection":
+            return [DocSectionFixture(key: "summary", label: "SUMMARY", fields: [para(
+                "summary", "Summary",
+                "Pre-purchase inspection of a 2001 single-family home. One safety item: the hall "
+                    + "bathroom GFCI does not trip on test. Three repair items follow, including "
+                    + "three lifted shingles on the south slope and grading that falls toward the "
+                    + "foundation at the northeast corner."
+            )])]
+        default:
+            return [DocSectionFixture(key: "summary", label: "SUMMARY", fields: [para(
+                "summary", "Summary",
+                "Site visit write-up. The items below are what was walked and agreed, in the "
+                    + "order they were covered on site."
+            )])]
+        }
     }
 
     // MARK: Document schemas (Plan 19) — in-memory demo conformance.

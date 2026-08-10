@@ -57,16 +57,27 @@ extension MurmurEngine {
         dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(unixSeconds))).uppercased()
     }
 
-    static func docNumberLabel(docKind: String, docNumber: UInt64) -> String {
+    /// "EST-0047". `numberPrefix` is the resolved schema row's, so an
+    /// operator's own document type numbers itself correctly; the switch is
+    /// the fallback for a pre-Plan-19 body that carries no prefix.
+    static func docNumberLabel(
+        docKind: String,
+        docNumber: UInt64,
+        numberPrefix: String? = nil
+    ) -> String {
         let prefix: String
-        switch docKind {
-        case "estimate": prefix = "EST"
-        case "invoice": prefix = "INV"
-        case "work_order": prefix = "WO"
-        case "inspection": prefix = "IR"
-        case "condition": prefix = "COND"
-        case "move_out": prefix = "MO"
-        default: prefix = "DOC"
+        if let numberPrefix, !numberPrefix.isEmpty {
+            prefix = numberPrefix
+        } else {
+            switch docKind {
+            case "estimate": prefix = "EST"
+            case "invoice": prefix = "INV"
+            case "work_order": prefix = "WO"
+            case "inspection": prefix = "IR"
+            case "condition": prefix = "COND"
+            case "move_out": prefix = "MO"
+            default: prefix = "DOC"
+            }
         }
         return "\(prefix)-\(String(format: "%04d", docNumber))"
     }
@@ -83,6 +94,10 @@ extension MurmurEngine {
         switch key {
         case "deposit_deduction": return "DEPOSIT DEDUCTION"
         case "findings": return "FINDINGS"
+        // What the sum MEANS differs, and this label is the only place a
+        // reader learns it: an estimate totals an offer, an invoice states a
+        // debt that is now owed.
+        case "amount_due": return "AMOUNT DUE"
         default: return "TOTAL"
         }
     }
@@ -112,7 +127,7 @@ extension MurmurEngine {
     static func row(_ line: FFIDocLine) -> DocRowFixture {
         DocRowFixture(
             title: line.title,
-            sub: line.isGap ? "NOT HEARD — TAP OR SAY IT" : line.detail,
+            sub: line.isGap ? OperatorNote.gap : line.detail,
             subWarn: line.isGap,
             hint: nil, // Deferred 4: price-book autofill hint
             qty: line.qty,
@@ -126,8 +141,56 @@ extension MurmurEngine {
             amount: line.amountCents.map(amountString) ?? (line.isGap ? "——" : ""),
             isEdit: false, // Deferred 4: pre-filled-from-history affordance
             isGap: line.isGap,
-            itemId: line.itemId
+            itemId: line.itemId,
+            assignee: line.assignee
         )
+    }
+
+    static func totalLabelText(_ key: String) -> String { totalLabel(key) }
+
+    /// The authored sections, grouped from the flat `fields` array the
+    /// payload carries. Order is preserved — core emits fields in schema
+    /// order, and the schema order IS the reading order of the document.
+    static func sections(_ payload: FFIDocumentPayload) -> [DocSectionFixture] {
+        var order: [String] = []
+        var grouped: [String: [DocFieldFixture]] = [:]
+        for field in payload.fields {
+            if grouped[field.sectionKey] == nil {
+                order.append(field.sectionKey)
+                grouped[field.sectionKey] = []
+            }
+            grouped[field.sectionKey]?.append(DocFieldFixture(
+                key: field.key,
+                label: field.label,
+                value: field.value,
+                isGap: field.isGap,
+                isParagraph: field.kind == "long_text"
+            ))
+        }
+        return order.map { key in
+            DocSectionFixture(
+                key: key,
+                // Core sends the field labels but not the section's own; the
+                // section key is authored lowercase and stable, so it is the
+                // honest source for the stamp above the block.
+                label: sectionLabel(key),
+                fields: grouped[key] ?? []
+            )
+        }
+    }
+
+    /// Display copy for an authored section. Unknown (operator-authored)
+    /// keys fall back to the key itself, title-cased — better a plain stamp
+    /// than a section with no heading at all.
+    static func sectionLabel(_ key: String) -> String {
+        switch key {
+        case "scope": return "SCOPE OF WORK"
+        case "work": return "WORK PERFORMED"
+        case "assignment": return "ASSIGNMENT"
+        case "site": return "SITE NOTES"
+        case "summary": return "SUMMARY"
+        default: return key.replacingOccurrences(of: "_", with: " ").uppercased()
+        }
     }
 
     static func document(_ payload: FFIDocumentPayload) -> DocumentModel {
@@ -137,6 +200,13 @@ extension MurmurEngine {
             staticTotal: payload.staticTotalCents.map(amountString) ?? "——",
             note: note(for: payload.docKind, queued: payload.queued),
             send: sendLabel(for: payload.docKind),
+            sections: sections(payload),
+            docNumber: docNumberLabel(
+                docKind: payload.docKind,
+                docNumber: payload.docNumber,
+                numberPrefix: payload.numberPrefix
+            ),
+            docKindLabel: DocKinds.label(for: payload.docKind).uppercased(),
             // Built-in kinds answer directly; a custom schema (Plan 19) is
             // priced iff core actually rendered money onto it — an amount or
             // a gap on any line. Guessing from the kind name alone would tell

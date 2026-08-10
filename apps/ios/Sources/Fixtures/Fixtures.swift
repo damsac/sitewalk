@@ -44,6 +44,37 @@ struct CapturedFixture: Identifiable {
     }
 }
 
+/// Marks the app writes onto a document to talk to the OPERATOR — never to
+/// whoever receives it.
+///
+/// "NOT HEARD — TAP OR SAY IT" is an instruction to the person holding the
+/// phone. "ADDED BY YOU" and "FILLED BY YOU" are provenance, useful while
+/// reviewing and faintly damaging on a client's copy: they advertise which
+/// parts of the estimate the software got wrong. Isaac, 2026-08-09: *"when
+/// the user hits send... little tag lines like 'added by you' are not
+/// included. Overall these should be clean and professional looking."*
+///
+/// They live here, in one place, because the failure mode is silent: a new
+/// marker added at a call site would simply start printing on customers'
+/// paperwork, and nobody would find out from the app. `DocumentPDF` strips
+/// everything in `all`, so a marker that is not registered here is a bug that
+/// ships. Add new ones HERE, not as string literals.
+enum OperatorNote {
+    static let added = "ADDED BY YOU"
+    static let filled = "FILLED BY YOU"
+    static let gap = "NOT HEARD — TAP OR SAY IT"
+
+    static let all: Set<String> = [added, filled, gap]
+
+    /// True for any operator-facing mark, including the demo fixtures' older
+    /// comma-spelled variants ("NOT HEARD, TAP OR SAY IT").
+    static func isOperatorFacing(_ text: String) -> Bool {
+        let upper = text.uppercased()
+        return all.contains(text) || upper.hasPrefix("NOT HEARD") || upper.hasPrefix("NOT ACCESSED")
+            || upper.hasSuffix("BY YOU")
+    }
+}
+
 struct DocRowFixture: Identifiable {
     let id = UUID()
     /// `var` so review can rename a line in place (#…, Isaac 2026-08-09).
@@ -53,7 +84,9 @@ struct DocRowFixture: Identifiable {
     var sub: String
     var subWarn: Bool = false
     var hint: String? = nil
-    let qty: String
+    /// `var` so the print path can blank a gap's "——" — a dash is warning
+    /// styling for the operator, not information for the client.
+    var qty: String
     /// `var` so a non-pricing document can blank it without rebuilding the row
     /// field by field (#222) — a work order must not carry prices.
     var amount: String
@@ -63,6 +96,9 @@ struct DocRowFixture: Identifiable {
     /// fixture rows (no core ids), total/rollup lines, or rows built before
     /// Plan 12 landed. // sac: a demo could wire a stub id to preview grouping.
     var itemId: String?
+    /// Who is doing this line — work orders only, where the money column is
+    /// empty by design and that space belongs to the crew.
+    var assignee: String?
 }
 
 struct TradeFixture {
@@ -149,13 +185,34 @@ enum DocKinds {
         case "work_order": return "CREW"
         case "condition": return "REPORT"
         case "move_out": return "DEPOSIT"
-        case "inspection": return "TREC REPORT"
+        // NOT "TREC REPORT". TREC is the Texas Real Estate Commission's
+        // mandatory inspection form, which a licensed Texas inspector is
+        // required to deliver on — and this app produces a findings list, not
+        // that form. There is no TREC section mapping anywhere in the
+        // codebase. An inspector reading that stamp would reasonably expect
+        // the form and discover otherwise after the walk, which is the worst
+        // possible moment.
+        case "inspection": return "FINDINGS"
         default: return "EXPORT"
         }
     }
 
+    /// Mirrors core's `is_pricing_kind`. `move_out` joined on 2026-08-09: the
+    /// deduction total IS the move-out report, and the unpriced version could
+    /// not do the one job it has.
     static func isPricingKind(_ kind: String) -> Bool {
-        kind == "estimate" || kind == "invoice"
+        kind == "estimate" || kind == "invoice" || kind == "move_out"
+    }
+
+    /// Mirrors core's `total_shape` label key → the demo's display copy, so a
+    /// demo invoice says AMOUNT DUE exactly like the real one.
+    static func totalLabel(for kind: String) -> String {
+        switch kind {
+        case "invoice": return "AMOUNT DUE"
+        case "move_out": return "DEPOSIT DEDUCTION"
+        case "inspection": return "FINDINGS"
+        default: return isPricingKind(kind) ? "TOTAL" : "ITEMS"
+        }
     }
 }
 
@@ -190,12 +247,12 @@ enum Fixtures {
         docNo: "EST-0047",
         docDate: "JUL 01 2026",
         rows: [
-            DocRowFixture(title: "Premium bark mulch, front beds", sub: "DELIVERED + INSTALLED", qty: "3 CU YD", amount: "$285"),
-            DocRowFixture(title: "Boxwood trim, walkway line", sub: "SHAPE + HAUL CLIPPINGS", qty: "× 4", amount: "$140"),
-            DocRowFixture(title: "Irrigation head, zone 2", sub: "PARTS + LABOR", hint: "↺ LAST 3: $110 · $120 · $125", qty: "× 1", amount: "$120", isEdit: true),
-            DocRowFixture(title: "Bed edging, front beds", sub: "SPADE EDGE, RE-CUT", qty: "60 LF", amount: "$310"),
+            DocRowFixture(title: "Premium bark mulch, front beds", sub: "Delivered and installed", qty: "3 CU YD", amount: "$285"),
+            DocRowFixture(title: "Boxwood trim, walkway line", sub: "Shaped, clippings hauled", qty: "× 4", amount: "$140"),
+            DocRowFixture(title: "Irrigation head, zone 2", sub: "Parts and labor", hint: "↺ LAST 3: $110 · $120 · $125", qty: "× 1", amount: "$120", isEdit: true),
+            DocRowFixture(title: "Bed edging, front beds", sub: "Spade edge, re-cut", qty: "60 LF", amount: "$310"),
             DocRowFixture(title: "Haul & disposal", sub: "NOT HEARD, TAP OR SAY IT", subWarn: true, qty: "× 1", amount: "——", isGap: true),
-            DocRowFixture(title: "Crew labor", sub: "2-MAN CREW · HALF DAY", qty: "4 HR", amount: "$355"),
+            DocRowFixture(title: "Crew labor", sub: "Two-man crew · half day", qty: "4 HR", amount: "$355"),
         ],
         totalKey: "TOTAL",
         totalValue: "$1,210",
@@ -232,10 +289,10 @@ enum Fixtures {
         docNo: "MO-0112",
         docDate: "JUL 01 2026",
         rows: [
-            DocRowFixture(title: "Carpet, bedroom 1", sub: "STAIN NEAR WINDOW · PHOTO ×2", hint: "↺ SCHEDULE: CARPET CLEAN $140", qty: "DEDUCT", amount: "$140", isEdit: true),
-            DocRowFixture(title: "Blinds, kitchen", sub: "2 SLATS MISSING · PHOTO ×1", qty: "DEDUCT", amount: "$45"),
-            DocRowFixture(title: "Walls, all rooms", sub: "NORMAL WEAR AND TEAR", qty: "OK", amount: "—"),
-            DocRowFixture(title: "Water heater", sub: "MFG 2019 · SERIAL LOGGED", qty: "NOTE", amount: "—"),
+            DocRowFixture(title: "Carpet, bedroom 1", sub: "Stain near the window · photo ×2", hint: "↺ SCHEDULE: CARPET CLEAN $140", qty: "DEDUCT", amount: "$140", isEdit: true),
+            DocRowFixture(title: "Blinds, kitchen", sub: "Two slats missing · photo ×1", qty: "DEDUCT", amount: "$45"),
+            DocRowFixture(title: "Walls, all rooms", sub: "Normal wear and tear", qty: "OK", amount: "—"),
+            DocRowFixture(title: "Water heater", sub: "Mfg 2019 · serial logged", qty: "NOTE", amount: "—"),
             DocRowFixture(title: "Garage remote", sub: "NOT HEARD, RETURNED? SAY IT", subWarn: true, qty: "DEDUCT", amount: "——", isGap: true),
         ],
         totalKey: "DEPOSIT DEDUCTION",
@@ -273,15 +330,18 @@ enum Fixtures {
         docNo: "IR-0389",
         docDate: "JUL 01 2026",
         rows: [
-            DocRowFixture(title: "Roof covering, south slope", sub: "3 LIFTED SHINGLES · PHOTO ×3", qty: "REPAIR", amount: "§ 2.1"),
-            DocRowFixture(title: "GFCI, hall bathroom", sub: "FAILS TO TRIP ON TEST", hint: "↺ AUTO-FILED FROM YOUR LAST 12 REPORTS", qty: "SAFETY", amount: "§ 6.4", isEdit: true),
-            DocRowFixture(title: "Attic ventilation", sub: "RIDGE + SOFFIT, ADEQUATE", qty: "OK", amount: "§ 3.2"),
-            DocRowFixture(title: "Furnace filter", sub: "REPLACEMENT OVERDUE", qty: "MAINT", amount: "§ 5.1"),
+            DocRowFixture(title: "Roof covering, south slope", sub: "Three lifted shingles · photo ×3", qty: "REPAIR", amount: "§ 2.1"),
+            DocRowFixture(title: "GFCI, hall bathroom", sub: "Fails to trip on test", hint: "↺ AUTO-FILED FROM YOUR LAST 12 REPORTS", qty: "SAFETY", amount: "§ 6.4", isEdit: true),
+            DocRowFixture(title: "Attic ventilation", sub: "Ridge and soffit, adequate", qty: "OK", amount: "§ 3.2"),
+            DocRowFixture(title: "Furnace filter", sub: "Replacement overdue", qty: "MAINT", amount: "§ 5.1"),
             DocRowFixture(title: "Water heater TPR valve", sub: "NOT ACCESSED, VERIFY OR EXCLUDE", subWarn: true, qty: "——", amount: "§ 5.3", isGap: true),
         ],
         totalKey: "FINDINGS",
         totalValue: "1 SAFETY · 3 REPAIR",
-        note: "FINDINGS FILE INTO TREC SECTIONS AUTOMATICALLY: REORDER BY DRAG",
+        // Was "FINDINGS FILE INTO TREC SECTIONS AUTOMATICALLY" — see
+        // `DocKinds.stamp`: there is no TREC mapping in the product, and this
+        // demo is what an inspector decides on.
+        note: "FINDINGS ARE GROUPED BY SEVERITY: SAFETY FIRST",
         send: "SEND REPORT"
     )
 

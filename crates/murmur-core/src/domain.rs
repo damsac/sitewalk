@@ -239,6 +239,20 @@ pub const VALID_FIELD_KINDS: [&str; 7] =
 /// completes at review (always a gap in v1), `static` = authored constant.
 pub const VALID_FILL_KINDS: [&str; 3] = ["walk", "manual", "static"];
 
+/// The allowlist for a `line_items` section's `line_detail` — what the second
+/// line under each item is FOR. Three, because a document is written for
+/// exactly one of three readers:
+///
+/// - `inclusion` — the CLIENT, deciding. What that line covers, so the number
+///   next to it is defensible: "delivered and installed, 3 cu yd".
+/// - `directive` — the CREW, executing. How to do it and what to watch for,
+///   plus who is doing it (`DocLine.assignee`).
+/// - `observation` — the RECORD, later. What was seen, in enough detail to
+///   stand up months from now in a deposit dispute or a re-inspection.
+///
+/// `""` means no second line, and is the default for every pre-existing row.
+pub const VALID_LINE_DETAILS: [&str; 4] = ["", "inclusion", "directive", "observation"];
+
 /// Fixed built-in schema ids (Plan 19 §3): UUIDv7-shaped constants (version
 /// nibble 7, variant 8) so they sort FIRST in any UUIDv7-ordered list and
 /// read as built-in. Identical on every device — together with the sentinel
@@ -271,6 +285,16 @@ pub struct SchemaField {
     /// The authored constant for `fill == "static"` fields; `None` otherwise.
     #[serde(default)]
     pub static_value: Option<String>,
+    /// What this field should contain, in the model's terms — sent with the
+    /// label on the compose pass.
+    ///
+    /// A label alone is too thin to fill well: "Access" produces one word,
+    /// while "how the crew gets in and what they must know before starting —
+    /// gate codes, parking, dogs" produces the paragraph a foreman actually
+    /// needs. Additive and defaulted, so every authored and pre-existing row
+    /// parses unchanged.
+    #[serde(default)]
+    pub hint: Option<String>,
 }
 
 /// One ordered section of a document schema (Plan 19 §3).
@@ -283,6 +307,17 @@ pub struct SchemaSection {
     /// `line_items` sections only: whether the build runs the pricing pass.
     #[serde(default)]
     pub priced: bool,
+    /// `line_items` sections only: what the second line under each item says.
+    /// One of `VALID_LINE_DETAILS`; `""` (the default, and every pre-existing
+    /// row) means no second line and no compose pass.
+    ///
+    /// This is the difference between a list and a document. "Mulch, front
+    /// beds" is a note to self; "Mulch, front beds / delivered and installed,
+    /// 3 cu yd" is a line on an estimate a client can agree to, and "JOSE —
+    /// strip the old bark before laying, watch the irrigation heads" is a
+    /// line on a work order a crew can execute from.
+    #[serde(default)]
+    pub line_detail: String,
     #[serde(default)]
     pub fields: Vec<SchemaField>,
 }
@@ -315,6 +350,31 @@ pub struct DocumentSchema {
     pub device_id: String,
 }
 
+/// One `filled` section of authored fields, in render order.
+fn filled(key: &str, label: &str, fields: Vec<SchemaField>) -> SchemaSection {
+    SchemaSection {
+        key: key.into(),
+        kind: "filled".into(),
+        label: label.into(),
+        priced: false,
+        line_detail: String::new(),
+        fields,
+    }
+}
+
+/// One walk-filled field: the model writes it, or it stays a truthful gap.
+fn walk_field(key: &str, kind: &str, label: &str, hint: &str) -> SchemaField {
+    SchemaField {
+        key: key.into(),
+        kind: kind.into(),
+        label: label.into(),
+        fill: "walk".into(),
+        static_value: None,
+        hint: Some(hint.into()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn builtin_schema(
     id: &str,
     kind: &str,
@@ -323,7 +383,22 @@ fn builtin_schema(
     trade_key: Option<&str>,
     priced: bool,
     (total_kind, total_label_key): (&str, &str),
+    line_detail: &str,
+    mut sections: Vec<SchemaSection>,
 ) -> DocumentSchema {
+    // Section order IS reading order, and the line items come LAST. Every
+    // trade document on paper works this way: who, when, and what this is
+    // about at the top, the itemized body under it, the total at the foot. A
+    // crew reads ASSIGNMENT and SITE NOTES before they read a single task; a
+    // client may read SCOPE OF WORK and never read the lines at all.
+    sections.push(SchemaSection {
+        key: "line_items".into(),
+        kind: "line_items".into(),
+        label: "Items".into(),
+        priced,
+        line_detail: line_detail.into(),
+        fields: vec![],
+    });
     DocumentSchema {
         id: id.to_string(),
         kind: kind.to_string(),
@@ -332,13 +407,7 @@ fn builtin_schema(
         trade_key: trade_key.map(str::to_string),
         total_kind: total_kind.to_string(),
         total_label_key: total_label_key.to_string(),
-        sections: vec![SchemaSection {
-            key: "line_items".into(),
-            kind: "line_items".into(),
-            label: "Items".into(),
-            priced,
-            fields: vec![],
-        }],
+        sections,
         schema_version: 1,
         // Fixed literals (Plan 19 Stage 1): a seeded row is byte-identical
         // on every device.
@@ -367,13 +436,122 @@ fn builtin_schema(
 /// would be noise.
 pub fn builtin_schemas() -> Vec<DocumentSchema> {
     vec![
-        builtin_schema(BUILTIN_SCHEMA_ID_ESTIMATE, "estimate", "Estimate", "EST", None, true, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_INVOICE, "invoice", "Invoice", "INV", None, true, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_WORK_ORDER, "work_order", "Work Order", "WO", None, false, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_CONDITION, "condition", "Condition Report", "COND", Some("property"), false, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_MOVE_OUT, "move_out", "Move-Out Report", "MO", Some("property"), false, ("sum", "total")),
-        builtin_schema(BUILTIN_SCHEMA_ID_INSPECTION, "inspection", "Inspection Report", "IR", Some("inspection"), false, ("static", "findings")),
-        builtin_schema(BUILTIN_SCHEMA_ID_REPORT, "report", "Report", "DOC", None, false, ("sum", "total")),
+        // ESTIMATE — read by a client deciding whether to say yes. The scope
+        // paragraph is what makes the number defensible: a bare list of
+        // priced lines reads like a receipt for work nobody has agreed to,
+        // and it is the paragraph, not the total, that a client forwards to
+        // their spouse.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_ESTIMATE, "estimate", "Estimate", "EST", None, true,
+            ("sum", "total"), "inclusion",
+            vec![filled("scope", "Scope of Work", vec![walk_field(
+                "scope_summary", "long_text", "Scope of work",
+                "2-3 plain sentences a client can read, in FUTURE tense: what will be done, \
+                 where on the property, and anything notable about how or in what order. \
+                 No prices — they are on the lines.",
+            )])],
+        ),
+        // INVOICE — the same document after the fact, and the difference is
+        // not cosmetic: an estimate offers, an invoice demands. Past tense,
+        // and the total says what is owed.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_INVOICE, "invoice", "Invoice", "INV", None, true,
+            ("sum", "amount_due"), "inclusion",
+            vec![filled("work", "Work Performed", vec![walk_field(
+                "work_summary", "long_text", "Work performed",
+                "2-3 plain sentences in PAST tense: what was actually done, where, and \
+                 anything the client should know about the finished work. No prices.",
+            )])],
+        ),
+        // WORK ORDER — the only one of these written for the crew, and the
+        // reason it carries no money: a sub who sees the client price bids
+        // higher next time. What it carries instead is everything a crew
+        // needs to start without calling: who, when, how to get in, what will
+        // hurt them.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_WORK_ORDER, "work_order", "Work Order", "WO", None, false,
+            ("sum", "total"), "directive",
+            vec![
+                filled("assignment", "Assignment", vec![
+                    walk_field(
+                        "crew", "text", "Assigned to",
+                        "The people named as doing this work, comma-separated, exactly as \
+                         spoken (\"Jose, Michael\"). Only names actually said — never invent \
+                         a crew.",
+                    ),
+                    walk_field(
+                        "schedule", "text", "Scheduled",
+                        "When the work is to happen, in the operator's own words (\"Thursday \
+                         morning\", \"first thing Monday\"). Only if it was stated.",
+                    ),
+                ]),
+                filled("site", "Site Notes", vec![
+                    walk_field(
+                        "access", "long_text", "Access",
+                        "How the crew gets in and what they must know before starting: gate \
+                         codes, parking, which door, dogs, tenant or client contact, hours \
+                         they may work. Only what was said.",
+                    ),
+                    walk_field(
+                        "safety", "long_text", "Safety",
+                        "Hazards a crew must be warned about before they arrive: buried or \
+                         overhead utilities, slopes, unstable structures, irrigation lines, \
+                         chemicals. Only what was said.",
+                    ),
+                ]),
+            ],
+        ),
+        // CONDITION REPORT — evidence of a property's state at a moment,
+        // usually move-in. Its whole value is being specific enough to prove
+        // what changed later.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_CONDITION, "condition", "Condition Report", "COND",
+            Some("property"), false, ("sum", "total"), "observation",
+            vec![filled("summary", "Summary", vec![walk_field(
+                "summary", "long_text", "Summary",
+                "2-4 plain sentences: the unit or property, what this walk covered, and the \
+                 overall condition found. Neutral and factual — this is a record.",
+            )])],
+        ),
+        // MOVE-OUT REPORT — the deposit document, and therefore a MONEY
+        // document. It exists to justify what is withheld, line by line,
+        // against a legal deadline; an unpriced version of it cannot do the
+        // one job it has.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_MOVE_OUT, "move_out", "Move-Out Report", "MO",
+            Some("property"), true, ("sum", "deposit_deduction"), "observation",
+            vec![filled("summary", "Summary", vec![walk_field(
+                "summary", "long_text", "Summary",
+                "2-4 plain sentences: the unit, the move-out date if stated, and the overall \
+                 condition — separating damage from normal wear where it was called out. \
+                 This may be read by a tenant disputing a deduction, so stay factual.",
+            )])],
+        ),
+        // INSPECTION REPORT — findings, not money, which is why it counts
+        // instead of summing.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_INSPECTION, "inspection", "Inspection Report", "IR",
+            Some("inspection"), false, ("static", "findings"), "observation",
+            vec![filled("summary", "Summary", vec![walk_field(
+                "summary", "long_text", "Summary",
+                "3-4 plain sentences: the property, what was inspected, and the findings that \
+                 matter most — safety items first. Never state a system is sound if it was \
+                 not examined.",
+            )])],
+        ),
+        // REPORT — the universal write-up, and the one an unknown trade
+        // falls back to. It has no money and no specialist structure, so the
+        // narrative and the per-line observations ARE the document.
+        builtin_schema(
+            BUILTIN_SCHEMA_ID_REPORT, "report", "Report", "DOC", None, false,
+            ("sum", "total"), "observation",
+            vec![filled("summary", "Summary", vec![walk_field(
+                "summary", "long_text", "Summary",
+                "3-4 plain sentences: where this was, what the visit covered, what was found \
+                 or decided, and anything outstanding. This is the whole write-up, so it \
+                 carries the context the terse lines below cannot.",
+            )])],
+        ),
     ]
 }
 

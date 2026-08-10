@@ -1539,7 +1539,46 @@ final class AppModel {
     /// Provenance for a line the operator added at review, kept off the walk's
     /// own vocabulary ("NOT HEARD", "FILLED BY YOU") because it is a different
     /// claim: this line was never spoken at all.
-    static let addedLineNote = "ADDED BY YOU"
+    static let addedLineNote = OperatorNote.added
+
+    /// The authored field being edited, as (section key, field key). Separate
+    /// from `editingRowID` because a field is not a line: it has no amount, no
+    /// quantity and nothing to remove — the sheet has to know which it is.
+    var editingField: (section: String, key: String)?
+
+    /// Opens an authored field (a work order's ACCESS note, an estimate's
+    /// SCOPE OF WORK) for editing.
+    ///
+    /// The same reasoning as tap-to-edit on a line, and the same seam: these
+    /// are the fields the walk was thin on, so the gap is a prompt to finish
+    /// the document rather than a defect. An operator who is about to send a
+    /// work order with a blank SAFETY block should be able to type the one
+    /// sentence they know without regenerating the whole thing.
+    func beginFieldEdit(section: DocSectionFixture, field: DocFieldFixture) {
+        editingField = (section: section.key, key: field.key)
+        editTitle = field.value ?? ""
+        editText = ""
+        editingRowID = nil
+        editingRowIsNew = false
+    }
+
+    /// Writes the field back. An emptied value returns it to a truthful gap —
+    /// the same rule as an emptied amount, for the same reason.
+    func commitFieldEdit() {
+        guard let target = editingField, var doc = document,
+              let sectionIndex = doc.sections.firstIndex(where: { $0.key == target.section }),
+              let fieldIndex = doc.sections[sectionIndex].fields
+                  .firstIndex(where: { $0.key == target.key })
+        else {
+            editingField = nil
+            return
+        }
+        let value = editTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        doc.sections[sectionIndex].fields[fieldIndex].value = value.isEmpty ? nil : value
+        doc.sections[sectionIndex].fields[fieldIndex].isGap = value.isEmpty
+        document = doc
+        editingField = nil
+    }
 
     func beginEdit(_ row: DocRowFixture) {
         editingRowID = row.id
@@ -1637,7 +1676,7 @@ final class AppModel {
                 row.amount = DocumentModel.money(cents: Int((dollars * 100).rounded()))
                 row.isGap = false
                 row.subWarn = false
-                if old.isGap && !added { row.sub = "FILLED BY YOU" }
+                if old.isGap && !added { row.sub = OperatorNote.filled }
             } else if cleaned.isEmpty {
                 // Erased on purpose. Back to an honest gap — keeping the old
                 // number would be the one failure this screen exists to
@@ -1645,7 +1684,7 @@ final class AppModel {
                 row.amount = "——"
                 row.isGap = true
                 if !added {
-                    row.sub = "NOT HEARD — TAP OR SAY IT"
+                    row.sub = OperatorNote.gap
                     row.subWarn = true
                 }
             }

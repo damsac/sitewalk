@@ -54,14 +54,28 @@ struct ReviewView: View {
                             // outside the fixture estimate rather than invented:
                             // core mints real numbers, and a fake one on a real
                             // document would be worse than none.
-                            docKind: model.reviewKind.map { DocKinds.label(for: $0).uppercased() }
-                                ?? model.trade.docKind,
-                            docNo: model.reviewKind == nil
-                                || model.reviewKind == DocKinds.primaryKind(for: model.trade.key)
-                                ? model.trade.docNo : "",
+                            docKind: doc.docKindLabel.isEmpty
+                                ? model.trade.docKind : doc.docKindLabel,
+                            // The number core actually minted for THIS build.
+                            // It used to fall back to the fixture's EST-0047
+                            // for a trade's lead kind and to nothing at all
+                            // for the other six — so every real invoice went
+                            // out unnumbered. See `DocumentModel.docNumber`.
+                            docNo: doc.docNumber.isEmpty ? model.trade.docNo : doc.docNumber,
                             docDate: model.letterheadDate,
                             branding: model.branding
                         )
+                        // The authored blocks, above the itemized body — the
+                        // order every trade document on paper uses (who and
+                        // what this is about, then the lines, then the total).
+                        ForEach(doc.sections) { section in
+                            DocSectionView(section: section) { field in
+                                model.beginFieldEdit(section: section, field: field)
+                            }
+                        }
+                        if !doc.sections.isEmpty {
+                            Spacer(minLength: 14)
+                        }
                         ForEach(doc.rows) { row in
                             DocRowView(row: row)
                                 .contentShape(Rectangle())
@@ -156,6 +170,12 @@ struct ReviewView: View {
             set: { if !$0 { model.commitEdit() } }
         )) {
             editSheet
+        }
+        .sheet(isPresented: Binding(
+            get: { model.editingField != nil },
+            set: { if !$0 { model.commitFieldEdit() } }
+        )) {
+            fieldSheet
         }
         .sheet(isPresented: Binding(
             get: { model.shareURL != nil },
@@ -310,6 +330,39 @@ struct ReviewView: View {
         .buttonStyle(.plain)
         .padding(.top, 10)
         .accessibilityLabel("Add a line")
+    }
+
+    /// The authored-field editor. Deliberately plainer than the line sheet:
+    /// a field has no amount, no quantity and nothing to remove — it is one
+    /// block of words — so offering those controls would be offering three
+    /// dead buttons.
+    private var fieldSheet: some View {
+        let label = model.document?.sections
+            .first { $0.key == model.editingField?.section }?
+            .fields.first { $0.key == model.editingField?.key }?
+            .label ?? "Field"
+        return VStack(alignment: .leading, spacing: 16) {
+            SectionLabel(label)
+            TextField("What was said", text: $model.editTitle, axis: .vertical)
+                .font(Theme.F.ui(16, .medium))
+                .lineLimit(3...8)
+                .focused($titleFocused)
+                .padding(.bottom, 4)
+                .overlay(alignment: .bottom) { Theme.C.hairline.frame(height: 1.5) }
+            Text("LEAVE EMPTY TO PUT IT BACK TO A GAP")
+                .font(Theme.F.mono(8, .semibold))
+                .tracking(1.2)
+                .foregroundStyle(Theme.C.ink45)
+            Button { model.commitFieldEdit() } label: {
+                BlockLabel("SET")
+            }
+            .buttonStyle(RaisedBlockStyle(height: Theme.S.buttonHeight, leadingDot: false))
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.S.screenPad)
+        .presentationDetents([.height(360)])
+        .presentationBackground(Theme.C.paper)
+        .onAppear { titleFocused = true }
     }
 
     /// One sheet for everything a line can need: its words, its number, and

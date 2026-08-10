@@ -42,9 +42,16 @@ pub fn doc_kinds_for_template(template: Option<&str>) -> &'static [&'static str]
 }
 
 /// Plan 13 D5: whether a `doc_kind` needs a pricing pass (an amount on every
-/// line). Only `estimate`/`invoice` are pricing kinds.
+/// line).
+///
+/// `move_out` joined the two obvious ones on 2026-08-09. A move-out report
+/// exists to justify what is withheld from a deposit, line by line, against a
+/// statutory deadline — the deduction total IS the document, and the unpriced
+/// version could not do the one job it has. (It had been unpriced while the
+/// demo screen the product is sold on showed "DEPOSIT DEDUCTION $185", a
+/// number the shipped build could not produce.)
 pub fn is_pricing_kind(kind: &str) -> bool {
-    matches!(kind, "estimate" | "invoice")
+    matches!(kind, "estimate" | "invoice" | "move_out")
 }
 
 /// Total-shape per BUILT-IN `doc_kind` (Plan 13; lifted here from
@@ -56,6 +63,11 @@ pub fn is_pricing_kind(kind: &str) -> bool {
 pub fn total_shape(doc_kind: &str) -> (&'static str, &'static str) {
     match doc_kind {
         "inspection" => ("static", "findings"),
+        // What the sum MEANS differs, and the label is the only place a
+        // reader learns it: an estimate totals an offer, an invoice states a
+        // debt, and a move-out report tallies what is being kept.
+        "invoice" => ("sum", "amount_due"),
+        "move_out" => ("sum", "deposit_deduction"),
         _ => ("sum", "total"),
     }
 }
@@ -938,13 +950,22 @@ mod tests {
     }
 
     #[test]
-    fn is_pricing_kind_flags_only_estimate_and_invoice() {
+    fn is_pricing_kind_flags_the_three_money_documents() {
         assert!(is_pricing_kind("estimate"));
         assert!(is_pricing_kind("invoice"));
-        assert!(!is_pricing_kind("work_order"));
+        assert!(is_pricing_kind("move_out"), "the deduction total IS the move-out report");
+        assert!(!is_pricing_kind("work_order"), "money on a crew's copy is the wrong document");
         assert!(!is_pricing_kind("inspection"));
         assert!(!is_pricing_kind("report"));
-        assert!(!is_pricing_kind("condition"));
+        assert!(!is_pricing_kind("condition"), "a move-in record tallies nothing");
+    }
+
+    #[test]
+    fn a_sum_is_labelled_by_what_it_means() {
+        assert_eq!(total_shape("estimate"), ("sum", "total"));
+        assert_eq!(total_shape("invoice"), ("sum", "amount_due"));
+        assert_eq!(total_shape("move_out"), ("sum", "deposit_deduction"));
+        assert_eq!(total_shape("inspection"), ("static", "findings"));
     }
 
     /// Plan 13 N3 (Stage 2 flip): `doc_kind_for_template` is now

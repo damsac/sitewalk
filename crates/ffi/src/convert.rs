@@ -67,6 +67,7 @@ pub fn document_payload(artifact: &Artifact) -> Result<DocumentPayload, ConvertE
                     section: line.get("section").and_then(|x| x.as_str()).map(str::to_string),
                     is_gap: line.get("is_gap").and_then(|x| x.as_bool()).unwrap_or(false),
                     item_id: line.get("item_id").and_then(|x| x.as_str()).map(str::to_string),
+                    assignee: line.get("assignee").and_then(|x| x.as_str()).map(str::to_string),
                 })
                 .collect()
         })

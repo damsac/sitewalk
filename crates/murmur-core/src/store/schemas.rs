@@ -345,6 +345,7 @@ mod tests {
                 kind: "line_items".into(),
                 label: "Items".into(),
                 priced: false,
+                line_detail: String::new(),
                 fields: vec![],
             }],
             schema_version: 1,
@@ -421,9 +422,36 @@ mod tests {
                 b.kind
             );
             assert!(
-                line_items[0].fields.is_empty()
-                    && b.sections.iter().all(|s| s.fields.is_empty()),
-                "{}: built-ins carry ZERO fields (launch-safety: zero fill calls)",
+                line_items[0].fields.is_empty(),
+                "{}: the line_items section itself never carries fields",
+                b.kind
+            );
+            // Every built-in writes prose now, so every one must be able to:
+            // an authored section with at least one walk field, and a
+            // `line_detail` from the allowlist. A built-in that silently lost
+            // its sections would still build — it would just quietly go back
+            // to being a list.
+            assert!(
+                crate::domain::VALID_LINE_DETAILS.contains(&line_items[0].line_detail.as_str()),
+                "{}: unknown line_detail '{}'",
+                b.kind,
+                line_items[0].line_detail
+            );
+            let walk_fields: Vec<&str> = b
+                .sections
+                .iter()
+                .flat_map(|s| s.fields.iter())
+                .filter(|f| f.fill == "walk")
+                .map(|f| f.key.as_str())
+                .collect();
+            assert!(!walk_fields.is_empty(), "{}: no authored fields to write", b.kind);
+            assert!(
+                b.sections
+                    .iter()
+                    .flat_map(|s| s.fields.iter())
+                    .filter(|f| f.fill == "walk")
+                    .all(|f| f.hint.is_some()),
+                "{}: a walk field without a hint fills badly — see SchemaField::hint",
                 b.kind
             );
         }
@@ -720,6 +748,7 @@ mod tests {
             kind: "gallery".into(),
             label: "Gallery".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![],
         });
         let err = s.save_document_schema(&bad).unwrap_err();
@@ -743,12 +772,14 @@ mod tests {
             kind: "filled".into(),
             label: "S2".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![SchemaField {
                 key: "b".into(),
                 kind: "barcode".into(),
                 label: "B".into(),
                 fill: "walk".into(),
                 static_value: None,
+                hint: None,
             }],
         });
         let err = s.save_document_schema(&bad).unwrap_err();
@@ -771,12 +802,14 @@ mod tests {
             kind: "filled".into(),
             label: "S2".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![SchemaField {
                 key: "f".into(),
                 kind: "text".into(),
                 label: "F".into(),
                 fill: "psychic".into(),
                 static_value: None,
+                hint: None,
             }],
         });
         let err = s.save_document_schema(&bad).unwrap_err();
@@ -822,12 +855,14 @@ mod tests {
             kind: "filled".into(),
             label: "Approvals".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![SchemaField {
                 key: "hoa_no".into(),
                 kind: "text".into(),
                 label: "HOA approval #".into(),
                 fill: "walk".into(),
                 static_value: None,
+                hint: None,
             }],
         });
         schema.sections.push(SchemaSection {
@@ -835,12 +870,14 @@ mod tests {
             kind: "static".into(),
             label: "Terms".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![SchemaField {
                 key: "terms_body".into(),
                 kind: "static".into(),
                 label: "Terms".into(),
                 fill: "static".into(),
                 static_value: Some("Valid for 30 days.".into()),
+                hint: None,
             }],
         });
         let saved = s.save_document_schema(&schema).unwrap();
