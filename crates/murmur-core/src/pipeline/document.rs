@@ -15,6 +15,7 @@ use harness::{
 use crate::domain::{Artifact, CapturedItem, DocumentSchema, SchemaField, SessionStatus};
 use crate::error::CoreError;
 use crate::pipeline::spoken_price::{fold_spoken_prices, FoldedPrices};
+use crate::pipeline::notes::{parse_notes_artifact, NotesEntry, NOTE_BUCKETS};
 use crate::pipeline::{doc_kinds_for_template, is_pricing_kind};
 use crate::store::Store;
 
@@ -96,6 +97,8 @@ pub(crate) fn render_lines(
                 "section": null,
                 "is_gap": is_gap,
                 "item_id": item.id,
+                // Written only by the compose pass, on `directive` documents.
+                "assignee": null,
             })
         })
         .collect()
@@ -228,101 +231,274 @@ pub(crate) async fn price_items(
     Ok(map)
 }
 
-const FILL_FIELDS: &str = "fill_fields";
+const COMPOSE_DOCUMENT: &str = "compose_document";
 
-fn fill_fields_tool_spec() -> ToolSpec {
+/// What the compose pass wrote onto one line.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct LineComposition {
+    /// The second line under the item: what it covers, what to do, or what
+    /// was seen — per the schema's `line_detail`.
+    pub detail: String,
+    /// Who is doing it. `directive` documents only, and only when a person
+    /// was actually named for that line.
+    pub assignee: Option<String>,
+}
+
+/// One pass's output: the authored fields, and the per-line writing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Composition {
+    /// Field key → value. Absent = a truthful gap.
+    pub fields: HashMap<String, String>,
+    /// `item_id` → what to write on that line.
+    pub lines: HashMap<String, LineComposition>,
+}
+
+fn compose_document_tool_spec(wants_lines: bool, wants_assignee: bool) -> ToolSpec {
+    let mut line_props = serde_json::json!({
+        "item_id": { "type": "string" },
+        "detail": { "type": "string", "description": "the second line under this item" },
+    });
+    if wants_assignee {
+        line_props["assignee"] = serde_json::json!({
+            "type": "string",
+            "description": "the person named as doing THIS line, exactly as spoken. Omit \
+                             unless someone was actually named for it."
+        });
+    }
+    let mut properties = serde_json::json!({
+        "fields": {
+            "type": "array",
+            "description": "Values for the named fields. Omit any field you are unsure about.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "value": { "type": "string" }
+                },
+                "required": ["key", "value"]
+            }
+        }
+    });
+    if wants_lines {
+        properties["lines"] = serde_json::json!({
+            "type": "array",
+            "description": "One entry per line you can say something REAL about, by its exact \
+                             item_id. Omit any line you would have to invent detail for.",
+            "items": {
+                "type": "object",
+                "properties": line_props,
+                "required": ["item_id", "detail"]
+            }
+        });
+    }
     ToolSpec {
-        name: FILL_FIELDS.into(),
-        description: "Fill named document fields from the session. Put a value only on a field \
-                       whose answer was clearly stated — omit any field you are unsure about. \
-                       You may fill only fields from the given list, by their exact key."
+        name: COMPOSE_DOCUMENT.into(),
+        description: "Write the prose of a field-work document: the named fields, and the \
+                       second line under each item. You may fill only the fields and items \
+                       given, by their exact key and item_id — you cannot add, rename, drop \
+                       or reorder anything."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
-            "properties": {
-                "fields": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "key": { "type": "string" },
-                            "value": { "type": "string" }
-                        },
-                        "required": ["key", "value"]
-                    }
-                }
-            },
+            "properties": properties,
             "required": ["fields"]
         }),
     }
 }
 
-/// Plan 19 Stage 5: the one focused fill pass — `price_items`' exact twin,
-/// including its degrade contract. Input is the items + session summary ONLY
-/// (never the transcript, R6); the items block reuses `format_pricing_items`
-/// (ONE item-formatting helper, no divergent shape). Echo-and-validate
-/// against the offered field keys, first-wins dedup, drop unknown keys.
-/// Usage is accumulated as soon as a response arrives (R9: an unparseable
-/// response still cost tokens) — BEFORE success/failure is decided. A
-/// provider `Err` carries no usage; a completed response whose tool block is
-/// missing/unparseable is `Err(HarnessError::Provider(..))` after
-/// `usage.add`, exactly like `price_items`. A tool block that IS present but
-/// simply omits a field is NOT an error — that field is a truthful gap.
-pub(crate) async fn fill_fields(
+/// The per-line brief, keyed by the schema's `line_detail`. Each one names
+/// the READER, because that is what actually decides the writing: the same
+/// item becomes "delivered and installed, 3 cu yd" for a client weighing a
+/// price, "strip the old bark before laying — watch the irrigation heads"
+/// for the crew doing it, and "south slope, three shingles lifted at the
+/// ridge" for whoever reads the record next year.
+fn line_brief(line_detail: &str) -> Option<String> {
+    // The rule that stops this pass padding, appended to every brief so it
+    // cannot drift out of one of them.
+    //
+    // It is here because the first real-API run produced it: handed the item
+    // "Strip old bark from front beds", the model wrote back "Strip old bark
+    // from front beds before mulching." — new words, no new information, on
+    // every single line. That is worse than a blank second line. It doubles
+    // the length of the document AND teaches the reader that the second line
+    // is noise, so they skim past the one line that actually carries a
+    // warning. Mocks cannot catch this: the shape was perfect.
+    const NOTHING_TO_ADD: &str = " If the line's own title already says everything you would \
+         write, OMIT that line entirely — a second line that restates the first is padding, and \
+         a document that pads is one a reader stops trusting. Never restate the title in other \
+         words. Write only where you are ADDING something the title does not say.";
+
+    let brief = match line_detail {
+        "inclusion" => {
+            "For each line, write what that line COVERS — quantity, material, and what is \
+             included in its price (delivered? hauled away? how many coats?). A short phrase, \
+             not a sentence. It is read by a client deciding whether the number beside it is \
+             fair, so it must justify the number without repeating it."
+        }
+        "directive" => {
+            "This is a WORK ORDER: the crew reads it, standing at the site, to do the job \
+             without calling anyone. For each line write ONLY what the title does not already \
+             tell them — the order to work in, the technique, the thing to watch out for, the \
+             spec to match. One short imperative sentence, in trade language. Where the \
+             operator named a person for a line, set `assignee` to that name exactly as \
+             spoken; a line nobody was named for gets no assignee."
+        }
+        "observation" => {
+            "For each line, write what was actually OBSERVED — where it is, how bad, how much, \
+             what condition. One or two short phrases. This is a record that may be read months \
+             from now by someone who was not there (a tenant disputing a deduction, a buyer, an \
+             adjuster), so specifics beat adjectives."
+        }
+        _ => return None,
+    };
+    Some(format!("{brief}{NOTHING_TO_ADD}"))
+}
+
+/// Renders the coordination notes the walk already produced as context.
+///
+/// These cost NOTHING to include: `summarize()` captured them at finish and
+/// they are sitting in the session's `notes` artifact. They are also exactly
+/// what the terse item list is missing — the gate code, the client's
+/// preference, the condition that changes the work — so a document written
+/// without them is guaranteed to be thinner than the walk was.
+fn format_notes_context(buckets: &[NotesEntry]) -> String {
+    if buckets.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n\nWhat was said around the work:\n");
+    for bucket in NOTE_BUCKETS {
+        let entries: Vec<&NotesEntry> = buckets.iter().filter(|b| b.bucket == bucket).collect();
+        if entries.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("{}:\n", bucket.replace('_', " ")));
+        for e in entries {
+            out.push_str(&format!("- {}: {}\n", e.label, e.detail));
+        }
+    }
+    // No trailing newline — every block in the user message supplies its own
+    // leading separator, so one here doubles up.
+    out.trim_end().to_string()
+}
+
+/// The output budget for one compose call, scaled to the document.
+///
+/// The pricing pass writes an integer per line and fits in a flat budget
+/// forever. This one writes PROSE — a paragraph per field plus a sentence or
+/// two per line — so a flat budget is a cliff: the model runs out mid-tool-call,
+/// the JSON is truncated, the parse fails, and the whole pass degrades to
+/// `queued` with every field a gap and every line bare.
+///
+/// That failure is silent and lands hardest on exactly the walks worth the
+/// most — a thirty-item walk on a big job blows a 1024-token budget while a
+/// four-item walk sails through, so the operator experiences it as "the long
+/// ones don't work" with no error to report. Hence: budget by the size of the
+/// thing being written, floored at the caller's value so no document gets
+/// LESS room than before, and capped so a runaway item list cannot authorize
+/// an unbounded spend.
+fn compose_budget(floor: u32, field_count: usize, item_count: usize, writes_lines: bool) -> u32 {
+    const PER_FIELD: u32 = 128; // a long_text field is a short paragraph
+    const PER_LINE: u32 = 64; // one or two short sentences, plus JSON overhead
+    const CEILING: u32 = 8192;
+    let lines = if writes_lines { item_count as u32 * PER_LINE } else { 0 };
+    let wanted = 256 + (field_count as u32 * PER_FIELD) + lines;
+    wanted.clamp(floor, CEILING)
+}
+
+/// The document's prose, in one call.
+///
+/// This is `price_items`' twin in every structural way — forced single-shot
+/// tool, echo-and-validate against ids we supplied, first-wins dedup,
+/// unknown ids dropped rather than failing the pass, usage banked before
+/// success is decided (R9) — and it replaces the narrower `fill_fields`.
+///
+/// **Why one pass and not two.** Fields and line details are the same act of
+/// writing: the scope paragraph is a summary of the very lines being
+/// detailed, so a model that writes both at once writes a document that
+/// agrees with itself, and a second call would pay the same input tokens
+/// twice to produce something that disagrees with the first. Pricing stays
+/// separate — money is a different risk class with its own validation and
+/// its own spoken-total hint, and it must not be entangled with prose.
+///
+/// **What it cannot do.** It cannot add, drop, rename or reorder a line, or
+/// invent a field key: the structure is already fixed by the deterministic
+/// render, and only the writing is at stake. R6 runs through the prompt: a
+/// line it has nothing real to say about gets nothing, because a document
+/// that pads is a document that eventually pads with something false.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn compose_document(
     provider: &Arc<dyn LlmProvider>,
+    document_label: &str,
+    line_detail: &str,
     fields: &[SchemaField],
     items: &[CapturedItem],
     summary: &str,
+    notes: &[NotesEntry],
     max_tokens: u32,
     usage: &mut Usage,
-) -> Result<HashMap<String, String>, HarnessError> {
-    let system = "You fill named fields of a field-work document for a tradesperson. Put a \
-                  value only on a field whose answer was clearly stated in the session — never \
-                  guess. You may fill only fields from the given list, by their exact key.";
-    let fields_block = fields
-        .iter()
-        .map(|f| format!("- [{}] {}", f.key, f.label))
-        .collect::<Vec<_>>()
-        .join("\n");
+) -> Result<Composition, HarnessError> {
+    let brief = line_brief(line_detail);
+    let wants_assignee = line_detail == "directive";
+    let system = format!(
+        "You write the prose of a {document_label} for a small trade operator, from one \
+         recorded site walk. Everything you write must come from what was actually said on \
+         that walk. Never invent a quantity, a price, a name, a date, an access detail or a \
+         condition — a document that is thin where the walk was thin is correct; one that \
+         reads well because you filled the gaps is the single worst thing this product can \
+         produce. Write in the operator's own trade language, not in marketing language, and \
+         never mention the recording, the transcript, or yourself."
+    );
+
+    let fields_block = if fields.is_empty() {
+        String::new()
+    } else {
+        let rendered = fields
+            .iter()
+            .map(|f| match &f.hint {
+                Some(h) => format!("- [{}] {} — {h}", f.key, f.label),
+                None => format!("- [{}] {}", f.key, f.label),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("\n\nFields to write:\n{rendered}")
+    };
+    let lines_block =
+        brief.as_deref().map(|b| format!("\n\nThe lines:\n{b}")).unwrap_or_default();
     let items_block = format_pricing_items(items);
-    // The exact WE-B user message (§6) — the items block is
-    // `format_pricing_items` verbatim; only the Fields/summary framing is
-    // the fill prompt's own.
+    let notes_block = format_notes_context(notes);
+    let summary_block = if summary.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\nSession summary:\n{summary}")
+    };
     let user_message = format!(
-        "Fill these document fields from the session. Put a value only on a field whose\n\
-         answer was clearly stated — omit any field you are unsure about; a blank field\n\
-         is cheaper than a wrong one.\n\
-         \n\
-         Fields:\n{fields_block}\n\
-         \n\
-         Session items:\n{items_block}\n\
-         \n\
-         Session summary:\n{summary}"
+        "Write this {document_label}.{fields_block}{lines_block}\
+         \n\nThe items on it:\n{items_block}{notes_block}{summary_block}"
     );
 
     let response = provider
         .complete(CompletionRequest {
-            system: system.to_string(),
+            system,
             messages: vec![Message::user_text(user_message)],
-            tools: vec![fill_fields_tool_spec()],
-            max_tokens,
-            tool_choice: Some(FILL_FIELDS.to_string()),
-            // Single-shot schema fill — see the PRICE_ITEMS note above.
+            tools: vec![compose_document_tool_spec(brief.is_some(), wants_assignee)],
+            max_tokens: compose_budget(max_tokens, fields.len(), items.len(), brief.is_some()),
+            tool_choice: Some(COMPOSE_DOCUMENT.to_string()),
+            // Single-shot — see the PRICE_ITEMS note above.
             cache_prefix: false,
         })
         .await?;
     usage.add(&response.usage);
 
     let input = response.content.iter().find_map(|b| match b {
-        ContentBlock::ToolUse { name, input, .. } if name == FILL_FIELDS => Some(input.clone()),
+        ContentBlock::ToolUse { name, input, .. } if name == COMPOSE_DOCUMENT => Some(input.clone()),
         _ => None,
     });
     let input = input.ok_or_else(|| {
-        HarnessError::Provider("fill_fields response missing fill_fields call".into())
+        HarnessError::Provider("compose_document response missing compose_document call".into())
     })?;
 
     let valid_keys: HashSet<&str> = fields.iter().map(|f| f.key.as_str()).collect();
-    let mut map: HashMap<String, String> = HashMap::new();
+    let mut out = Composition::default();
     if let Some(entries) = input.get("fields").and_then(|v| v.as_array()) {
         for e in entries {
             let (Some(key), Some(value)) =
@@ -332,12 +508,66 @@ pub(crate) async fn fill_fields(
             };
             // First-wins dedup; unknown/hallucinated keys are dropped — never
             // fail the whole pass over one bad row.
-            if valid_keys.contains(key) && !map.contains_key(key) {
-                map.insert(key.to_string(), value.to_string());
+            if valid_keys.contains(key) && !out.fields.contains_key(key) && !value.trim().is_empty()
+            {
+                out.fields.insert(key.to_string(), value.trim().to_string());
             }
         }
     }
-    Ok(map)
+
+    let valid_ids: HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
+    if let Some(entries) = input.get("lines").and_then(|v| v.as_array()) {
+        for e in entries {
+            let Some(id) = e.get("item_id").and_then(|v| v.as_str()) else { continue };
+            if !valid_ids.contains(id) || out.lines.contains_key(id) {
+                continue;
+            }
+            let detail =
+                e.get("detail").and_then(|v| v.as_str()).unwrap_or_default().trim().to_string();
+            // The assignee is only READ on a directive document. A model that
+            // volunteers one on an estimate is answering a question nobody
+            // asked, and a name in the price column would be a rendering bug
+            // wearing a data bug's clothes.
+            let assignee = if wants_assignee {
+                e.get("assignee")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            } else {
+                None
+            };
+            if detail.is_empty() && assignee.is_none() {
+                continue;
+            }
+            out.lines.insert(id.to_string(), LineComposition { detail, assignee });
+        }
+    }
+    Ok(out)
+}
+
+/// Writes the composed prose onto the rendered lines. A line whose `item_id`
+/// the pass wrote about gains its `detail` and `assignee`; every other line
+/// is left exactly as the deterministic render produced it.
+fn apply_composition(composed: &HashMap<String, LineComposition>, lines: &mut [serde_json::Value]) {
+    let mut claimed: HashSet<String> = HashSet::new();
+    for line in lines.iter_mut() {
+        let Some(item_id) = line.get("item_id").and_then(|v| v.as_str()).map(str::to_string) else {
+            continue;
+        };
+        if claimed.contains(&item_id) {
+            continue;
+        }
+        if let Some(written) = composed.get(&item_id) {
+            if !written.detail.is_empty() {
+                line["detail"] = serde_json::json!(written.detail);
+            }
+            if let Some(assignee) = &written.assignee {
+                line["assignee"] = serde_json::json!(assignee);
+            }
+            claimed.insert(item_id);
+        }
+    }
 }
 
 /// Assembles the payload `fields[]` (Plan 19 Stage 5): one entry per
@@ -556,36 +786,55 @@ impl DocumentBuilder {
             }
         }
 
-        // §4 step 5 — the fill pass: ONE focused call iff the schema has ≥1
-        // LLM-fillable (`fill: "walk"`) field. Built-ins have none → zero
-        // calls → byte-identical (the launch-safety spine). `manual` fields
-        // are never offered to the model — they are always gaps in v1.
+        // §4 step 5 — the compose pass: ONE call iff this document has prose
+        // to write, i.e. ≥1 LLM-fillable (`fill: "walk"`) field OR a
+        // `line_detail` style. A schema with neither — an operator's own bare
+        // list — still makes zero calls. `manual` fields are never offered to
+        // the model; they are always gaps in v1.
         let walk_fields: Vec<SchemaField> = schema
             .sections
             .iter()
             .filter(|s| s.kind == "filled")
             .flat_map(|s| s.fields.iter().filter(|f| f.fill == "walk").cloned())
             .collect();
-        let mut fill_values: HashMap<String, String> = HashMap::new();
-        if !walk_fields.is_empty() {
-            match fill_fields(
+        let line_detail = schema
+            .sections
+            .iter()
+            .find(|s| s.kind == "line_items")
+            .map(|s| s.line_detail.clone())
+            .unwrap_or_default();
+        let mut composed = Composition::default();
+        if !walk_fields.is_empty() || line_brief(&line_detail).is_some() {
+            // The coordination notes the walk already produced — free
+            // context: `summarize()` captured them at finish and they are
+            // sitting in this session's `notes` artifact. Without them the
+            // document is guaranteed to be thinner than the walk was.
+            let notes = self.session_notes(session_id)?;
+            match compose_document(
                 &self.provider,
+                &schema.label,
+                &line_detail,
                 &walk_fields,
-                &items,
+                &folded.items,
                 session.summary.as_deref().unwrap_or(""),
+                &notes,
                 self.max_tokens,
                 &mut usage,
             )
             .await
             {
-                Ok(map) => fill_values = map,
+                Ok(c) => {
+                    apply_composition(&c.lines, &mut lines);
+                    composed = c;
+                }
                 // Mirrors the pricing degrade exactly (R7): a model call this
                 // build needed didn't complete — regenerate to retry. Every
-                // walk field then falls to a truthful gap below.
+                // walk field then falls to a truthful gap below, and the lines
+                // keep the operator's own words with no second line.
                 Err(_) => queued = true,
             }
         }
-        let fields = assemble_fields(&schema, &fill_values);
+        let fields = assemble_fields(&schema, &composed.fields);
 
         // §4 step 6 — the total shape comes from the schema envelope (for
         // every built-in this equals the old total_shape(doc_kind) exactly).
@@ -631,6 +880,20 @@ impl DocumentBuilder {
         Ok(meta
             .and_then(|a| serde_json::from_str::<serde_json::Value>(&a.body).ok())
             .and_then(|v| v.get("spoken_total_cents").and_then(|n| n.as_i64())))
+    }
+
+    /// The coordination notes `process()` wrote at finish, as compose-pass
+    /// context. `[]` when the walk produced none, or the artifact is garbled
+    /// — `parse_notes_artifact` is deliberately tolerant (R7), and a document
+    /// written without this context is thinner, never wrong.
+    fn session_notes(&self, session_id: &str) -> Result<Vec<NotesEntry>, CoreError> {
+        let artifacts = self.locked()?.list_artifacts_for_session(session_id)?;
+        Ok(artifacts
+            .iter()
+            .rev()
+            .find(|a| a.kind == "notes")
+            .map(|a| parse_notes_artifact(&a.body))
+            .unwrap_or_default())
     }
 }
 
@@ -837,6 +1100,12 @@ mod tests {
         DocumentBuilder::new(provider, store, Arc::new(Mutex::new(Memory::default())), Arc::new(NullMemoryStore))
     }
 
+    /// The decoded document body for an artifact id.
+    fn v_of(store: &Arc<Mutex<Store>>, artifact_id: &str) -> serde_json::Value {
+        let store = store.lock().unwrap();
+        serde_json::from_str(&store.get_artifact(artifact_id).unwrap().body).unwrap()
+    }
+
     #[tokio::test]
     async fn build_happy_path_prices_and_mints_a_document() {
         let (store, sid) = processed_session_with_items(&[("todo", "mulch"), ("safety", "loose railing")]);
@@ -844,15 +1113,30 @@ mod tests {
         let a1 = store.list_items_for_session(&sid).unwrap()[0].id.clone();
         let store = Arc::new(Mutex::new(store));
 
-        let provider = Arc::new(MockProvider::new(vec![tool_use(
-            "price_items",
-            serde_json::json!({"prices": [{"item_id": a1, "amount_cents": 28500}]}),
-        )]));
+        let provider = Arc::new(MockProvider::new(vec![
+            tool_use(
+                "price_items",
+                serde_json::json!({"prices": [{"item_id": a1, "amount_cents": 28500}]}),
+            ),
+            compose_response(
+                serde_json::json!([{"key": "scope_summary", "value": "Mulch the front beds."}]),
+                serde_json::json!([{"item_id": a1, "detail": "3 cu yd, delivered and installed"}]),
+            ),
+        ]));
         let b = builder(store.clone(), provider);
 
         let outcome = b.build(&sid, "estimate").await.unwrap();
         assert!(!outcome.queued);
-        assert_eq!(outcome.usage, Usage { input_tokens: 80, output_tokens: 15, ..Default::default() });
+        assert_eq!(
+            outcome.usage,
+            Usage { input_tokens: 160, output_tokens: 30, ..Default::default() },
+            "two calls on an estimate: the money, then the prose"
+        );
+        assert_eq!(
+            v_of(&store, &outcome.document_artifact_id)["lines"][0]["detail"],
+            "3 cu yd, delivered and installed",
+            "the line says what it covers, so the number beside it is defensible"
+        );
 
         let store = store.lock().unwrap();
         let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
@@ -942,7 +1226,8 @@ mod tests {
         let (store, sid) =
             processed_session_with_items(&[("part", "5 yards mulch"), ("price", "$200 mulch")]);
         let store = Arc::new(Mutex::new(store));
-        let provider = Arc::new(MockProvider::new(vec![]));
+        let provider =
+            Arc::new(MockProvider::new(vec![compose_response(serde_json::json!([]), serde_json::json!([]))]));
         let b = builder(store.clone(), provider.clone());
 
         let outcome = b.build(&sid, "work_order").await.unwrap();
@@ -952,7 +1237,7 @@ mod tests {
         let titles: Vec<&str> =
             v["lines"].as_array().unwrap().iter().map(|l| l["title"].as_str().unwrap()).collect();
         assert_eq!(titles, vec!["5 yards mulch", "$200 mulch"]);
-        assert!(provider.requests().is_empty(), "still zero calls for a non-pricing kind");
+        assert_eq!(provider.requests().len(), 1, "the prose pass, never a pricing one");
     }
 
     /// A walk whose every item priced itself needs no model call at all.
@@ -963,13 +1248,21 @@ mod tests {
             ("price", "$200 mulch"),
         ]);
         let store = Arc::new(Mutex::new(store));
-        let provider = Arc::new(MockProvider::new(vec![]));
+        let provider =
+            Arc::new(MockProvider::new(vec![compose_response(serde_json::json!([]), serde_json::json!([]))]));
         let b = builder(store.clone(), provider.clone());
 
         let outcome = b.build(&sid, "estimate").await.unwrap();
         assert!(!outcome.queued, "nothing to ask is not a degrade");
-        assert_eq!(outcome.usage, Usage::default());
-        assert!(provider.requests().is_empty(), "every line was priced by the operator");
+        assert_eq!(
+            provider.requests().len(),
+            1,
+            "the prose pass still runs; the PRICING call is what the operator saved"
+        );
+        assert!(
+            !format!("{:?}", provider.requests()[0].tools).contains("price_items"),
+            "every line was priced by the operator"
+        );
 
         let store = store.lock().unwrap();
         let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
@@ -1001,26 +1294,50 @@ mod tests {
         }
     }
 
+    /// A non-pricing kind still never makes a PRICING call — the invariant
+    /// that matters, and the one that keeps money off a work order. (It does
+    /// now make a prose call: a work order's whole value is the directives,
+    /// so "zero calls" stopped being the goal the moment it started carrying
+    /// them. The genuinely call-free case is pinned below.)
     #[tokio::test]
-    async fn build_non_pricing_kind_makes_zero_calls() {
+    async fn build_non_pricing_kind_never_makes_a_pricing_call() {
         let (store, sid) = processed_session_with_items(&[("todo", "mulch")]);
         let store = Arc::new(Mutex::new(store));
-        let provider = Arc::new(MockProvider::new(vec![]));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([{"key": "crew", "value": "Jose"}]),
+            serde_json::json!([]),
+        )]));
         let b = builder(store.clone(), provider.clone());
 
         let outcome = b.build(&sid, "work_order").await.unwrap();
         assert!(!outcome.queued);
+        let tools = format!("{:?}", provider.requests()[0].tools);
+        assert!(tools.contains("compose_document"));
+        assert!(!tools.contains("price_items"), "a work order is never priced");
+        assert_eq!(provider.requests().len(), 1, "one call, not two");
+    }
+
+    /// The call-free path: a schema with no walk fields and no `line_detail`
+    /// — an operator's own bare list — still costs nothing to build.
+    #[tokio::test]
+    async fn a_schema_with_no_prose_to_write_makes_zero_calls() {
+        let (store, sid) = processed_session_with_items(&[("todo", "mulch")]);
+        let mut bare = hoa_schema();
+        bare.sections.retain(|s| s.kind == "line_items");
+        store.save_document_schema(&bare).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider.clone());
+
+        let outcome = b.build(&sid, "hoa_addendum").await.unwrap();
+        assert!(!outcome.queued);
         assert_eq!(outcome.usage, Usage::default());
-        assert!(provider.requests().is_empty(), "non-pricing kinds never call the LLM");
+        assert!(provider.requests().is_empty(), "nothing to write, nothing to spend");
 
         let store = store.lock().unwrap();
         assert!(
-            store
-                .list_llm_usage_for_session(&sid)
-                .unwrap()
-                .iter()
-                .all(|r| r.purpose != "document"),
-            "non-pricing kinds log no 'document'-purpose usage row"
+            store.list_llm_usage_for_session(&sid).unwrap().iter().all(|r| r.purpose != "document"),
+            "and no 'document'-purpose usage row"
         );
     }
 
@@ -1170,13 +1487,18 @@ mod tests {
         }
     }
 
-    /// The Stage 4 golden: for each of the 7 built-ins, the decoded payload's
-    /// today-existing fields equal the pre-refactor values (computed here
-    /// from the OLD hardcoded functions `is_pricing_kind`/`total_shape`,
-    /// which stay in `pipeline/mod.rs` as the parity reference). `id`/
-    /// `doc_number` excluded — non-deterministic pre-refactor too.
+    /// The golden: for each of the 7 built-ins, the decoded payload's shared
+    /// fields equal the values `is_pricing_kind`/`total_shape` declare — the
+    /// hardcoded parity reference in `pipeline/mod.rs` that the seeded rows
+    /// must never silently drift from. `id`/`doc_number` excluded (they are
+    /// non-deterministic by design).
+    ///
+    /// Since 2026-08-09 every built-in also writes prose, so each build here
+    /// scripts one compose response; the per-line `detail` it returns is
+    /// asserted too, because a document whose lines lost their second line
+    /// would still pass every other check in this test.
     #[tokio::test]
-    async fn builtin_output_is_byte_identical_per_trade_kind() {
+    async fn builtin_output_matches_the_pricing_and_total_reference() {
         use crate::pipeline::total_shape;
         let builtins: &[(Option<&str>, &str)] = &[
             (Some("landscape"), "estimate"),
@@ -1200,16 +1522,21 @@ mod tests {
                 .collect();
             let store = Arc::new(Mutex::new(store));
             let pricing = is_pricing_kind(kind);
-            // Pricing kinds get a scripted price on item 1 (both pre- and
-            // post-refactor paths make exactly one pricing call).
-            let responses = if pricing {
-                vec![tool_use(
+            // Pricing kinds get a scripted price on item 1; every built-in
+            // then gets its one compose call, writing a second line onto
+            // item 1 only — so the test also proves a line the model said
+            // nothing about keeps an empty detail rather than inventing one.
+            let mut responses = Vec::new();
+            if pricing {
+                responses.push(tool_use(
                     "price_items",
                     serde_json::json!({"prices": [{"item_id": ids[0], "amount_cents": 28500}]}),
-                )]
-            } else {
-                vec![]
-            };
+                ));
+            }
+            responses.push(compose_response(
+                serde_json::json!([]),
+                serde_json::json!([{"item_id": ids[0], "detail": "from the yard"}]),
+            ));
             let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(responses));
             let b = builder(store.clone(), provider);
             let outcome = b.build(&sid, kind).await.unwrap();
@@ -1225,19 +1552,22 @@ mod tests {
             assert_eq!(v["queued"], false, "{kind}: no degrade in the golden path");
             let lines = v["lines"].as_array().unwrap();
             assert_eq!(lines.len(), 2);
-            let expected: Vec<(&str, &str, Option<i64>, bool)> = if pricing {
+            let expected: Vec<(&str, &str, Option<i64>, bool, &str)> = if pricing {
                 vec![
-                    ("order lumber", "", Some(28500), false),
-                    ("bark mulch", "", None, true),
+                    ("order lumber", "", Some(28500), false, "from the yard"),
+                    ("bark mulch", "", None, true, ""),
                 ]
             } else {
-                vec![("order lumber", "", None, false), ("bark mulch", "", None, false)]
+                vec![
+                    ("order lumber", "", None, false, "from the yard"),
+                    ("bark mulch", "", None, false, ""),
+                ]
             };
-            for ((line, item_id), (title, qty, amount, is_gap)) in
+            for ((line, item_id), (title, qty, amount, is_gap, detail)) in
                 lines.iter().zip(&ids).zip(expected)
             {
                 assert_eq!(line["title"], title, "{kind}");
-                assert_eq!(line["detail"], "", "{kind}");
+                assert_eq!(line["detail"], detail, "{kind}: written, or honestly empty");
                 assert_eq!(line["qty"], qty, "{kind}");
                 assert_eq!(
                     line["amount_cents"],
@@ -1287,6 +1617,7 @@ mod tests {
             label: label.into(),
             fill: "walk".into(),
             static_value: None,
+            hint: None,
         }
     }
 
@@ -1308,6 +1639,7 @@ mod tests {
                     kind: "line_items".into(),
                     label: "Items".into(),
                     priced: false,
+                    line_detail: String::new(),
                     fields: vec![],
                 },
                 SchemaSection {
@@ -1315,6 +1647,7 @@ mod tests {
                     kind: "filled".into(),
                     label: "Approvals".into(),
                     priced: false,
+                    line_detail: String::new(),
                     fields: vec![
                         walk_field("hoa_no", "HOA approval #"),
                         walk_field("reviewed_by", "Reviewed by"),
@@ -1325,12 +1658,14 @@ mod tests {
                     kind: "static".into(),
                     label: "Terms".into(),
                     priced: false,
+                    line_detail: String::new(),
                     fields: vec![SchemaField {
                         key: "terms_body".into(),
                         kind: "static".into(),
                         label: "Terms".into(),
                         fill: "static".into(),
                         static_value: Some("Valid for 30 days.".into()),
+                        hint: None,
                     }],
                 },
             ],
@@ -1369,7 +1704,15 @@ mod tests {
     }
 
     fn fill_response(fields: serde_json::Value) -> harness::CompletionResponse {
-        tool_use("fill_fields", serde_json::json!({ "fields": fields }))
+        tool_use("compose_document", serde_json::json!({ "fields": fields }))
+    }
+
+    /// A compose response that also writes the lines.
+    fn compose_response(
+        fields: serde_json::Value,
+        lines: serde_json::Value,
+    ) -> harness::CompletionResponse {
+        tool_use("compose_document", serde_json::json!({ "fields": fields, "lines": lines }))
     }
 
     fn decoded_document(
@@ -1382,7 +1725,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fill_fields_echoes_and_validates_and_drops_unknown_keys() {
+    async fn compose_echoes_and_validates_and_drops_unknown_keys() {
         let fields = vec![walk_field("hoa_no", "HOA approval #"), walk_field("reviewed_by", "Reviewed by")];
         let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![fill_response(
             serde_json::json!([
@@ -1393,7 +1736,12 @@ mod tests {
             ]),
         )]));
         let mut usage = Usage::default();
-        let map = fill_fields(&provider, &fields, &[], "summary", 512, &mut usage).await.unwrap();
+        let map = compose_document(
+            &provider, "HOA Addendum", "", &fields, &[], "summary", &[], 512, &mut usage,
+        )
+        .await
+        .unwrap()
+        .fields;
         assert_eq!(map.get("hoa_no").map(String::as_str), Some("41827"), "first-wins dedup");
         assert_eq!(map.get("reviewed_by").map(String::as_str), Some("Dana"));
         assert_eq!(map.get("gate_code"), None, "hallucinated key dropped");
@@ -1401,11 +1749,11 @@ mod tests {
         assert_eq!(usage, Usage { input_tokens: 80, output_tokens: 15, ..Default::default() }, "R9: usage accumulated");
     }
 
-    /// R6 + the WE-B exact prompt: items (via `format_pricing_items`
-    /// verbatim — no `right_text`) + summary reach the request; the
-    /// transcript never does.
+    /// R6 + the exact compose prompt: items (via `format_pricing_items`
+    /// verbatim — no `right_text`), the coordination notes, and the summary
+    /// reach the request; the transcript never does.
     #[tokio::test]
-    async fn fill_fields_fed_items_and_summary_never_the_transcript() {
+    async fn compose_fed_items_notes_and_summary_never_the_transcript() {
         let store = Store::open_in_memory("device-a").unwrap();
         let session = store.start_session(None).unwrap();
         // Literal WE-B item ids, hand-built (not store-minted) so the pinned
@@ -1430,11 +1778,18 @@ mod tests {
         ]))]));
         let dyn_provider: Arc<dyn LlmProvider> = provider.clone();
         let mut usage = Usage::default();
-        fill_fields(
+        compose_document(
             &dyn_provider,
+            "HOA Addendum",
+            "",
             &fields,
             &items,
             "Walked the front yard; HOA approval 41827 on file.",
+            &[NotesEntry {
+                bucket: "constraints".into(),
+                label: "Gate".into(),
+                detail: "Code 4412, park on the street.".into(),
+            }],
             512,
             &mut usage,
         )
@@ -1445,22 +1800,27 @@ mod tests {
         let ContentBlock::Text { text } = &reqs[0].messages[0].content[0] else {
             panic!("expected text content");
         };
-        let expected = "Fill these document fields from the session. Put a value only on a field whose\n\
-                        answer was clearly stated — omit any field you are unsure about; a blank field\n\
-                        is cheaper than a wrong one.\n\
+        let expected = "Write this HOA Addendum.\n\
                         \n\
-                        Fields:\n\
+                        Fields to write:\n\
                         - [hoa_no] HOA approval #\n\
                         - [reviewed_by] Reviewed by\n\
                         \n\
-                        Session items:\n\
+                        The items on it:\n\
                         - [todo] Install boxwood hedge (item_id: item-A)\n\
                         - [part] bark mulch (item_id: item-B)\n\
                         \n\
+                        What was said around the work:\n\
+                        constraints:\n\
+                        - Gate: Code 4412, park on the street.\n\
+                        \n\
                         Session summary:\n\
                         Walked the front yard; HOA approval 41827 on file.";
-        assert_eq!(text, expected, "the exact WE-B user message — note right_text is absent \
-                    (format_pricing_items omits it; the fill pass does not re-add it)");
+        assert_eq!(
+            text, expected,
+            "the exact compose user message — right_text is absent (format_pricing_items \
+             omits it), and the coordination notes ride along at no extra call"
+        );
         assert!(!text.to_lowercase().contains("transcript"), "never the transcript (R6)");
     }
 
@@ -1556,6 +1916,7 @@ mod tests {
             label: "Signed by".into(),
             fill: "manual".into(),
             static_value: None,
+            hint: None,
         }];
         store.save_document_schema(&schema).unwrap();
         let store = Arc::new(Mutex::new(store));
@@ -1590,6 +1951,176 @@ mod tests {
         assert_eq!(v["fields"][1]["is_gap"], true, "reviewed_by degraded to a gap");
         assert_eq!(v["fields"][2]["is_gap"], false, "the static field is untouched by the degrade");
         assert_eq!(v["doc_number"], 1, "the document still mints and lands (R7)");
+    }
+
+    // ---- What the compose pass is FOR ------------------------------------
+
+    /// The work order Isaac asked for: "if during my walk I say Jose is gonna
+    /// do X, Michael is gonna do Y, that should be mentioned."
+    #[tokio::test]
+    async fn a_work_order_carries_directives_and_the_names_against_them() {
+        let (store, sid) = processed_session_with_items(&[
+            ("todo", "mulch the front beds"),
+            ("todo", "rebuild the back fence panel"),
+        ]);
+        let ids: Vec<String> =
+            store.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([{"key": "crew", "value": "Jose, Michael"}]),
+            serde_json::json!([
+                {"item_id": ids[0], "detail": "Strip the old bark first. Watch the irrigation heads.",
+                 "assignee": "Jose"},
+                {"item_id": ids[1], "detail": "Pull the cracked panel; match the existing pickets.",
+                 "assignee": "Michael"}
+            ]),
+        )]));
+        let b = builder(store.clone(), provider);
+
+        let outcome = b.build(&sid, "work_order").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        let lines = v["lines"].as_array().unwrap();
+        assert_eq!(lines[0]["detail"], "Strip the old bark first. Watch the irrigation heads.");
+        assert_eq!(lines[0]["assignee"], "Jose");
+        assert_eq!(lines[1]["assignee"], "Michael");
+        assert_eq!(lines[0]["amount_cents"], serde_json::Value::Null, "still no money");
+        assert_eq!(v["fields"][0]["value"], "Jose, Michael");
+    }
+
+    /// An assignee is only ever read on a document written FOR a crew. A
+    /// model that volunteers one on an estimate is answering a question
+    /// nobody asked, and a name in the price column would be a rendering bug
+    /// wearing a data bug's clothes.
+    #[tokio::test]
+    async fn an_estimate_never_takes_an_assignee() {
+        let (store, sid) = processed_session_with_items(&[("todo", "mulch the front beds")]);
+        let id = store.list_items_for_session(&sid).unwrap()[0].id.clone();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![
+            tool_use("price_items", serde_json::json!({"prices": []})),
+            compose_response(
+                serde_json::json!([]),
+                serde_json::json!([
+                    {"item_id": id, "detail": "3 cu yd, delivered", "assignee": "Jose"}
+                ]),
+            ),
+        ]));
+        let b = builder(store.clone(), provider.clone());
+
+        let outcome = b.build(&sid, "estimate").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["lines"][0]["detail"], "3 cu yd, delivered", "the inclusion still lands");
+        assert_eq!(v["lines"][0]["assignee"], serde_json::Value::Null, "the name does not");
+        assert!(
+            !format!("{:?}", provider.requests()[1].tools).contains("assignee"),
+            "and the tool never offered the field, so there was nothing to volunteer"
+        );
+    }
+
+    /// A line the pass had nothing real to say about keeps the operator's own
+    /// words and no second line. Padding every line is how a document starts
+    /// padding with something false.
+    #[tokio::test]
+    async fn a_line_the_pass_declined_gets_no_invented_detail() {
+        let (store, sid) =
+            processed_session_with_items(&[("todo", "mulch the beds"), ("todo", "check the gate")]);
+        let ids: Vec<String> =
+            store.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([]),
+            serde_json::json!([
+                {"item_id": ids[0], "detail": "Front beds only."},
+                {"item_id": "hallucinated-id", "detail": "invented"},
+                {"item_id": ids[0], "detail": "a second bite"}
+            ]),
+        )]));
+        let b = builder(store.clone(), provider);
+
+        let outcome = b.build(&sid, "work_order").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["lines"][0]["detail"], "Front beds only.", "first-wins dedup");
+        assert_eq!(v["lines"][1]["detail"], "", "declined -> empty, never filler");
+        assert_eq!(v["lines"].as_array().unwrap().len(), 2, "and no line was added");
+    }
+
+    /// The coordination notes the walk already produced reach the pass — the
+    /// gate code a crew needs is in `constraints`, not in the item list, and
+    /// it costs nothing to carry.
+    #[tokio::test]
+    async fn the_walks_notes_reach_the_compose_pass() {
+        let (store, sid) = processed_session_with_items(&[("todo", "mulch the beds")]);
+        store
+            .add_artifact(
+                &sid,
+                "notes",
+                "notes",
+                &crate::pipeline::notes::serialize_buckets(&[NotesEntry {
+                    bucket: "constraints".into(),
+                    label: "Access".into(),
+                    detail: "Gate code 4412; dog in the back yard until eight.".into(),
+                }]),
+            )
+            .unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([]),
+            serde_json::json!([]),
+        )]));
+        let b = builder(store.clone(), provider.clone());
+        b.build(&sid, "work_order").await.unwrap();
+
+        let asked = format!("{:?}", provider.requests()[0].messages[0].content);
+        assert!(asked.contains("Gate code 4412"), "the crew's own gate code reached the writer");
+        assert!(asked.contains("dog in the back yard"));
+    }
+
+    /// A move-out report is a MONEY document: the deduction total is the
+    /// whole point, and the label says what the sum means.
+    #[tokio::test]
+    async fn a_move_out_report_prices_its_deductions() {
+        let (store, sid) = processed_session_with_template(
+            Some("property"),
+            &[("todo", "carpet stain, bedroom 1"), ("todo", "blinds, kitchen")],
+        );
+        let ids: Vec<String> =
+            store.list_items_for_session(&sid).unwrap().into_iter().map(|i| i.id).collect();
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![
+            tool_use(
+                "price_items",
+                serde_json::json!({"prices": [{"item_id": ids[0], "amount_cents": 14000}]}),
+            ),
+            compose_response(serde_json::json!([]), serde_json::json!([])),
+        ]));
+        let b = builder(store.clone(), provider);
+
+        let outcome = b.build(&sid, "move_out").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["total_label_key"], "deposit_deduction", "the sum says what it is");
+        assert_eq!(v["lines"][0]["amount_cents"], 14000);
+        assert_eq!(
+            v["lines"][1]["is_gap"], true,
+            "an unpriced deduction is an open question, not a free pass"
+        );
+    }
+
+    /// A flat output budget is a cliff for a pass that writes prose: the
+    /// model runs out mid-tool-call, the JSON truncates, and the document
+    /// degrades to all-gaps — silently, and only on the longest walks.
+    #[test]
+    fn the_compose_budget_grows_with_the_document() {
+        // A four-item walk with one field is small; the caller's floor holds.
+        assert_eq!(compose_budget(1024, 1, 4, true), 1024);
+        // A thirty-item work order with four fields needs real room — under a
+        // flat 1024 this is the walk that would have come back empty.
+        assert!(compose_budget(1024, 4, 30, true) > 2000);
+        // No per-line writing, no per-line budget.
+        assert!(compose_budget(256, 1, 30, false) < compose_budget(256, 1, 30, true));
+        // Bounded: a runaway item list cannot authorize an unbounded spend.
+        assert_eq!(compose_budget(1024, 4, 100_000, true), 8192);
+        // And never LESS room than the caller asked for.
+        assert!(compose_budget(4096, 1, 1, false) >= 4096);
     }
 
     /// The contrast pin: the call SUCCEEDED but omitted a field — a truthful
@@ -1651,15 +2182,30 @@ mod tests {
     /// The byte-identical guard on the additive keys: built-ins emit
     /// `fields: []` and today's prefix.
     #[tokio::test]
-    async fn builtins_emit_empty_fields_and_todays_prefix() {
+    async fn a_work_order_emits_its_assignment_block_and_todays_prefix() {
         let (store, sid) = processed_session_with_items(&[("todo", "mulch")]);
         let store = Arc::new(Mutex::new(store));
-        let provider = Arc::new(MockProvider::new(vec![]));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([
+                {"key": "crew", "value": "Jose, Michael"},
+                {"key": "access", "value": "Gate code 4412."}
+            ]),
+            serde_json::json!([]),
+        )]));
         let b = builder(store.clone(), provider.clone());
         let outcome = b.build(&sid, "work_order").await.unwrap();
         let v = decoded_document(&store, &outcome.document_artifact_id);
-        assert_eq!(v["fields"], serde_json::json!([]), "zero authored fields on a built-in");
+
+        // The four fields a crew standing at the gate actually needs, in
+        // schema order — two written, two honestly blank.
+        let keys: Vec<&str> =
+            v["fields"].as_array().unwrap().iter().map(|f| f["key"].as_str().unwrap()).collect();
+        assert_eq!(keys, vec!["crew", "schedule", "access", "safety"]);
+        assert_eq!(v["fields"][0]["value"], "Jose, Michael");
+        assert_eq!(v["fields"][0]["label"], "Assigned to");
+        assert_eq!(v["fields"][1]["is_gap"], true, "no date was said — never invented");
+        assert_eq!(v["fields"][2]["value"], "Gate code 4412.");
+        assert_eq!(v["fields"][3]["is_gap"], true, "no hazards were said");
         assert_eq!(v["number_prefix"], "WO", "today's Swift-side prefix, now also in the body");
-        assert!(provider.requests().is_empty(), "zero fill calls (launch-safety)");
     }
 }

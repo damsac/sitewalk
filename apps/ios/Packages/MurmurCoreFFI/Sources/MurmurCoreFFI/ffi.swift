@@ -2057,6 +2057,17 @@ public struct DocLine {
      * Additive; never derived by the FFI layer.
      */
     public var itemId: String?
+    /**
+     * Who is doing this line — `directive` documents (the work order) only,
+     * and only where the operator actually named someone.
+     *
+     * It rides in the column the amount would occupy, because a work order
+     * carries no money and that space is exactly where the crew looks.
+     * `None` everywhere else, including on a work order line nobody was
+     * named for: an unassigned task is a real state, and inventing an owner
+     * for it would put a person's name against work they never agreed to.
+     */
+    public var assignee: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2069,7 +2080,17 @@ public struct DocLine {
          * The core item this row was built from (Plan 12). `None` for
          * total/rollup lines, or an old document body written before Plan 12.
          * Additive; never derived by the FFI layer.
-         */itemId: String?) {
+         */itemId: String?, 
+        /**
+         * Who is doing this line — `directive` documents (the work order) only,
+         * and only where the operator actually named someone.
+         *
+         * It rides in the column the amount would occupy, because a work order
+         * carries no money and that space is exactly where the crew looks.
+         * `None` everywhere else, including on a work order line nobody was
+         * named for: an unassigned task is a real state, and inventing an owner
+         * for it would put a person's name against work they never agreed to.
+         */assignee: String?) {
         self.id = id
         self.title = title
         self.detail = detail
@@ -2078,6 +2099,7 @@ public struct DocLine {
         self.section = section
         self.isGap = isGap
         self.itemId = itemId
+        self.assignee = assignee
     }
 }
 
@@ -2109,6 +2131,9 @@ extension DocLine: Equatable, Hashable {
         if lhs.itemId != rhs.itemId {
             return false
         }
+        if lhs.assignee != rhs.assignee {
+            return false
+        }
         return true
     }
 
@@ -2121,6 +2146,7 @@ extension DocLine: Equatable, Hashable {
         hasher.combine(section)
         hasher.combine(isGap)
         hasher.combine(itemId)
+        hasher.combine(assignee)
     }
 }
 
@@ -2139,7 +2165,8 @@ public struct FfiConverterTypeDocLine: FfiConverterRustBuffer {
                 amountCents: FfiConverterOptionInt64.read(from: &buf), 
                 section: FfiConverterOptionString.read(from: &buf), 
                 isGap: FfiConverterBool.read(from: &buf), 
-                itemId: FfiConverterOptionString.read(from: &buf)
+                itemId: FfiConverterOptionString.read(from: &buf), 
+                assignee: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -2152,6 +2179,7 @@ public struct FfiConverterTypeDocLine: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.section, into: &buf)
         FfiConverterBool.write(value.isGap, into: &buf)
         FfiConverterOptionString.write(value.itemId, into: &buf)
+        FfiConverterOptionString.write(value.assignee, into: &buf)
     }
 }
 
@@ -3173,15 +3201,27 @@ public struct SchemaField {
     public var label: String
     public var fill: String
     public var staticValue: String?
+    /**
+     * What the field should contain, in the model's terms — carried across
+     * the boundary so an operator authoring their own document type can
+     * teach the compose pass what they mean by it.
+     */
+    public var hint: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(key: String, kind: String, label: String, fill: String, staticValue: String?) {
+    public init(key: String, kind: String, label: String, fill: String, staticValue: String?, 
+        /**
+         * What the field should contain, in the model's terms — carried across
+         * the boundary so an operator authoring their own document type can
+         * teach the compose pass what they mean by it.
+         */hint: String?) {
         self.key = key
         self.kind = kind
         self.label = label
         self.fill = fill
         self.staticValue = staticValue
+        self.hint = hint
     }
 }
 
@@ -3204,6 +3244,9 @@ extension SchemaField: Equatable, Hashable {
         if lhs.staticValue != rhs.staticValue {
             return false
         }
+        if lhs.hint != rhs.hint {
+            return false
+        }
         return true
     }
 
@@ -3213,6 +3256,7 @@ extension SchemaField: Equatable, Hashable {
         hasher.combine(label)
         hasher.combine(fill)
         hasher.combine(staticValue)
+        hasher.combine(hint)
     }
 }
 
@@ -3228,7 +3272,8 @@ public struct FfiConverterTypeSchemaField: FfiConverterRustBuffer {
                 kind: FfiConverterString.read(from: &buf), 
                 label: FfiConverterString.read(from: &buf), 
                 fill: FfiConverterString.read(from: &buf), 
-                staticValue: FfiConverterOptionString.read(from: &buf)
+                staticValue: FfiConverterOptionString.read(from: &buf), 
+                hint: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -3238,6 +3283,7 @@ public struct FfiConverterTypeSchemaField: FfiConverterRustBuffer {
         FfiConverterString.write(value.label, into: &buf)
         FfiConverterString.write(value.fill, into: &buf)
         FfiConverterOptionString.write(value.staticValue, into: &buf)
+        FfiConverterOptionString.write(value.hint, into: &buf)
     }
 }
 
@@ -3265,15 +3311,25 @@ public struct SchemaSection {
     public var kind: String
     public var label: String
     public var priced: Bool
+    /**
+     * `line_items` only: "" | "inclusion" | "directive" | "observation" —
+     * who the second line under each item is written for.
+     */
+    public var lineDetail: String
     public var fields: [SchemaField]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(key: String, kind: String, label: String, priced: Bool, fields: [SchemaField]) {
+    public init(key: String, kind: String, label: String, priced: Bool, 
+        /**
+         * `line_items` only: "" | "inclusion" | "directive" | "observation" —
+         * who the second line under each item is written for.
+         */lineDetail: String, fields: [SchemaField]) {
         self.key = key
         self.kind = kind
         self.label = label
         self.priced = priced
+        self.lineDetail = lineDetail
         self.fields = fields
     }
 }
@@ -3294,6 +3350,9 @@ extension SchemaSection: Equatable, Hashable {
         if lhs.priced != rhs.priced {
             return false
         }
+        if lhs.lineDetail != rhs.lineDetail {
+            return false
+        }
         if lhs.fields != rhs.fields {
             return false
         }
@@ -3305,6 +3364,7 @@ extension SchemaSection: Equatable, Hashable {
         hasher.combine(kind)
         hasher.combine(label)
         hasher.combine(priced)
+        hasher.combine(lineDetail)
         hasher.combine(fields)
     }
 }
@@ -3321,6 +3381,7 @@ public struct FfiConverterTypeSchemaSection: FfiConverterRustBuffer {
                 kind: FfiConverterString.read(from: &buf), 
                 label: FfiConverterString.read(from: &buf), 
                 priced: FfiConverterBool.read(from: &buf), 
+                lineDetail: FfiConverterString.read(from: &buf), 
                 fields: FfiConverterSequenceTypeSchemaField.read(from: &buf)
         )
     }
@@ -3330,6 +3391,7 @@ public struct FfiConverterTypeSchemaSection: FfiConverterRustBuffer {
         FfiConverterString.write(value.kind, into: &buf)
         FfiConverterString.write(value.label, into: &buf)
         FfiConverterBool.write(value.priced, into: &buf)
+        FfiConverterString.write(value.lineDetail, into: &buf)
         FfiConverterSequenceTypeSchemaField.write(value.fields, into: &buf)
     }
 }

@@ -56,6 +56,7 @@ fn unit_turn_schema() -> DocumentSchema {
                 kind: "line_items".into(),
                 label: "Items".into(),
                 priced: false,
+                line_detail: String::new(),
                 fields: vec![],
             },
             SchemaSection {
@@ -63,6 +64,7 @@ fn unit_turn_schema() -> DocumentSchema {
                 kind: "filled".into(),
                 label: "Approvals".into(),
                 priced: false,
+                line_detail: String::new(),
                 fields: vec![
                     SchemaField {
                         key: "hoa_no".into(),
@@ -70,6 +72,7 @@ fn unit_turn_schema() -> DocumentSchema {
                         label: "HOA approval #".into(),
                         fill: "walk".into(),
                         static_value: None,
+                        hint: None,
                     },
                     SchemaField {
                         key: "unit".into(),
@@ -77,6 +80,7 @@ fn unit_turn_schema() -> DocumentSchema {
                         label: "Unit".into(),
                         fill: "walk".into(),
                         static_value: None,
+                        hint: None,
                     },
                 ],
             },
@@ -148,7 +152,7 @@ fn build_fields(
 #[test]
 fn custom_field_absent_from_the_transcript_renders_as_a_gap() {
     let (fields, queued) = build_fields(vec![tool_use(
-        "fill_fields",
+        "compose_document",
         serde_json::json!({"fields": [{"key": "unit", "value": "12"}]}),
     )]);
     assert_eq!(fields[0]["key"], "hoa_no");
@@ -162,7 +166,7 @@ fn custom_field_absent_from_the_transcript_renders_as_a_gap() {
 #[test]
 fn custom_field_stated_in_the_transcript_is_filled() {
     let (fields, queued) = build_fields(vec![tool_use(
-        "fill_fields",
+        "compose_document",
         serde_json::json!({"fields": [{"key": "unit", "value": "12"}]}),
     )]);
     assert_eq!(fields[1]["key"], "unit");

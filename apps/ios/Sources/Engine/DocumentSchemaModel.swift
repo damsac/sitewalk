@@ -37,6 +37,10 @@ struct SchemaFieldModel: Identifiable, Hashable {
     var fill: String
     /// The authored constant when `fill == "static"`; nil otherwise.
     var staticValue: String?
+    /// What this field should contain, in the model's terms. Not editable in
+    /// v1 — carried so a round-trip through the editor cannot silently strip
+    /// it off a built-in and leave the compose pass writing one-word answers.
+    var hint: String?
 
     init(
         id: UUID = UUID(),
@@ -44,7 +48,8 @@ struct SchemaFieldModel: Identifiable, Hashable {
         kind: String,
         label: String,
         fill: String,
-        staticValue: String? = nil
+        staticValue: String? = nil,
+        hint: String? = nil
     ) {
         self.id = id
         self.key = key
@@ -52,6 +57,7 @@ struct SchemaFieldModel: Identifiable, Hashable {
         self.label = label
         self.fill = fill
         self.staticValue = staticValue
+        self.hint = hint
     }
 }
 
@@ -63,6 +69,9 @@ struct SchemaSectionModel: Identifiable, Hashable {
     var label: String
     /// Whether the captured-items table carries amounts.
     var priced: Bool
+    /// `line_items` only: "" | "inclusion" | "directive" | "observation".
+    /// Not editable in v1 — carried for the same reason as `hint`.
+    var lineDetail: String
     var fields: [SchemaFieldModel]
 
     init(
@@ -71,6 +80,7 @@ struct SchemaSectionModel: Identifiable, Hashable {
         kind: String,
         label: String,
         priced: Bool,
+        lineDetail: String = "",
         fields: [SchemaFieldModel]
     ) {
         self.id = id
@@ -78,6 +88,7 @@ struct SchemaSectionModel: Identifiable, Hashable {
         self.kind = kind
         self.label = label
         self.priced = priced
+        self.lineDetail = lineDetail
         self.fields = fields
     }
 }

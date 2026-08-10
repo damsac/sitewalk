@@ -21,6 +21,10 @@ pub struct SchemaField {
     pub label: String,
     pub fill: String,
     pub static_value: Option<String>,
+    /// What the field should contain, in the model's terms — carried across
+    /// the boundary so an operator authoring their own document type can
+    /// teach the compose pass what they mean by it.
+    pub hint: Option<String>,
 }
 
 /// FFI mirror of `murmur_core::SchemaSection`.
@@ -30,6 +34,9 @@ pub struct SchemaSection {
     pub kind: String,
     pub label: String,
     pub priced: bool,
+    /// `line_items` only: "" | "inclusion" | "directive" | "observation" —
+    /// who the second line under each item is written for.
+    pub line_detail: String,
     pub fields: Vec<SchemaField>,
 }
 
@@ -59,6 +66,7 @@ fn field_to_core(f: &SchemaField) -> murmur_core::SchemaField {
         label: f.label.clone(),
         fill: f.fill.clone(),
         static_value: f.static_value.clone(),
+        hint: f.hint.clone(),
     }
 }
 
@@ -68,6 +76,7 @@ fn section_to_core(s: &SchemaSection) -> murmur_core::SchemaSection {
         kind: s.kind.clone(),
         label: s.label.clone(),
         priced: s.priced,
+        line_detail: s.line_detail.clone(),
         fields: s.fields.iter().map(field_to_core).collect(),
     }
 }
@@ -106,6 +115,7 @@ fn schema_from_core(d: murmur_core::DocumentSchema) -> DocumentSchema {
                 kind: s.kind,
                 label: s.label,
                 priced: s.priced,
+                line_detail: s.line_detail,
                 fields: s
                     .fields
                     .into_iter()
@@ -115,6 +125,7 @@ fn schema_from_core(d: murmur_core::DocumentSchema) -> DocumentSchema {
                         label: f.label,
                         fill: f.fill,
                         static_value: f.static_value,
+                        hint: f.hint,
                     })
                     .collect(),
             })
@@ -238,6 +249,7 @@ mod tests {
                 kind: "line_items".into(),
                 label: "Items".into(),
                 priced: false,
+                line_detail: String::new(),
                 fields: vec![],
             }],
             schema_version: 1,
@@ -264,12 +276,14 @@ mod tests {
             kind: "filled".into(),
             label: "Approvals".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![SchemaField {
                 key: "hoa_no".into(),
                 kind: "text".into(),
                 label: "HOA approval #".into(),
                 fill: "walk".into(),
                 static_value: None,
+                hint: None,
             }],
         });
         let saved = e.save_document_schema(schema).unwrap();
@@ -301,12 +315,14 @@ mod tests {
             kind: "filled".into(),
             label: "S2".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![SchemaField {
                 key: "b".into(),
                 kind: "barcode".into(),
                 label: "B".into(),
                 fill: "walk".into(),
                 static_value: None,
+                hint: None,
             }],
         });
         let err = e.save_document_schema(bad).unwrap_err();
@@ -332,6 +348,7 @@ mod tests {
             kind: "gallery".into(),
             label: "Gallery".into(),
             priced: false,
+            line_detail: String::new(),
             fields: vec![],
         });
         assert!(matches!(
@@ -341,15 +358,19 @@ mod tests {
         assert_eq!(e.list_document_schemas(None).unwrap().len(), before);
     }
 
-    /// Payload parity THROUGH the FFI: a built-in build is unchanged on
-    /// every pre-Plan-19 field, plus the additive `fields: []` and today's
-    /// prefix.
+    /// Payload parity THROUGH the FFI: a built-in build keeps every
+    /// pre-Plan-19 field exactly, and carries its authored fields and today's
+    /// prefix on top.
     #[tokio::test]
     async fn ffi_build_document_unchanged_for_builtins() {
         let e = engine_with(vec![
             tool_use("add_item", serde_json::json!({"kind": "todo", "text": "order lumber"})),
             end_turn("done"),
             tool_use("write_notes", serde_json::json!({"summary": "Lumber ordered."})),
+            tool_use(
+                "compose_document",
+                serde_json::json!({"fields": [{"key": "crew", "value": "Jose"}]}),
+            ),
         ]);
         let session = e.clone().begin_walk(None, "landscape".into()).unwrap();
         session.clone().append_transcript("order twelve two by tens".into());
@@ -367,8 +388,16 @@ mod tests {
         assert_eq!(payload.lines[0].title, "order lumber");
         assert_eq!(payload.lines[0].section, None);
         assert!(!payload.lines[0].is_gap);
-        // The Plan 19 additive surface, inert for built-ins:
-        assert!(payload.fields.is_empty(), "built-ins carry zero authored fields");
+        // The Plan 19 additive surface, now carrying the work order's own
+        // structure: the crew it was assigned to, and truthful gaps for what
+        // this short walk never mentioned.
+        assert_eq!(
+            payload.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
+            vec!["crew", "schedule", "access", "safety"],
+            "the assignment block, in schema order"
+        );
+        assert_eq!(payload.fields[0].value.as_deref(), Some("Jose"));
+        assert!(payload.fields[1].is_gap, "no schedule was stated — a gap, not an invented date");
         assert_eq!(payload.number_prefix.as_deref(), Some("WO"), "today's prefix, from the row");
     }
 }

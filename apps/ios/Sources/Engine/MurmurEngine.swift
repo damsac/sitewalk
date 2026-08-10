@@ -438,13 +438,15 @@ final class MurmurEngine: WalkEngine {
                     kind: section.kind,
                     label: section.label,
                     priced: section.priced,
+                    lineDetail: section.lineDetail,
                     fields: section.fields.map { field in
                         SchemaFieldModel(
                             key: field.key,
                             kind: field.kind,
                             label: field.label,
                             fill: field.fill,
-                            staticValue: field.staticValue
+                            staticValue: field.staticValue,
+                            hint: field.hint
                         )
                     }
                 )
@@ -476,13 +478,15 @@ final class MurmurEngine: WalkEngine {
                     kind: section.kind,
                     label: section.label,
                     priced: section.priced,
+                    lineDetail: section.lineDetail,
                     fields: section.fields.map { field in
                         MurmurCoreFFI.SchemaField(
                             key: field.key,
                             kind: field.kind,
                             label: field.label,
                             fill: field.fill,
-                            staticValue: field.staticValue
+                            staticValue: field.staticValue,
+                            hint: field.hint
                         )
                     }
                 )

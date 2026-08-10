@@ -40,12 +40,61 @@ struct PhotoModel: Identifiable, Equatable {
     var capturedAt: UInt64
 }
 
+/// One authored section of a document — the block of prose above or below
+/// the lines that turns a list into a document a trade reader recognizes.
+///
+/// A work order's ASSIGNMENT and SITE NOTES, an estimate's SCOPE OF WORK, a
+/// report's SUMMARY. Rendered from the schema, so an operator's own document
+/// type gets its own sections with no app change.
+struct DocSectionFixture: Identifiable {
+    let id = UUID()
+    let key: String
+    let label: String
+    var fields: [DocFieldFixture]
+
+    /// A section with nothing written in it at all is not rendered — an
+    /// all-gap block is a heading over an empty box, which reads as a broken
+    /// screen rather than as an honest blank.
+    var hasContent: Bool { fields.contains { !$0.isGap } }
+}
+
+struct DocFieldFixture: Identifiable {
+    let id = UUID()
+    let key: String
+    let label: String
+    /// `nil` = a truthful gap: nothing about this was said on the walk.
+    var value: String?
+    var isGap: Bool
+    /// `long_text` sets its own paragraph; `text` sits inline beside its label.
+    var isParagraph: Bool
+}
+
 struct DocumentModel {
     var rows: [DocRowFixture]
     var totalKey: String
     var staticTotal: String   // used when rows carry no $ amounts (e.g. inspection)
     var note: String
     var send: String
+    /// Authored sections, in schema order. Empty for the demo engine's
+    /// fixtures and any pre-Plan-19 document body.
+    var sections: [DocSectionFixture] = []
+    /// The document's own number — "EST-0047", "INV-0003", "WO-0012".
+    ///
+    /// Core has minted a real, per-kind, monotonic number on every build
+    /// since Plan 13, and the app was throwing it away: the letterhead read
+    /// the FIXTURE number for a trade's lead kind and printed nothing at all
+    /// for the other six. So every real estimate went out as EST-0047
+    /// whatever core had minted, and every real invoice went out with no
+    /// invoice number — which is not a document a bookkeeper can accept, and
+    /// in most places not one a client is obliged to pay against.
+    var docNumber: String = ""
+    /// "WORK ORDER", "INVOICE" — the stamp at the top right.
+    ///
+    /// Same defect as `docNumber` and the same fix: the PDF was passing the
+    /// TRADE fixture's kind, so an exported work order was headed ESTIMATE.
+    /// One value, read by the screen and the export, because a document that
+    /// disagrees with itself about what it is has no business being sent.
+    var docKindLabel: String = ""
     /// Whether this document has an amount column at all.
     ///
     /// Set once, at build, from the kind — NOT inferred from the rows, which
