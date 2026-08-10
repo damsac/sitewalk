@@ -32,9 +32,22 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
          - Use add_item for todos, decisions, notes, safety issues, parts, prices.\n\
          - An item is ONE PIECE OF WORK OR ONE MATERIAL, named the way it would \
          appear as a line on paperwork: a short noun phrase. \"Mulch, three beds\", \
-         \"Weed and compost, three beds\", \"Ten pepper plants\", \"Prune five pear \
-         trees\". NOT a sentence about the job: not \"Juan is going to do the \
-         mulching\", not \"we should probably weed those beds first\".\n\
+         \"Weed and compost, three beds\", \"Prune five pear trees\". NOT a sentence \
+         about the job: not \"Juan is going to do the mulching\", not \"we should \
+         probably weed those beds first\".\n\
+         - Group what the operator groups. If they name several things together and \
+         give them ONE price — \"ten peppers, ten tomatoes and five artichokes… two \
+         fifty for the plants\" — that is ONE item (\"Plants: 10 peppers, 10 \
+         tomatoes, 5 artichokes\"), not three. Splitting it puts their one price on \
+         one line and leaves the others blank, which is worse paperwork than the way \
+         they said it. Match the grain of their pricing.\n\
+         - ALWAYS KEEP A SPOKEN AMOUNT IN THE TEXT, exactly as a figure: \"$200 \
+         weeding and compost\", \"$500 labor\". This is the one place the noun-phrase \
+         rule does not shorten anything — the amount is the whole content of that \
+         item, and a later step reads the figure out of the text and attaches it to \
+         the work it names. An item that drops the number loses the price entirely: \
+         nothing downstream can recover it, and the operator's own stated price never \
+         reaches their estimate.\n\
          - WHO does the work is never an item. A person assigned to a task belongs \
          in the notes (scope_of_work), not on a line of its own — a line reading \
          \"Juan to do the mulching\" duplicates the work item it refers to and lands \
