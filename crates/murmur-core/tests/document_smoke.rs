@@ -26,7 +26,19 @@ use std::sync::{Arc, Mutex};
 use harness::{AnthropicProvider, HarnessError, Memory, MemoryStore};
 use murmur_core::{DocumentBuilder, SessionProcessor, Store};
 
-const MODEL: &str = "claude-haiku-4-5";
+/// The model under test, defaulting to the one the SHIPPED app builds
+/// documents with — `EngineResolution.modelProcessing` → `providers.processing`
+/// → `DocumentBuilder`.
+///
+/// It defaults to the real thing on purpose, and the purpose was learned the
+/// hard way: this test first ran on haiku (cheaper, and the sibling smoke
+/// test's choice) and reported a pricing failure that was then quoted as
+/// production behaviour. Sonnet failed differently and by a different amount.
+/// A smoke test pointed at a model nobody ships tells you about that model.
+/// Override with `SMOKE_MODEL=` when you specifically want to compare.
+fn model() -> String {
+    std::env::var("SMOKE_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".to_string())
+}
 
 /// A walk that names people against tasks — the thing Isaac asked for, and
 /// the case a mock cannot evaluate.
@@ -64,7 +76,7 @@ five hundred labor.";
 async fn a_real_estimates_lines_read_like_line_items() {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .expect("set ANTHROPIC_API_KEY to run the real-provider document smoke test");
-    let provider = Arc::new(AnthropicProvider::from_env(api_key, MODEL));
+    let provider = Arc::new(AnthropicProvider::from_env(api_key, model()));
 
     let store = Store::open_in_memory("smoke-device").unwrap();
     let session = store.start_session_with_template(None, "landscape").unwrap();
@@ -128,7 +140,7 @@ async fn a_real_estimates_lines_read_like_line_items() {
 async fn real_walk_becomes_a_work_order() {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .expect("set ANTHROPIC_API_KEY to run the real-provider document smoke test");
-    let provider = Arc::new(AnthropicProvider::from_env(api_key, MODEL));
+    let provider = Arc::new(AnthropicProvider::from_env(api_key, model()));
 
     let store = Store::open_in_memory("smoke-device").unwrap();
     let session = store.start_session_with_template(None, "landscape").unwrap();
