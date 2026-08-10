@@ -1562,6 +1562,31 @@ final class AppModel {
         editingRowIsNew = false
     }
 
+    /// Takes the block off this document entirely.
+    ///
+    /// Distinct from clearing it, and both are wanted: clearing says "this
+    /// belongs here and I still owe it a value", so the field stays visible as
+    /// a gap you can come back to. Removing says "this document doesn't need
+    /// this block" — a one-line fence repair does not want a SAFETY paragraph
+    /// on it, and leaving an empty heading there is the "heading over an empty
+    /// box" problem the operator can't fix any other way.
+    ///
+    /// A section that loses its last field goes with it, for the same reason.
+    func removeEditingField() {
+        guard let target = editingField, var doc = document,
+              let sectionIndex = doc.sections.firstIndex(where: { $0.key == target.section })
+        else {
+            editingField = nil
+            return
+        }
+        doc.sections[sectionIndex].fields.removeAll { $0.key == target.key }
+        if doc.sections[sectionIndex].fields.isEmpty {
+            doc.sections.remove(at: sectionIndex)
+        }
+        document = doc
+        editingField = nil
+    }
+
     /// Writes the field back. An emptied value returns it to a truthful gap —
     /// the same rule as an emptied amount, for the same reason.
     func commitFieldEdit() {

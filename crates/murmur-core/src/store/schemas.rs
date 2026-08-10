@@ -92,6 +92,53 @@ pub(crate) fn seed_schemas(conn: &Connection, schemas: &[DocumentSchema]) -> Res
                 schema.device_id,
             ],
         )?;
+        // ...and UPGRADE a row that is still the seeded one.
+        //
+        // Insert-if-absent alone is a trap, and it sprang on 2026-08-09: the
+        // built-in ids are fixed constants, so once a device has seeded them
+        // ONE TIME, no later app version can ever change what those documents
+        // are. The release that gave every built-in its authored sections
+        // shipped to a device that already had the old rows and changed
+        // nothing at all — no scope paragraph, no line details, no AMOUNT DUE,
+        // because the schema the builder resolved was still the one from the
+        // previous version. Every test had used a fresh store, where the
+        // INSERT fires and everything works.
+        //
+        // Two things this must not touch, hence the WHERE clause:
+        //
+        // - `deleted_at IS NULL` — a built-in the operator deliberately
+        //   deleted stays deleted. Resurrecting it on every launch would make
+        //   the delete button a no-op (pinned by
+        //   `tombstoned_builtin_survives_a_fresh_seed_call`).
+        // - `device_id = 'builtin' AND updated_at = 0` — the two fixed
+        //   literals `builtin_schema()` stamps and nothing else writes. Any
+        //   operator save bumps `updated_at` to a real clock, so an edited
+        //   built-in stops matching and keeps their version. Their edit
+        //   outranks our update, always: silently reverting somebody's
+        //   customized document type on an app update is worse than leaving
+        //   them on an out-of-date one. (Both conditions, because they fail
+        //   independently — `save_document_schema`'s UPDATE path bumps the
+        //   clock without restamping the device.)
+        //
+        // The update deliberately does NOT bump `updated_at`: an upgraded row
+        // is still a seeded row, and must stay eligible for the next upgrade.
+        conn.execute(
+            "UPDATE document_schemas
+                SET kind = ?2, label = ?3, number_prefix = ?4, trade_key = ?5,
+                    sections = ?6, schema_version = ?7
+              WHERE id = ?1 AND deleted_at IS NULL AND device_id = ?8
+                AND updated_at = 0",
+            rusqlite::params![
+                schema.id,
+                schema.kind,
+                schema.label,
+                schema.number_prefix,
+                schema.trade_key,
+                sections,
+                schema.schema_version as i64,
+                schema.device_id,
+            ],
+        )?;
     }
     Ok(())
 }
@@ -455,6 +502,78 @@ mod tests {
                 b.kind
             );
         }
+    }
+
+    /// The app-update path, and the defect that shipped on 2026-08-09.
+    ///
+    /// Built-in ids are fixed constants, so insert-if-absent means a device
+    /// that seeded them once can NEVER receive a changed built-in. The release
+    /// that gave every built-in its authored sections landed on an existing
+    /// install and changed nothing: the estimate still had no scope section,
+    /// so the compose pass never ran and the document came out exactly as
+    /// before. Every test used a fresh store, where the INSERT fires.
+    #[test]
+    fn an_app_update_upgrades_the_seeded_builtins_in_place() {
+        let s = Store::open_in_memory("device-a").unwrap();
+        // Simulate the PREVIOUS version's row: no authored sections, no
+        // line_detail — exactly what a device seeded before the update holds.
+        let stale = DocumentSchema {
+            sections: vec![SchemaSection {
+                key: "line_items".into(),
+                kind: "line_items".into(),
+                label: "Items".into(),
+                priced: true,
+                line_detail: String::new(),
+                fields: vec![],
+            }],
+            label: "Old Estimate".into(),
+            ..crate::domain::builtin_schemas()
+                .into_iter()
+                .find(|b| b.id == BUILTIN_SCHEMA_ID_ESTIMATE)
+                .unwrap()
+        };
+        s.conn
+            .execute(
+                "UPDATE document_schemas SET sections = ?2, label = ?3 WHERE id = ?1",
+                rusqlite::params![
+                    BUILTIN_SCHEMA_ID_ESTIMATE,
+                    envelope_json(&stale).unwrap(),
+                    stale.label
+                ],
+            )
+            .unwrap();
+
+        seed_builtin_schemas(&s.conn).unwrap();
+
+        let fresh = s.get_document_schema(BUILTIN_SCHEMA_ID_ESTIMATE).unwrap();
+        assert_eq!(fresh.label, "Estimate", "the label caught up");
+        let line_items = fresh.sections.iter().find(|x| x.kind == "line_items").unwrap();
+        assert_eq!(line_items.line_detail, "inclusion", "the lines learned what to say");
+        assert!(
+            fresh.sections.iter().any(|x| x.key == "scope"),
+            "the scope section arrived — without this the compose pass never runs"
+        );
+        let count: i64 =
+            s.conn.query_row("SELECT COUNT(*) FROM document_schemas", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 7, "upgraded in place, not duplicated");
+    }
+
+    /// The other half: an operator who customized a built-in keeps their
+    /// version. Silently reverting somebody's edited document type on an app
+    /// update is worse than leaving them on an out-of-date one.
+    #[test]
+    fn an_operator_edited_builtin_is_never_overwritten_by_a_seed() {
+        let s = Store::open_in_memory("device-a").unwrap().with_clock(Arc::new(|| 1000));
+        let mut edited = s.get_document_schema(BUILTIN_SCHEMA_ID_ESTIMATE).unwrap();
+        edited.label = "My Estimate".into();
+        edited.number_prefix = "QUO".into();
+        s.save_document_schema(&edited).unwrap();
+
+        seed_builtin_schemas(&s.conn).unwrap();
+
+        let after = s.get_document_schema(BUILTIN_SCHEMA_ID_ESTIMATE).unwrap();
+        assert_eq!(after.label, "My Estimate", "their edit outranks our update");
+        assert_eq!(after.number_prefix, "QUO");
     }
 
     /// WE-A core — the guard exercised the way every real launch exercises it.
