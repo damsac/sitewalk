@@ -154,6 +154,7 @@ before the token existed, but nothing is being deployed while it is missing.
 | `CLOUDFLARE_API_TOKEN` | secret | Cloudflare API token (scopes below) |
 | `CLOUDFLARE_ACCOUNT_ID` | secret, optional | Only if the token can see more than one account; a single-account token is inferred |
 | `JEFE_PROXY_URL` | variable, optional | Worker base URL for the post-deploy smoke check. Already set for the app build; reused rather than duplicated |
+| `JEFE_APP_SECRET` | secret, **already set** | Nothing to do. `release.yml` already bakes it into the app, and it must equal the worker's `APP_SECRET` or every build would 401 — which is exactly why the smoke check can borrow it for an authenticated probe |
 
 Mint the token at **My Profile → API Tokens → Create Token → Custom token**
 with exactly these permissions:
@@ -173,23 +174,79 @@ move to CI.
 
 CI does not trust wrangler's exit code — that says "Cloudflare accepted an
 upload", not "the running worker is this commit and still has its secrets".
-After each deploy it asserts, against the live URL:
+After each deploy it probes the live URL, with two credentials that prove
+different things.
 
-- `GET /health` → `200` `{"ok":true}`
+**Unauthenticated**, which proves the worker still *has* its configuration:
+
+- `GET /health` → `200` `{"ok":true}`.
 - `POST /v1/messages` with a deliberately-invalid credential → `401`, **not**
   `500`. A `500` is `index.ts`'s "proxy is not configured" — a worker that
   deployed cleanly and lost `ANTHROPIC_API_KEY`/`APP_SECRET`, which fails every
-  real call. That 401-vs-500 distinction is the most useful thing an
-  unauthenticated probe can tell you.
-- `POST /v1/messages` with `stream: true` → `400`. CI holds no valid
-  `APP_SECRET`, and the credential is checked before the body is read, so this
-  probe sees `401` unless the streaming guard runs ahead of authentication. It
-  treats `401` as *unproven* (a loud warning, not a pass) and fails on anything
-  else. Set the repo variable `PROXY_SMOKE_REQUIRE_STREAM_REJECT=true` to make
-  the `400` mandatory once the guard is known to run pre-auth.
+  real call. That 401-vs-500 distinction is the most useful thing a probe
+  without a credential can tell you.
 
-It asserts on status codes and never prints a `/v1/messages` response body —
-the privacy rule above governs CI output too.
+**Authenticated**, which reaches the request validation (the `stream: true`
+refusal and the model allowlist). Both guards sit *after* `authenticate()` —
+the right place, since
+`/v1/messages` has no body size cap and moving them ahead of auth would expose
+`text()` + `JSON.parse` to unauthenticated scanners and hand the allowlist to
+anyone who asks. CI does not need them moved: it already holds
+`JEFE_APP_SECRET`, so it can simply present `jefe.ci-smoke-check.<secret>`.
+
+- `stream: true` with an **allowed** model → `400`.
+- an **allowlisted-out** model (`claude-fable-5`), with no `stream` field → `400`.
+
+Each probe is shaped so only one guard can produce its `400`, since the check
+never reads response bodies. Neither costs anything: both guards return before
+the upstream `fetch`, and `addSpend` runs only on a successful upstream
+response — so a rejected probe makes no Anthropic call and moves no counter.
+
+#### What the smoke check will *not* fail on
+
+The cap check runs **before** the body is read, so a tripped cap shadows both
+guards — the probe never reaches them:
+
+| Status | Meaning | Treated as |
+|---|---|---|
+| `400` | The guard fired | **pass** |
+| `200` | Not rejected, served upstream | **hard fail** — the regression worth paging for |
+| `503` / `429` | Global / per-install daily cap tripped | **inconclusive**, warn and continue |
+| `401` | The probe's own credential was refused | **inconclusive**, warn loudly |
+| `404`, `5xx` | Went upstream instead of being rejected | **fail** — the live worker is not running the deployed code |
+
+`503` and `429` stay non-fatal on purpose. A spend incident is exactly when a
+spurious page is most expensive and least informative, and failing the deploy
+would not fix the cap. `429` is reachable in ordinary operation now that
+`PER_INSTALL_DAILY_CAP_USD = "0"` is a legitimate blanket kill switch.
+
+A `401` on the *authenticated* probe has two causes, worth checking in this
+order: `JEFE_APP_SECRET` has drifted from the worker's `APP_SECRET` (in which
+case the shipped app is also failing, and that is the real emergency), or
+`ATTEST_MODE` has left `off`, which a plain `jefe.` credential cannot satisfy.
+Both mean *unreachable*, not *regressed*.
+
+#### `PROXY_SMOKE_REQUIRE_STREAM_REJECT`
+
+Set this repo variable to `true` to escalate. It makes it fatal when the
+authenticated probes **do not run at all** — because `JEFE_APP_SECRET` is
+missing, or because the deployed commit does not contain the guards. A smoke
+check that quietly stops checking is the failure this switch exists to catch.
+
+It does **not** make `503`, `429`, or `401` fatal. Those are unreachable-guard
+states, and escalating them would page someone during an unrelated spend
+incident. A `200` is fatal with or without the switch.
+
+Before probing, the check greps the deployed checkout for the guards. That
+turns "we could not observe it" into two genuinely different states — *not in
+this build* versus *in this build but the live worker didn't apply it* — and
+only the second is a deploy failure. It also stops the check from exercising
+the very bypass it is testing for: against a build without the guards, an
+authenticated `stream: true` probe would be forwarded to Anthropic as a real
+SSE call that spends money and meters as zero.
+
+Everything is asserted on status codes; no `/v1/messages` response body is ever
+printed — the privacy rule above governs CI output too.
 
 ### First-time (or break-glass) manual deploy
 

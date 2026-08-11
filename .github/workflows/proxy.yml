@@ -24,6 +24,11 @@
 #   CLOUDFLARE_ACCOUNT_ID  Optional. Only needed when the token can see more
 #                          than one account; with a single-account token
 #                          wrangler infers it. Empty is harmless.
+#   JEFE_APP_SECRET        Already set — release.yml bakes it into the shipped
+#                          app, and it must equal the worker's APP_SECRET or
+#                          every build would 401. Reused here so the smoke
+#                          check can make an AUTHENTICATED probe. Not required:
+#                          without it the authenticated assertions skip.
 #
 # Optional repo variables:
 #   JEFE_PROXY_URL                     Worker base URL for the smoke check.
@@ -31,8 +36,11 @@
 #                                      build; reused here rather than adding a
 #                                      second source of truth. Falls back to the
 #                                      known production URL when unset.
-#   PROXY_SMOKE_REQUIRE_STREAM_REJECT  "true" makes the streaming-rejection
-#                                      assertion blocking. See that step.
+#   PROXY_SMOKE_REQUIRE_STREAM_REJECT  "true" escalates the request-validation
+#                                      assertions from advisory to blocking.
+#                                      See that step for exactly what it does
+#                                      and — just as important — what it does
+#                                      NOT make fatal.
 
 name: Proxy
 
@@ -169,15 +177,22 @@ jobs:
       # live having lost ANTHROPIC_API_KEY/APP_SECRET, which src/index.ts turns
       # into a blanket 500 on every call. So: probe the live URL.
       #
-      # CI holds no valid APP_SECRET, so everything past /health is probed with
-      # a deliberately-invalid credential. That is not a limitation to work
-      # around — the 401-vs-500 distinction it produces is the single most
-      # useful thing this check can assert (see below).
+      # It probes twice over, because the two credentials prove different
+      # things. An INVALID credential proves the worker still has its secrets
+      # (401 means it compared them; 500 means it lost them). A VALID one —
+      # JEFE_APP_SECRET, which release.yml already bakes into the app and which
+      # must equal the worker's APP_SECRET — reaches past auth to the request
+      # validation the app actually depends on.
       - name: Smoke check the live worker
         if: ${{ steps.gate.outputs.configured == 'true' }}
         env:
-          # "true" makes the streaming assertion blocking. See that block.
+          # "true" escalates the request-validation assertions. See that block.
           REQUIRE_STREAM_REJECT: ${{ vars.PROXY_SMOKE_REQUIRE_STREAM_REJECT }}
+          # The same secret release.yml bakes into the app. It MUST equal the
+          # worker's APP_SECRET or every shipped build would 401, which is what
+          # lets CI make an authenticated probe without holding a new secret.
+          # GitHub masks it in logs; nothing below ever echoes it.
+          JEFE_APP_SECRET: ${{ secrets.JEFE_APP_SECRET }}
         run: |
           set -euo pipefail
           BASE="${PROXY_URL%/}"
@@ -242,48 +257,131 @@ jobs:
           fi
           echo "  ok  POST /v1/messages (invalid credential) -> 401"
 
-          # ---- 3. A streaming request is refused ---------------------------
-          # The rejection lands in the metering-fix PR
-          # (pr/dam/proxy-only-and-metering-fixes). It is asserted here as a
-          # SET of acceptable codes rather than a single one, because from CI
-          # the two passing shapes are genuinely indistinguishable:
+          # ---- 3. Request validation, via an AUTHENTICATED probe ------------
+          # The `stream: true` and model-allowlist guards both sit AFTER
+          # `authenticate()` — deliberately, and the reasoning is worth keeping
+          # here because it is what shapes this block. `/v1/messages` has no
+          # body size cap, so putting body-dependent checks ahead of auth would
+          # expose an uncapped text()+JSON.parse to unauthenticated scanners,
+          # break the file's invariant that every body read is post-auth, and
+          # hand the allowlist contents to anyone who asks. The observability
+          # those checks would have bought is available a cheaper way: give the
+          # probe a real credential. CI already holds JEFE_APP_SECRET, which
+          # must equal the worker's APP_SECRET or every shipped build would
+          # 401 — so there is no new secret to mint and no new trust to grant.
           #
-          #   400 -> the guard ran and refused the stream. Proven.
-          #   401 -> the credential was refused FIRST, so the request never
-          #          reached the guard. On main today src/index.ts authenticates
-          #          before it reads the body at all, so unless that PR places
-          #          the stream check ahead of the credential check, 401 is what
-          #          a correct worker returns here and no unauthenticated probe
-          #          can ever see the 400. This is NOT proof the guard exists.
-          #   else -> a real failure, including 200 (a stream was accepted).
+          # An authenticated probe is cheap BY CONSTRUCTION, not by luck: both
+          # guards return before the upstream `fetch`, and `addSpend` runs only
+          # on a successful upstream response. A rejected probe therefore makes
+          # no Anthropic call and moves no spend counter.
           #
-          # This is deliberately not a check that cannot fail: 200/404/500/5xx
-          # all fail it unconditionally. What it cannot do is distinguish
-          # "guard absent" from "guard unreachable without a valid APP_SECRET",
-          # and it says so out loud rather than reporting a pass it did not earn.
-          # Set the repo variable PROXY_SMOKE_REQUIRE_STREAM_REJECT=true once
-          # that PR lands with the guard ahead of auth, and 401 becomes fatal.
-          STREAM_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
-            -X POST "$BASE/v1/messages" \
-            -H 'content-type: application/json' \
-            -H "x-api-key: $BAD_CRED" \
-            --data '{"model":"claude-3-5-haiku-20241022","max_tokens":1,"stream":true,"messages":[{"role":"user","content":"ci smoke check"}]}' \
-            || echo "000")
-          case "$STREAM_CODE" in
-            400)
-              echo "  ok  POST /v1/messages (stream:true) -> 400, streaming refused"
-              ;;
-            401)
-              if [ "${REQUIRE_STREAM_REJECT:-}" = "true" ]; then
-                echo "::error::POST /v1/messages with stream:true returned 401, not 400. PROXY_SMOKE_REQUIRE_STREAM_REJECT is set, which asserts the streaming guard runs BEFORE the credential check — it did not. Either the guard regressed, or it moved behind auth (in which case unset that variable; the guard is then only pinned by the vitest suite)."
-                exit 1
-              fi
-              echo "::warning::POST /v1/messages with stream:true returned 401, so the streaming rejection was NOT observed. The credential is checked before the body is read, so this is what a correct worker returns to an unauthenticated probe whether the guard exists or not — CI has no valid APP_SECRET and cannot tell the two apart. UNPROVEN, not passed. Once pr/dam/proxy-only-and-metering-fixes lands, check where it put the guard: if ahead of the credential check, set the repo variable PROXY_SMOKE_REQUIRE_STREAM_REJECT=true to make this blocking; if behind it, the vitest suite is the only place this behaviour is pinned and this probe stays advisory."
-              ;;
-            *)
-              echo "::error::POST /v1/messages with stream:true returned $STREAM_CODE, expected 400 (streaming refused) or 401 (credential refused first). A 200 here means the worker accepted a streaming request."
+          # Each probe is built so that exactly ONE guard can produce its 400,
+          # which matters because we never read response bodies and 400 is the
+          # shared status:
+          #   - stream probe: ALLOWED model + `stream: true` -> only the stream
+          #     guard can reject it (the JSON is valid, the model is fine).
+          #   - model probe: disallowed model + NO `stream` field -> the stream
+          #     guard cannot fire, so only the allowlist can reject it.
+          PROBE_INSTALL='ci-smoke-check'
+          ALLOWED_MODEL='claude-haiku-4-5'
+          # Deliberately not a real model and deliberately not a near-miss of an
+          # allowed prefix — the allowlist is prefix-matched, so a name like
+          # `claude-haiku-4-5-x` would be ACCEPTED and this probe would be
+          # asserting the opposite of what it looks like it asserts.
+          DISALLOWED_MODEL='claude-fable-5'
+
+          # Whether the deployed code even contains the guards. This is read
+          # from the checkout we just deployed, so it is a fact about the
+          # shipped commit rather than a guess: it turns "we could not observe
+          # the guard" into the two genuinely different states, "the guard is
+          # not in this build" and "the guard is in this build but the live
+          # worker did not apply it" — and only the second is a deploy failure.
+          #
+          # It also prevents a real hazard while these two PRs are in flight.
+          # If this workflow deploys a commit WITHOUT the guards, an
+          # authenticated `stream: true` probe would be forwarded to Anthropic:
+          # a live SSE call that spends money and, being unparseable as JSON,
+          # meters as zero. Probing for a guard must not exercise the very
+          # bypass the guard exists to close.
+          GUARDS_PRESENT=true
+          grep -q 'stream === true' services/proxy/src/index.ts || GUARDS_PRESENT=false
+          grep -q 'isAllowedModel' services/proxy/src/index.ts || GUARDS_PRESENT=false
+
+          SKIP_REASON=''
+          if [ -z "${JEFE_APP_SECRET:-}" ]; then
+            SKIP_REASON='the JEFE_APP_SECRET secret is not set, so no authenticated probe can be made'
+          elif [ "$GUARDS_PRESENT" != "true" ]; then
+            SKIP_REASON='the deployed commit does not contain the stream/allowlist guards (services/proxy/src/index.ts), so there is nothing to observe — probing anyway would forward a streaming request to Anthropic and spend real money unmetered'
+          fi
+
+          if [ -n "$SKIP_REASON" ]; then
+            if [ "${REQUIRE_STREAM_REJECT:-}" = "true" ]; then
+              echo "::error::Request-validation probes did NOT run: $SKIP_REASON. PROXY_SMOKE_REQUIRE_STREAM_REJECT is set, which asserts these checks actually run — a smoke check that quietly stops checking is the failure this switch exists to catch."
               exit 1
-              ;;
-          esac
+            fi
+            echo "::warning::Request-validation probes skipped: $SKIP_REASON. /health and the 401-vs-500 assertion above still ran."
+          else
+            FAILED=0
+
+            # Classifies one probe. The status set is not arbitrary — every arm
+            # corresponds to a specific path through src/index.ts.
+            #   400 -> the guard fired. Proven.
+            #   200 -> the guard did NOT fire and upstream served the request.
+            #          This is the regression worth paging for, and it is fatal
+            #          whether or not the escalation switch is set.
+            #   503 -> the GLOBAL daily cap is tripped. The cap check runs
+            #   429    before the body is ever read, so it shadows both guards:
+            #          the probe never reached them and proves nothing either
+            #          way. 429 is the per-install twin, reachable now that
+            #          PER_INSTALL_DAILY_CAP_USD="0" is a legitimate blanket
+            #          kill switch. INCONCLUSIVE, never fatal — a spend
+            #          incident is precisely when a spurious page is most
+            #          expensive and least informative.
+            #   401 -> the probe's own credential was refused. Either
+            #          JEFE_APP_SECRET has drifted from the worker's APP_SECRET
+            #          (in which case the shipped app is also 401ing and that is
+            #          the real emergency), or ATTEST_MODE has left `off` and a
+            #          plain `jefe.` credential can no longer satisfy it. Loud,
+            #          but not fatal: like 503, it means unreachable, not
+            #          regressed, and failing the deploy would not fix either.
+            #   else -> a real failure (404, 5xx, a network 000).
+            classify() {
+              case "$2" in
+                400) echo "  ok  $1 -> 400 ($3)" ;;
+                200)
+                  echo "::error::$1 returned 200 — the request was NOT rejected and was served upstream. $3 is not being enforced by the live worker."
+                  FAILED=1
+                  ;;
+                503|429)
+                  echo "::warning::$1 returned $2 — a daily spend cap is tripped, and the cap check runs before the body is read, so the probe never reached the guard. INCONCLUSIVE, not a pass and not a failure. Re-run after the cap resets (or after raising it) to actually exercise $3."
+                  ;;
+                401)
+                  echo "::warning::$1 returned 401 — the probe's credential was refused, so it never reached the guard. INCONCLUSIVE. Two causes worth checking in this order: (1) JEFE_APP_SECRET no longer equals the worker's APP_SECRET, which means every shipped build is also failing right now; (2) ATTEST_MODE has left 'off', which a plain jefe. credential cannot satisfy. Not treated as a deploy failure either way — it means unreachable, not regressed."
+                  ;;
+                *)
+                  echo "::error::$1 returned $2, expected 400. If this is a 404 or a 5xx the request went upstream instead of being rejected, which means the live worker is not running the code that was just deployed."
+                  FAILED=1
+                  ;;
+              esac
+            }
+
+            STREAM_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+              -X POST "$BASE/v1/messages" \
+              -H 'content-type: application/json' \
+              -H "x-api-key: jefe.$PROBE_INSTALL.$JEFE_APP_SECRET" \
+              --data "{\"model\":\"$ALLOWED_MODEL\",\"max_tokens\":1,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"ci smoke check\"}]}" \
+              || echo "000")
+            classify 'POST /v1/messages (authenticated, stream:true)' "$STREAM_CODE" 'streaming refused'
+
+            MODEL_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+              -X POST "$BASE/v1/messages" \
+              -H 'content-type: application/json' \
+              -H "x-api-key: jefe.$PROBE_INSTALL.$JEFE_APP_SECRET" \
+              --data "{\"model\":\"$DISALLOWED_MODEL\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ci smoke check\"}]}" \
+              || echo "000")
+            classify "POST /v1/messages (authenticated, model:$DISALLOWED_MODEL)" "$MODEL_CODE" 'the model allowlist'
+
+            [ "$FAILED" -eq 0 ] || exit 1
+          fi
 
           echo "Smoke check complete."
