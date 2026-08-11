@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { authenticate, readRawCredential } from '../src/auth';
-import { costUsd, rateFor } from '../src/pricing';
+import { costUsd, isAllowedModel, rateFor } from '../src/pricing';
 import worker, { dayKey, type Env } from '../src/index';
 
 const APP_SECRET = 'test-app-secret';
@@ -37,6 +37,54 @@ describe('pricing', () => {
     // Guessing low would let an unpriced model slip past the cap entirely.
     const unknown = rateFor('claude-something-unreleased');
     expect(unknown.input).toBeGreaterThanOrEqual(rateFor('claude-opus-5').input);
+  });
+
+  it('prices an unknown model above every model Anthropic actually sells', () => {
+    // The regression this pins: the fallback used to be $5/$25, but Claude
+    // Fable 5 is $10/$50 and matches no prefix in RATES — so it metered at
+    // HALF its real cost. "Unknown must overestimate" has to hold against the
+    // real price list, not just against the table's own cheapest guesses.
+    const unknown = rateFor('claude-fable-5');
+    expect(unknown.input).toBeGreaterThan(10);
+    expect(unknown.output).toBeGreaterThan(50);
+  });
+
+  it('keeps the fallback strictly above every priced entry', () => {
+    const unknown = rateFor('definitely-not-a-model');
+    for (const known of ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-5']) {
+      expect(unknown.input, known).toBeGreaterThan(rateFor(known).input);
+      expect(unknown.output, known).toBeGreaterThan(rateFor(known).output);
+    }
+  });
+});
+
+// -------------------------------------------------------------- allowlist
+
+describe('model allowlist', () => {
+  it('admits exactly the models the shipped app sends', () => {
+    // EngineResolution.swift: modelLive/modelReflection = haiku-4-5,
+    // modelProcessing = sonnet-4-5. Nothing else is on that path.
+    expect(isAllowedModel('claude-haiku-4-5')).toBe(true);
+    expect(isAllowedModel('claude-sonnet-4-5')).toBe(true);
+  });
+
+  it('admits a dated snapshot of an allowed family', () => {
+    // The harness tests use this exact id; a snapshot bills at family rates.
+    expect(isAllowedModel('claude-haiku-4-5-20251001')).toBe(true);
+  });
+
+  it('refuses priced-but-unsent models and anything unrecognised', () => {
+    for (const model of [
+      'claude-opus-5', // in RATES, but the app never sends it
+      'claude-sonnet-4-6',
+      'claude-fable-5', // the under-metering case
+      'claude-mythos-5',
+      '',
+      'unknown',
+      'claude-haiku', // prefix of the prefix — must not squeak through
+    ]) {
+      expect(isAllowedModel(model), model).toBe(false);
+    }
   });
 });
 
@@ -116,6 +164,15 @@ function messagesRequest(credential = GOOD, model = 'claude-haiku-4-5'): Request
     method: 'POST',
     headers: { 'x-api-key': credential, 'content-type': 'application/json' },
     body: JSON.stringify({ model, max_tokens: 64, messages: [{ role: 'user', content: 'hi' }] }),
+  });
+}
+
+/** Same route/credential, but an arbitrary body — for the validation tests. */
+function rawMessagesRequest(body: Record<string, unknown>): Request {
+  return new Request('https://proxy.test/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': GOOD, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   });
 }
 
@@ -224,6 +281,145 @@ describe('worker', () => {
     const res = await worker.fetch(messagesRequest(), env, ctx);
     await settle();
     expect(res.status).toBe(429);
+  });
+
+  // ------------------------------------------------- stream: the metering hole
+
+  it('refuses stream:true rather than forwarding an unmeterable request', async () => {
+    // An SSE response is a 200 whose body is not JSON. The pricing path would
+    // throw, log `unpriceable_response`, and return it having called addSpend
+    // ZERO times — so both daily counters stay at 0 forever and every later
+    // request sails past the cap check. Refuse instead of forwarding.
+    const kv = fakeKv();
+    const env = makeEnv({ METER: kv });
+    const { ctx, settle } = makeCtx();
+
+    const res = await worker.fetch(
+      rawMessagesRequest({
+        model: 'claude-haiku-4-5',
+        max_tokens: 64,
+        stream: true,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+      env,
+      ctx,
+    );
+    await settle();
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      type: 'error',
+      error: { type: 'invalid_request_error' },
+    });
+    // Nothing forwarded, nothing spent, no counter written.
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('still forwards when stream is absent or explicitly false', async () => {
+    const env = makeEnv();
+    const { ctx, settle } = makeCtx();
+
+    const explicit = await worker.fetch(
+      rawMessagesRequest({
+        model: 'claude-haiku-4-5',
+        max_tokens: 64,
+        stream: false,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+      env,
+      ctx,
+    );
+    await settle();
+    expect(explicit.status).toBe(200);
+
+    const absent = await worker.fetch(messagesRequest(), env, ctx);
+    await settle();
+    expect(absent.status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  // ---------------------------------------------------------- model allowlist
+
+  it('refuses a model the app never sends, before spending anything', async () => {
+    // The body is forwarded verbatim, so `model` is attacker-chosen. Fable 5 is
+    // the concrete under-metering case: $10/$50 per MTok, matching no prefix in
+    // RATES, so it used to meter at the fallback's rate instead of its own.
+    const kv = fakeKv();
+    const env = makeEnv({ METER: kv });
+    const { ctx, settle } = makeCtx();
+
+    const res = await worker.fetch(messagesRequest(GOOD, 'claude-fable-5'), env, ctx);
+    await settle();
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('claude-fable-5');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(kv.store.size).toBe(0);
+  });
+
+  it('truncates an oversized model string instead of echoing it back whole', async () => {
+    const env = makeEnv();
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(messagesRequest(GOOD, 'x'.repeat(5000)), env, ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message.length).toBeLessThan(300);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('forwards a dated snapshot of an allowed model', async () => {
+    const env = makeEnv();
+    const { ctx, settle } = makeCtx();
+    const res = await worker.fetch(messagesRequest(GOOD, 'claude-haiku-4-5-20251001'), env, ctx);
+    await settle();
+    expect(res.status).toBe(200);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  // --------------------------------------------------------- the kill switch
+
+  it('honors an explicit zero global cap as a kill switch', async () => {
+    // The obvious incident move. `parsed > 0` used to turn this into the $25
+    // default — a kill switch that failed OPEN.
+    const env = makeEnv({ DAILY_SPEND_CAP_USD: '0' });
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(messagesRequest(), env, ctx);
+    expect(res.status).toBe(503);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit zero per-install cap', async () => {
+    const env = makeEnv({ PER_INSTALL_DAILY_CAP_USD: '0' });
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(messagesRequest(), env, ctx);
+    expect(res.status).toBe(429);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the default cap for genuine garbage, not to zero', async () => {
+    // A stray `= ""` or a typo must NOT become an accidental kill switch
+    // (`Number('')` is 0), and must not disable the cap either.
+    for (const raw of ['', '   ', 'twenty-five', '-5', 'NaN']) {
+      vi.mocked(globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
+      const env = makeEnv({ DAILY_SPEND_CAP_USD: raw });
+      const { ctx, settle } = makeCtx();
+      const res = await worker.fetch(messagesRequest(), env, ctx);
+      await settle();
+      // Default is $25 and the counter is empty, so the call goes through.
+      expect(res.status, raw).toBe(200);
+    }
+  });
+
+  it('still trips the default cap when garbage is configured and spend is high', async () => {
+    const today = dayKey(new Date());
+    const kv = fakeKv({ [`spend:global:${today}`]: '30' });
+    const env = makeEnv({ METER: kv, DAILY_SPEND_CAP_USD: 'twenty-five' });
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(messagesRequest(), env, ctx);
+    expect(res.status).toBe(503);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('serves health without a credential and 404s anything else', async () => {

@@ -10,6 +10,12 @@ compatibility_date = "2026-07-25"
 [vars]
 # Blast-radius limiters, tunable without a code deploy. Both are checked
 # BEFORE a request is forwarded upstream.
+#
+# EMERGENCY KILL SWITCH: set DAILY_SPEND_CAP_USD = "0" and redeploy. Zero is
+# honored literally — the global cap trips on the very next request and the
+# worker stops forwarding. (Anything that is not a non-negative number — unset,
+# empty, a typo, a negative — falls back to the built-in default instead, so
+# "0" is the only spelling of the kill switch. See num() in src/index.ts.)
 DAILY_SPEND_CAP_USD = "25"
 PER_INSTALL_DAILY_CAP_USD = "2"
 

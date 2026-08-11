@@ -29,14 +29,54 @@ const RATES: ReadonlyArray<readonly [string, Rate]> = [
 ];
 
 /**
+ * The models this proxy will forward, matched by PREFIX.
+ *
+ * These are exactly what the shipped app sends: `EngineResolution.swift` builds
+ * an `EngineConfig` with `modelLive`/`modelReflection` = `claude-haiku-4-5` and
+ * `modelProcessing` = `claude-sonnet-4-5`, which `build_providers`
+ * (crates/ffi/src/engine.rs) hands to `AnthropicProvider`, which puts them in
+ * the request body verbatim. There is no launch arg and no env override on that
+ * path — the two strings below are the complete set.
+ *
+ * Prefix matching lets a dated snapshot through (`claude-haiku-4-5-20251001`,
+ * which the harness tests already use). That is safe: a snapshot of a family
+ * bills at the family's rate, and a made-up suffix just 404s upstream having
+ * spent nothing.
+ *
+ * WHY AN ALLOWLIST AND NOT A BIGGER FALLBACK NUMBER: the body is forwarded
+ * byte-identically, so `model` is entirely attacker-chosen. Metering an
+ * arbitrary model correctly means tracking every price Anthropic publishes,
+ * forever, and being wrong is a silent under-meter. Refusing the models the app
+ * never sends costs the app nothing and makes the pricing table's accuracy a
+ * convenience rather than a security property.
+ */
+const ALLOWED_MODEL_PREFIXES: readonly string[] = ['claude-haiku-4-5', 'claude-sonnet-4-5'];
+
+export function isAllowedModel(model: string): boolean {
+  return ALLOWED_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+}
+
+/** For the rejection message — the caller shouldn't have to guess. */
+export const ALLOWED_MODELS_FOR_MESSAGE = ALLOWED_MODEL_PREFIXES.join(', ');
+
+/**
  * The rate applied when the model string matches nothing known.
  *
- * Deliberately the most expensive entry: an unrecognized model must
- * OVERestimate. Guessing low would let a model we haven't priced slip past the
- * spend cap, which is the one thing the cap exists to prevent. Over-charging a
- * legitimate call only trips the cap early, which is visible and fixable.
+ * Defense in depth only — the allowlist above is what actually stops an
+ * unpriced model, and nothing that reaches `costUsd` should ever land here.
+ *
+ * Strictly more expensive than every entry in RATES, and more expensive than
+ * the priciest model Anthropic currently sells ($10/$50 per MTok — Claude Fable
+ * 5, Claude Mythos 5, and Opus 5 in fast mode), with 1.5x headroom on top so a
+ * model released tomorrow still OVERestimates. The invariant is what matters:
+ * guessing low would let an unpriced model slip past the spend cap, which is
+ * the one thing the cap exists to prevent. Over-charging only trips the cap
+ * early, which is visible and fixable.
+ *
+ * The previous value ($5/$25) did NOT satisfy this. Fable 5 is exactly 2x it
+ * and matches no prefix in RATES, so it metered at half its real cost.
  */
-const UNKNOWN_MODEL_RATE: Rate = { input: 5, output: 25 };
+const UNKNOWN_MODEL_RATE: Rate = { input: 15, output: 75 };
 
 export function rateFor(model: string): Rate {
   for (const [prefix, rate] of RATES) {
