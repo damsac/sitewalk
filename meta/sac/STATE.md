@@ -4,6 +4,76 @@ What sac is working on right now. Updated with every PR.
 
 ---
 
+## 2026-08-09/10 — the documents became documents (#319 – #326)
+
+Eight PRs off one field report. The short version: **every document type was
+the same list under a different heading**, and the parts to fix that were
+already built and unused — `DocLine.detail` had rendered as each row's second
+line since Plan 07 and was always `""`, `DocField` crossed the FFI and nothing
+displayed it, Plan 19's fill pass ran for zero built-ins.
+
+**What landed**
+
+- `fill_fields` → **`compose_document`**: one call returning authored field
+  values AND per-line detail + assignee, echo-validated by `item_id` exactly
+  like `price_items`. One call, not two — the scope paragraph summarises the
+  very lines being detailed. Pricing stays separate; money is a different risk
+  class. It reads the coordination notes `summarize()` already captured, so a
+  crew's gate code costs no extra call.
+- **All seven built-ins rebuilt** with authored sections: estimate = SCOPE OF
+  WORK, invoice = WORK PERFORMED + AMOUNT DUE, work order = ASSIGNMENT +
+  SITE NOTES + per-line directives + `DocLine.assignee` (additive on the FFI),
+  report/condition/inspection = summary + observations. **`move_out` became a
+  pricing kind** — its deduction total IS the document.
+- **`fill: "manual"` is now load-bearing** (Isaac's idea, your mode): a blank
+  optional field is NOT a gap. PREPARED FOR on estimates and invoices.
+- Additive schema fields `SchemaSection.line_detail` and `SchemaField.hint`,
+  both `#[serde(default)]`.
+
+**Three things worth your review, all yours by rights**
+
+1. **Seeding now UPGRADES built-ins in place** (#321). `seed_schemas` was
+   `INSERT … WHERE NOT EXISTS` over FIXED ids, so a device that seeded once
+   could never receive a changed built-in — #320 shipped and was 100% inert on
+   every existing install. Guarded on `device_id = 'builtin' AND updated_at =
+   0`; tombstones stay dead, operator edits win. **Note for sync:** two devices
+   on different app versions now hold different `sections` for the same id at
+   the same `updated_at = 0`. Flagging, not redesigning.
+2. **The D5a spoken-total hint is no longer sent to `price_items`** (#323). It
+   said "allocate line prices consistent with this", which is an instruction to
+   invent — across four real runs it put an operator's entire $1,250 quote onto
+   a line he never priced, once. Rewording to "sanity check only" was not
+   enough. The capture and `session_spoken_total` are intact for a future
+   ceiling check.
+3. **Pricing is narrowed to "this operator's own history, or nothing"** (#322).
+   The old wording licensed pricing anything "you can reasonably infer from its
+   text", and did: $3,300 returned against $1,250 stated. Deliberately gappier.
+
+**Extraction prompt changes** (#322 – #326, also yours): items are one piece of
+work or one material as a noun phrase; who does it and site facts are not
+items; a spoken price keeps its figure; group what the operator groups. The
+eval corpus grades extraction CONTENT not phrasing, so the hermetic graders are
+unaffected — **a real eval run will shift.**
+
+**New: `crates/murmur-core/tests/document_smoke.rs`** — env-gated, `#[ignore]`d,
+prints the document under `--nocapture`. It caught three defects mocks
+structurally cannot: the compose pass restating every title, an estimate coming
+back with NO prices at all, and site facts landing as work-order lines. It
+defaults to **`claude-sonnet-4-5`**, the model the app actually ships — it
+originally ran haiku and a haiku result got quoted as production behaviour.
+**Run it 3–5×; single runs hid a total-failure mode.**
+
+**Known and open**
+
+- Absorption of duplicate line pairs is phrasing-dependent (~1 run in 3). Not
+  tuned further on purpose — the only lever merges genuinely different lines.
+- No client capture: `Job.client` / `Job.site` exist and sync, and nothing
+  collects them. PREPARED FOR is typed per document until they do.
+- Builds 105–110 are on the INTERNAL lane; the external "Jefe Beta" group is
+  still on 2.0.0 (54) and needs a `vX.Y.Z` tag + Beta App Review.
+
+---
+
 ## → READ THIS FIRST: `meta/dam/BEFORE-THE-MONTH-AWAY.md`
 
 *(2026-08-02.)*

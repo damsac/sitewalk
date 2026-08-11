@@ -452,15 +452,21 @@ mod tests {
         );
         // work_order: non-pricing, deterministic, zero LLM calls.
         let doc = engine.build_document(sid.clone(), "work_order".into()).await.unwrap();
-        assert_eq!(doc.lines.len(), 3, "the re-tag does NOT change the document structure");
+        // A2 is a SAFETY item and a work order no longer draws one as a line
+        // of work (`draws_kind`) — it reaches the crew through the site block
+        // instead. The invariant this test exists for is untouched: a
+        // todo -> part re-tag changes no structure, because a work order draws
+        // both.
+        assert_eq!(doc.lines.len(), 2, "the re-tag does NOT change the document structure");
         let titles: Vec<&str> = doc.lines.iter().map(|l| l.title.as_str()).collect();
-        assert_eq!(titles, vec!["Mower", "loose railing", "bark mulch"],
-            "order [A1, A2, A3]; only L1's title changed — the corrected text reached the document");
+        assert_eq!(titles, vec!["Mower", "bark mulch"],
+            "order [A1, A3]; only L1's title changed — the corrected text reached the document");
         let line_item_ids: Vec<Option<&str>> =
             doc.lines.iter().map(|l| l.item_id.as_deref()).collect();
         assert_eq!(
             line_item_ids,
-            ids.iter().map(|i| Some(i.as_str())).collect::<Vec<_>>()
+            vec![Some(ids[0].as_str()), Some(ids[2].as_str())],
+            "the drawn lines carry their own item ids; A2 (safety) draws none"
         );
         assert!(doc.lines.iter().all(|l| l.qty.is_empty()), "no right set yet — every qty empty");
 
@@ -469,9 +475,9 @@ mod tests {
             .update_item(sid.clone(), ids[2].clone(), None, None, Some("3 CU YD".into()))
             .unwrap();
         let doc = engine.build_document(sid, "work_order".into()).await.unwrap();
-        assert_eq!(doc.lines[2].qty, "3 CU YD", "the quantity edit reached the qty column");
+        // A3 is the SECOND drawn line now — A2 (safety) draws none.
+        assert_eq!(doc.lines[1].qty, "3 CU YD", "the quantity edit reached the qty column");
         assert_eq!(doc.lines[0].qty, "");
-        assert_eq!(doc.lines[1].qty, "");
     }
 
     #[tokio::test]
@@ -503,13 +509,23 @@ mod tests {
 
         // WE-D: add appends — the last line of the rebuilt document.
         let added = engine
-            .add_item(sid.clone(), "safety".into(), "cracked walkway".into(), "".into())
+            .add_item(sid.clone(), "todo".into(), "repair cracked walkway".into(), "".into())
             .unwrap();
         assert_eq!(item_ids(&engine, &sid), vec![b1, b3, added.id.clone()]);
-        let doc = engine.build_document(sid, "work_order".into()).await.unwrap();
+        let doc = engine.build_document(sid.clone(), "work_order".into()).await.unwrap();
         assert_eq!(doc.lines.len(), 3);
-        assert_eq!(doc.lines[2].title, "cracked walkway", "appended last");
+        assert_eq!(doc.lines[2].title, "repair cracked walkway", "appended last");
         assert_eq!(doc.lines[2].item_id.as_deref(), Some(added.id.as_str()));
+
+        // The contrast: a SAFETY item appends to the board exactly the same
+        // way and draws no line of work on a work order (`draws_kind`) — the
+        // crew meets it in the site block, not as a task.
+        let hazard = engine
+            .add_item(sid.clone(), "safety".into(), "cracked walkway".into(), "".into())
+            .unwrap();
+        assert!(item_ids(&engine, &sid).contains(&hazard.id), "it is on the board");
+        let doc = engine.build_document(sid, "work_order".into()).await.unwrap();
+        assert_eq!(doc.lines.len(), 3, "and not on the paperwork as work");
     }
 
     #[tokio::test]

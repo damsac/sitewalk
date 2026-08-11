@@ -346,6 +346,41 @@ fn compose_document_tool_spec(wants_lines: bool, wants_assignee: bool) -> ToolSp
     }
 }
 
+/// Whether a document written for this reader draws a line from an item of
+/// this kind.
+///
+/// Not every item belongs on every document, and the render used to put ALL
+/// of them on ALL of them. On Isaac's work order (2026-08-10) that meant
+/// "Gate code 4412", "Park on street", and "Dog in back until 8am" appearing
+/// as TASKS — while also, correctly, appearing in the SITE NOTES block right
+/// above. The same facts twice, once as work nobody is meant to do.
+///
+/// The obvious fix — tell extraction to stop recording them — is wrong twice
+/// over. It contradicts the extraction prompt's own earlier and more concrete
+/// rule ("use add_item for todos, decisions, notes, safety issues, parts,
+/// prices"), which is why the model kept doing it; and those items are RIGHT.
+/// The live board tags them SAFETY and NOTE, the notes screen groups them, and
+/// the compose pass reads them into a work order's site block. Deleting them
+/// to tidy a document would gut three things that work.
+///
+/// So the filter belongs here, keyed to who reads the document:
+///
+/// - A client buying work (`inclusion`) is paying for labor and materials. A
+///   gate code is not a line item on an estimate.
+/// - A crew executing (`directive`) needs the tasks; the site facts are
+///   already in the block above their heads.
+/// - A record (`observation`) is the one document where a condition, a note
+///   and a safety finding ARE the content — that is the whole point of an
+///   inspection report.
+fn draws_kind(line_detail: &str, kind: &str) -> bool {
+    match line_detail {
+        // Work, materials, and the money for them.
+        "inclusion" | "directive" => matches!(kind, "todo" | "part" | "price"),
+        // Everything: a report exists to record what was seen.
+        _ => true,
+    }
+}
+
 /// The per-line brief, keyed by the schema's `line_detail`. Each one names
 /// the READER, because that is what actually decides the writing: the same
 /// item becomes "delivered and installed, 3 cu yd" for a client weighing a
@@ -800,6 +835,37 @@ impl DocumentBuilder {
             .iter()
             .find(|s| s.kind == "line_items")
             .is_some_and(|s| s.priced);
+        let line_detail = schema
+            .sections
+            .iter()
+            .find(|s| s.kind == "line_items")
+            .map(|s| s.line_detail.clone())
+            .unwrap_or_default();
+
+        // Only the kinds this document is FOR (see `draws_kind`). A gate code
+        // is a real item and belongs on the board, in the notes, and in a work
+        // order's site block — but never as a line of work on the paperwork.
+        //
+        // The filter is on the RENDER, never on the CONTEXT: `all_items` still
+        // goes to the compose pass below. Filtering that too would mean a
+        // safety item recorded ONLY as an item — "loose railing" — vanishing
+        // from the work order's SAFETY block as well as from its lines, which
+        // is losing a hazard to tidy a page. The compose pass writes by
+        // `item_id` and simply cannot touch a line that was not rendered, so
+        // the extra context is free.
+        let all_items = items.clone();
+        let items: Vec<CapturedItem> =
+            items.into_iter().filter(|i| draws_kind(&line_detail, &i.kind)).collect();
+        if items.is_empty() {
+            // The same posture as the empty-walk guard above, for the same
+            // reason: mint nothing rather than a document with no content.
+            // An estimate off a walk that captured only site conditions has
+            // nothing to sell, and saying so beats a blank priced page.
+            return Err(CoreError::InvalidState(
+                "nothing to build — this walk captured no work or materials for this document"
+                    .into(),
+            ));
+        }
 
         // Fold spoken prices onto the work they describe, BEFORE the render
         // (Isaac's field report 2026-08-09 — "$200 mulch" was landing as its
@@ -875,12 +941,6 @@ impl DocumentBuilder {
             .filter(|s| s.kind == "filled")
             .flat_map(|s| s.fields.iter().filter(|f| f.fill == "walk").cloned())
             .collect();
-        let line_detail = schema
-            .sections
-            .iter()
-            .find(|s| s.kind == "line_items")
-            .map(|s| s.line_detail.clone())
-            .unwrap_or_default();
         let mut composed = Composition::default();
         if !walk_fields.is_empty() || line_brief(&line_detail).is_some() {
             // The coordination notes the walk already produced — free
@@ -893,7 +953,7 @@ impl DocumentBuilder {
                 &schema.label,
                 &line_detail,
                 &walk_fields,
-                &folded.items,
+                &all_items,
                 session.summary.as_deref().unwrap_or(""),
                 &notes,
                 self.max_tokens,
@@ -1193,7 +1253,11 @@ mod tests {
 
     #[tokio::test]
     async fn build_happy_path_prices_and_mints_a_document() {
-        let (store, sid) = processed_session_with_items(&[("todo", "mulch"), ("safety", "loose railing")]);
+        // Two DRAWABLE kinds: an estimate does not draw a `safety` item
+        // (`draws_kind`), and this test is about pricing, not about which
+        // kinds reach the page — that is pinned separately below.
+        let (store, sid) =
+            processed_session_with_items(&[("todo", "mulch"), ("part", "bark mulch")]);
         // Re-read the real minted ids so the scripted response can echo one.
         let a1 = store.list_items_for_session(&sid).unwrap()[0].id.clone();
         let store = Arc::new(Mutex::new(store));
@@ -2197,6 +2261,81 @@ mod tests {
         assert_eq!(
             v["lines"][1]["is_gap"], true,
             "an unpriced deduction is an open question, not a free pass"
+        );
+    }
+
+    /// Not every item belongs on every document. Isaac's work order
+    /// (2026-08-10) listed "Gate code 4412", "Park on street" and "Dog in back
+    /// until 8am" as TASKS, while the same facts sat correctly in the SITE
+    /// NOTES block above them.
+    #[tokio::test]
+    async fn a_document_draws_only_the_kinds_it_is_for() {
+        let fixture = &[
+            ("todo", "mulch the beds"),
+            ("part", "bark mulch"),
+            ("note", "gate code 4412"),
+            ("safety", "loose railing"),
+            ("decision", "going with dark mulch"),
+        ];
+
+        // A work order is for a crew: work and materials, not site trivia —
+        // the crew meets those in the site block.
+        let (store, sid) = processed_session_with_items(fixture);
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([]),
+            serde_json::json!([]),
+        )]));
+        let outcome =
+            builder(store.clone(), provider.clone()).build(&sid, "work_order").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        let titles: Vec<&str> =
+            v["lines"].as_array().unwrap().iter().map(|l| l["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, vec!["mulch the beds", "bark mulch"]);
+
+        // …but the FULL item list still reaches the compose pass, or a hazard
+        // recorded only as an item would vanish from the safety block too.
+        let asked = format!("{:?}", provider.requests()[0].messages[0].content);
+        assert!(asked.contains("loose railing"), "the hazard is still context");
+        assert!(asked.contains("gate code 4412"), "and so is the access detail");
+
+        // A report is the document those observations are FOR.
+        let (store2, sid2) = processed_session_with_items(fixture);
+        let store2 = Arc::new(Mutex::new(store2));
+        let provider2 = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([]),
+            serde_json::json!([]),
+        )]));
+        let outcome2 = builder(store2.clone(), provider2).build(&sid2, "report").await.unwrap();
+        let v2 = decoded_document(&store2, &outcome2.document_artifact_id);
+        assert_eq!(
+            v2["lines"].as_array().unwrap().len(),
+            5,
+            "a report records everything — that is what it is for"
+        );
+    }
+
+    /// A walk that captured only site conditions has nothing to sell, and
+    /// saying so beats minting a blank priced page.
+    #[tokio::test]
+    async fn an_estimate_off_a_walk_with_no_work_is_skipped_truthfully() {
+        let (store, sid) =
+            processed_session_with_items(&[("note", "gate code 4412"), ("safety", "loose rail")]);
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let b = builder(store.clone(), provider.clone());
+
+        let err = b.build(&sid, "estimate").await.unwrap_err();
+        assert!(matches!(err, CoreError::InvalidState(_)), "{err:?}");
+        assert!(provider.requests().is_empty(), "and costs nothing");
+        let guard = store.lock().unwrap();
+        assert!(
+            guard
+                .list_artifacts_for_session(&sid)
+                .unwrap()
+                .iter()
+                .all(|a| a.kind != "document"),
+            "no ghost document minted"
         );
     }
 
