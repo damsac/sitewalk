@@ -157,9 +157,9 @@ jobs:
         working-directory: services/proxy
         run: npm ci
 
-      # Secrets (ANTHROPIC_API_KEY, APP_SECRET) and the KV namespace are NOT
-      # managed here — they were set once with `wrangler secret put` and live in
-      # Cloudflare. `wrangler deploy` uploads code and wrangler.toml config and
+      # Secrets (ANTHROPIC_API_KEY, APP_SECRET, ATTEST_TOKEN_SECRET) and the KV
+      # namespace are NOT managed here — they were set once with
+      # `wrangler secret put` and live in Cloudflare. `wrangler deploy` uploads code and wrangler.toml config and
       # leaves existing secrets alone. This job therefore never handles the
       # Anthropic key at all, which is the point of the service.
       - name: wrangler deploy

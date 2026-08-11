@@ -77,6 +77,19 @@ export class AttestError extends Error {
 /** Apple's certificate extension carrying the attestation nonce. */
 const NONCE_EXTENSION_OID = '1.2.840.113635.100.8.2';
 
+/** X.509 basicConstraints. RFC 5280 §4.2.1.9 — the `cA` flag lives here. */
+const BASIC_CONSTRAINTS_OID = '2.5.29.19';
+
+/**
+ * How many certificates an `x5c` may carry. Apple sends exactly two — the
+ * credential certificate and `Apple App Attestation CA 1` — and the root is
+ * configured, not sent. Four leaves room for two more intermediates if Apple
+ * ever lengthens the chain, and it is a hard stop on a hostile client posting a
+ * thousand-certificate array: every entry costs a DER parse and, worse, an
+ * ECDSA verify. The bound is checked BEFORE anything is parsed.
+ */
+const MAX_X5C_CERTIFICATES = 4;
+
 /** The 16-byte aaguid Apple stamps into attested credential data. */
 const AAGUID_PRODUCTION = 'appattest\0\0\0\0\0\0\0';
 const AAGUID_DEVELOPMENT = 'appattestdevelop';
@@ -237,12 +250,45 @@ function nonceFromCertificate(cert: Certificate): Uint8Array {
 }
 
 /**
+ * True only for a certificate carrying basicConstraints with `cA` TRUE.
+ *
+ * `BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint
+ * INTEGER OPTIONAL }`. Because `cA` is DEFAULT FALSE, a DER encoder omits it
+ * when it is false — so an absent extension, an empty SEQUENCE, and a SEQUENCE
+ * whose first element is the pathLen INTEGER all mean "not a CA". Only an
+ * explicit BOOLEAN 0xFF says otherwise, and DER admits no other spelling of
+ * true.
+ */
+function isCertificateAuthority(cert: Certificate): boolean {
+  const extension = cert.extensions.get(BASIC_CONSTRAINTS_OID);
+  if (!extension) return false;
+  try {
+    const outer = parseTlv(extension, 0);
+    if (outer.tag !== 0x30) return false;
+    const first = children(extension, outer)[0];
+    if (!first || first.tag !== 0x01) return false;
+    const value = content(extension, first);
+    return value.length === 1 && value[0] === 0xff;
+  } catch {
+    // A basicConstraints we cannot parse is not a basicConstraints we may
+    // read as TRUE.
+    return false;
+  }
+}
+
+/**
  * Verifies `leaf → … → root`, where `root` is the pinned Apple certificate.
  *
  * Each certificate must be signed by the next, its issuer name must match that
  * signer's subject, and it must be inside its validity window. The root is
  * trusted because it was configured, not because it is self-signed — checking
  * a self-signature proves nothing about who issued it.
+ *
+ * Every certificate that ISSUES another must also assert it is a CA. Without
+ * that, a leaf is a usable signer: anyone holding a genuine App Attest device
+ * certificate could sign a second certificate with it and present
+ * `[forged, theirLeaf, …]`, and every other check here would pass. The `cA`
+ * flag is what makes a leaf a dead end.
  */
 async function verifyChain(chain: Certificate[], root: Certificate, now: Date): Promise<void> {
   const path = [...chain, root];
@@ -250,6 +296,14 @@ async function verifyChain(chain: Certificate[], root: Certificate, now: Date): 
   for (const cert of path) {
     if (now < cert.notBefore || now > cert.notAfter) {
       throw new AttestError('a certificate in the chain is outside its validity window', 'cert_expired');
+    }
+  }
+
+  // Index 0 is the leaf, which signs nothing. Everything above it does.
+  for (let i = 1; i < path.length; i++) {
+    const issuer = path[i];
+    if (!issuer || !isCertificateAuthority(issuer)) {
+      throw new AttestError('a signing certificate is not a CA', 'issuer_not_ca');
     }
   }
 
@@ -339,6 +393,9 @@ export async function verifyAttestation(
   const x5cRaw = mapField(attStmt, 'x5c');
   if (!Array.isArray(x5cRaw) || x5cRaw.length < 2) {
     throw new AttestError('attestation statement has no certificate chain', 'no_chain');
+  }
+  if (x5cRaw.length > MAX_X5C_CERTIFICATES) {
+    throw new AttestError('certificate chain is longer than any real one', 'chain_too_long');
   }
 
   let chain: Certificate[];
@@ -467,11 +524,21 @@ export async function verifyAssertion(
  * A short-lived bearer token, minted after a successful assertion.
  *
  * `jat.<payload>.<mac>`, both base64url. The payload names the install, the
- * key and an expiry; the MAC is HMAC-SHA256 under the app secret. Note this
- * means the token's unforgeability rests on a secret that also ships in the
- * binary — so a token is NOT stronger than Phase 1 on its own. What it is, is
- * a receipt that a real attestation happened within the last hour, which an
- * extracted secret alone cannot produce.
+ * attested key and an expiry; the MAC is HMAC-SHA256 under `ATTEST_TOKEN_SECRET`.
+ *
+ * TWO things make this a real receipt rather than decoration, and the token is
+ * worthless without either:
+ *
+ *  1. The MAC key is a SERVER-ONLY secret. It was `APP_SECRET` — which ships
+ *     inside the IPA — so anyone who unzipped a build could mint a token that
+ *     verified, and the ~600 lines of attestation verification above bought
+ *     nothing. A secret the client holds cannot certify anything about the
+ *     client.
+ *  2. `k` is CHECKED. The MAC proves `k` is the key id we wrote, but a name
+ *     nobody looks up is not a binding. `verifyToken` loads that key from KV
+ *     and refuses a token for a key that was never attested, or that some other
+ *     install attested. That lookup is what connects `/v1/messages` back to the
+ *     Secure Enclave key, and it is the reason `verifyToken` needs KV at all.
  */
 interface TokenPayload {
   i: string;
@@ -509,13 +576,25 @@ export type TokenFailure =
   | 'malformed'
   | 'bad_signature'
   | 'expired'
-  | 'wrong_install';
+  | 'wrong_install'
+  | 'unknown_key'
+  | 'key_install_mismatch';
 
 export type TokenResult =
   | { ok: true; keyId: string }
   | { ok: false; reason: TokenFailure };
 
+/**
+ * Verifies a token AND the attested key it names.
+ *
+ * KV is a required argument rather than an optional second step on purpose.
+ * The previous shape — a pure MAC check whose `keyId` the caller was trusted to
+ * do something with — is exactly how `payload.k` ended up with zero consumers
+ * and the attestation ended up unreachable from `/v1/messages`. There is now no
+ * way to ask "is this token good?" without the storage that can answer it.
+ */
 export async function verifyToken(
+  kv: KVNamespace,
   secret: string,
   token: string,
   installId: string,
@@ -548,13 +627,32 @@ export async function verifyToken(
   } catch {
     return { ok: false, reason: 'malformed' };
   }
-  if (typeof payload.e !== 'number' || typeof payload.i !== 'string') {
+  if (
+    typeof payload.e !== 'number' ||
+    typeof payload.i !== 'string' ||
+    typeof payload.k !== 'string'
+  ) {
     return { ok: false, reason: 'malformed' };
   }
   if (payload.e * 1000 <= now.getTime()) return { ok: false, reason: 'expired' };
   // A token is bound to the install that earned it, so a leaked token cannot
   // be pasted into someone else's credential to dodge their spend cap.
   if (payload.i !== installId) return { ok: false, reason: 'wrong_install' };
+  // Shape-check before the key id reaches KV. The MAC already proves we wrote
+  // it, so this cannot fire in practice — but it means a leaked signing secret
+  // buys a forger no ability to aim arbitrary strings at the keyspace.
+  if (!isPlausibleKeyId(payload.k)) return { ok: false, reason: 'malformed' };
+
+  // THE BINDING. Everything above this line is true of a token minted by
+  // whoever holds the signing secret; only this line ties the request to a key
+  // the Secure Enclave generated and Apple's chain vouched for.
+  const stored = await loadAttestedKey(kv, payload.k);
+  if (!stored) return { ok: false, reason: 'unknown_key' };
+  // Belt and braces with the `i` check above: that one compares the token's
+  // claim against the caller, this one compares it against what enrolment
+  // actually recorded. They come apart if a key is ever re-attested by a
+  // different install while an old token is still inside its hour.
+  if (stored.installId !== installId) return { ok: false, reason: 'key_install_mismatch' };
 
   return { ok: true, keyId: payload.k };
 }

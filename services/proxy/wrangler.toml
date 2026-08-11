@@ -5,6 +5,7 @@ compatibility_date = "2026-07-25"
 # Secrets are NOT set here — `wrangler.toml` is committed. Set them with:
 #   wrangler secret put ANTHROPIC_API_KEY
 #   wrangler secret put APP_SECRET
+#   wrangler secret put ATTEST_TOKEN_SECRET
 # See README.md.
 
 [vars]
@@ -22,16 +23,20 @@ PER_INSTALL_DAILY_CAP_USD = "2"
 # --- App Attest (Phase 2) --------------------------------------------------
 # `off` | `monitor` | `enforce`. Ships as `off`: the device half does not exist
 # yet, and even once it does, `enforce` before a `monitor` soak would lock out
-# every already-installed build. Anything unrecognised also means `off`.
+# every already-installed build. Anything unrecognised also means `off` — and is
+# logged as `attest_mode_unrecognised`, so a typo is visible rather than
+# indistinguishable from a correct `off` deployment.
 ATTEST_MODE = "off"
 
-# Required before ATTEST_MODE can leave `off`. Both are public values, so they
-# live here rather than in secrets — but the worker fails CLOSED without them.
+# Required before ATTEST_MODE can leave `off`. These two are public values, so
+# they live here rather than in secrets — but the worker fails CLOSED without
+# them.
 #
-# APP_ATTEST_APP_ID is "<TeamID>.<bundle id>". Note the real-core build uses
-# com.isaacwm.sitewalk; the demo project's id differs, and a mismatch shows up
-# as `app_id_mismatch` on every attestation.
-# APP_ATTEST_APP_ID = "TEAMID.com.isaacwm.sitewalk"
+# APP_ATTEST_APP_ID is "<TeamID>.<bundle id>". The shipped app is bundle id
+# com.isaacwm.murmur (the product is named Sitewalk; the bundle id predates the
+# rename — see apps/ios/project-release.yml) on team 98GXNZ6NKZ. Anything else
+# shows up as `app_id_mismatch` on every single attestation.
+# APP_ATTEST_APP_ID = "98GXNZ6NKZ.com.isaacwm.murmur"
 #
 # APP_ATTEST_ROOT_CA is Apple's App Attest root, PEM. It is configured rather
 # than compiled in so it can be rotated without a code change:
@@ -41,6 +46,13 @@ ATTEST_MODE = "off"
 # APP_ATTEST_ALLOW_DEVELOPMENT = "true" also accepts attestations from builds
 # signed with a development profile. Useful on a staging worker, never in
 # production — a development attestation is a far lower bar to clear.
+#
+# ATTEST_TOKEN_SECRET is a SECRET (`wrangler secret put`), and it is the one
+# value here that must never reach the app. It signs the hourly attestation
+# token. Signing that token with APP_SECRET — which ships inside the IPA — would
+# mean anyone who unzipped a build could mint one, and the attestation would
+# certify nothing. The worker refuses to run attestation if it is missing, or if
+# it equals APP_SECRET.
 
 [[kv_namespaces]]
 binding = "METER"
