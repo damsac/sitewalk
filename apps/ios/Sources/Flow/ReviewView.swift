@@ -84,8 +84,10 @@ struct ReviewView: View {
                                 .accessibilityHint("Edit this line")
                         }
                         addLineButton
-                        TotalRow(key: doc.totalKey, value: doc.totalValue, gaps: doc.gapCount)
-                            .padding(.top, 2)
+                        if doc.showsTotal {
+                            TotalRow(key: doc.totalKey, value: doc.totalValue, gaps: doc.gapCount)
+                                .padding(.top, 2)
+                        }
                         // Empty note = no bar. An empty amber block reads as a
                         // rendering failure, and a non-priced document has no
                         // pricing gap to talk about (#222).

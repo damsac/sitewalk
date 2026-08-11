@@ -200,7 +200,7 @@ extension MurmurEngine {
         DocumentModel(
             rows: payload.lines.map(row),
             totalKey: totalLabel(payload.totalLabelKey),
-            staticTotal: payload.staticTotalCents.map(amountString) ?? "——",
+            staticTotal: payload.staticTotalCents.map(amountString) ?? DocumentModel.noTotal,
             note: note(for: payload.docKind, queued: payload.queued),
             send: sendLabel(for: payload.docKind),
             sections: sections(payload),
@@ -221,7 +221,7 @@ extension MurmurEngine {
 
     static func emptyDocument() -> DocumentModel {
         DocumentModel(
-            rows: [], totalKey: "TOTAL", staticTotal: "——", note: "", send: "SEND",
+            rows: [], totalKey: "TOTAL", staticTotal: DocumentModel.noTotal, note: "", send: "SEND",
             pricesShown: false
         )
     }
