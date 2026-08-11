@@ -42,7 +42,6 @@ struct DocumentBuilderView: View {
             if let editing {
                 SchemaEditor(
                     schema: editing,
-                    tradeKey: model.trade.key,
                     onCancel: { self.editing = nil },
                     onSave: { save($0) },
                     onDelete: editing.isBuiltin || editing.id.isEmpty
@@ -245,18 +244,14 @@ private struct SchemaEditor: View {
     let onSave: (DocumentSchemaModel) -> Void
     /// nil for built-ins and unsaved drafts — neither can be deleted.
     let onDelete: (() -> Void)?
-    /// The operator's trade, stamped onto a copy of a built-in. See `saveShape`.
-    private let tradeKey: String?
 
     init(
         schema: DocumentSchemaModel,
-        tradeKey: String?,
         onCancel: @escaping () -> Void,
         onSave: @escaping (DocumentSchemaModel) -> Void,
         onDelete: (() -> Void)?
     ) {
         self.original = schema
-        self.tradeKey = tradeKey
         _draft = State(initialValue: schema)
         self.onCancel = onCancel
         self.onSave = onSave
@@ -266,36 +261,9 @@ private struct SchemaEditor: View {
     private var problem: String? { SchemaValidation.firstProblem(in: draft) }
 
     /// What actually gets sent to `save_document_schema`.
-    ///
-    /// `save` upserts BY ID, so sending a built-in's id back overwrites the
-    /// built-in in place — while this screen promised "saving creates your own
-    /// copy, the default stays available." That was simply false, and it took
-    /// the shipped default with it.
-    ///
-    /// Clearing the id makes core mint a new one, so the copy is real. If the
-    /// operator also renamed it, the kind is re-derived: a built-in keeps its
-    /// kind frozen (that is what `buildDocument` resolves against), but a
-    /// RENAMED copy is a different document type and must not keep answering
-    /// to "estimate" — otherwise a button labelled RFP builds an estimate.
+    /// Lives on the model so it can be tested — see `DocumentSchemaModel`.
     private func saveShape(of draft: DocumentSchemaModel) -> DocumentSchemaModel {
-        guard draft.isBuiltin else { return draft }
-        var copy = draft
-        copy.id = ""            // create, don't overwrite the shipped default
-        copy.isBuiltin = false
-        // INHERIT the source's trade — do not stamp the operator's.
-        //
-        // #283 stamped the current trade here, to work around a nil-trade copy
-        // being unbuildable. Core now treats nil as universal, so the
-        // workaround is not only unnecessary but backwards: stamping would pin
-        // a copy of the universal Report to one trade, and Isaac's call
-        // (2026-07-30) is the opposite — "They should come in regardless of
-        // trade!" A duplicate of Report stays universal; a duplicate of the
-        // landscape Estimate stays landscape. The copy keeps whatever scope the
-        // thing it was copied from had.
-        if draft.label != original.label {
-            copy.kind = Self.slug(draft.label)
-        }
-        return copy
+        DocumentSchemaModel.saveShape(of: draft, editedFrom: original)
     }
 
     var body: some View {
@@ -367,7 +335,7 @@ private struct SchemaEditor: View {
                     // saved once. After that the key is frozen: it is what core
                     // resolves `buildDocument(kind:)` against, so renaming a
                     // saved type must not silently orphan its documents.
-                    if original.id.isEmpty { draft.kind = Self.slug(new) }
+                    if original.id.isEmpty { draft.kind = DocumentSchemaModel.slug(new) }
                 }
             LabeledField(
                 title: "Number prefix", text: $draft.numberPrefix, placeholder: "EST"
@@ -381,14 +349,6 @@ private struct SchemaEditor: View {
     private var prefixPreview: String {
         let p = draft.numberPrefix.trimmingCharacters(in: .whitespaces).uppercased()
         return p.isEmpty ? "EST" : p
-    }
-
-    private static func slug(_ s: String) -> String {
-        s.lowercased()
-            .map { $0.isLetter || $0.isNumber ? String($0) : "_" }
-            .joined()
-            .split(separator: "_", omittingEmptySubsequences: true)
-            .joined(separator: "_")
     }
 
     private var sections: some View {

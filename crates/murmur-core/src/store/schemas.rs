@@ -305,14 +305,20 @@ impl Store {
         Ok(())
     }
 
-    /// The active schema for `(kind, template)` (Plan 19 §4): trade must
-    /// match exactly — a NULL-trade schema (e.g. `report`) resolves ONLY for
-    /// a None-template session, so it stays illegal on a landscape session,
-    /// matching today. Newest `updated_at` wins (a custom save shadows the
-    /// fixed-timestamp built-in). `None` when nothing resolves (e.g. an
-    /// operator tombstoned a built-in) — the caller fails truthfully, never
-    /// falls back to a hardcoded shape (that would resurrect a deleted
-    /// built-in).
+    /// The active schema for `(kind, template)` (Plan 19 §4, as amended by
+    /// #306): a row resolves when its trade matches the template OR its trade
+    /// is NULL, because a NULL trade means UNIVERSAL — a `report` resolves on
+    /// a landscape walk, a property walk, and a trade the app has never heard
+    /// of. A row naming a DIFFERENT trade never resolves.
+    ///
+    /// Ranked, in order: trade-specific over universal (an operator's
+    /// landscape `report` beats the shared one), then newest `updated_at` (a
+    /// custom save shadows the fixed-timestamp built-in), then lowest `id` so
+    /// two otherwise-equal rows always resolve to the same one.
+    ///
+    /// `None` when nothing resolves (e.g. an operator tombstoned a built-in) —
+    /// the caller fails truthfully, never falls back to a hardcoded shape
+    /// (that would resurrect a deleted built-in).
     pub fn resolve_active_schema(
         &self,
         kind: &str,
@@ -340,6 +346,16 @@ impl Store {
         // remaining tie, preserving the `updated_at DESC` behaviour the app's
         // picker mirrors.
         //
+        // `id ASC` closes the ordering. Without it two rows of equal rank —
+        // same trade-ness, same `updated_at` — come back in whatever order the
+        // scan happens to produce, so which document the operator gets is a
+        // property of SQLite's plan rather than of the data. Two rows do tie in
+        // practice: every seeded built-in carries the fixed `updated_at = 0`,
+        // and a save that lands in the same clock tick as another ties too.
+        // A total order also means the answer cannot change under an index
+        // change or a VACUUM. (Pinned by
+        // `resolve_breaks_an_exact_tie_deterministically_by_id`.)
+        //
         // Does NOT widen across trades: a `property` schema still has
         // `trade_key = 'property'`, which matches neither clause under a
         // landscape session.
@@ -348,7 +364,7 @@ impl Store {
              WHERE kind = ?1
                AND (trade_key = ?2 OR trade_key IS NULL)
                AND deleted_at IS NULL
-             ORDER BY (trade_key IS NULL) ASC, updated_at DESC LIMIT 1"
+             ORDER BY (trade_key IS NULL) ASC, updated_at DESC, id ASC LIMIT 1"
         ))?;
         let mut rows = stmt.query(rusqlite::params![kind, template])?;
         match rows.next()? {
@@ -766,19 +782,61 @@ mod tests {
 
     /// Trade-specific beats universal for the same kind, whatever the clock
     /// says — otherwise a shared default could shadow the operator's own.
+    ///
+    /// The fixture is deliberately stacked AGAINST the trade term, because a
+    /// version of this test that was not could be deleted along with the clause
+    /// it guards and stay green: the universal row is the NEWER one (so
+    /// `updated_at DESC` alone picks it) and the alphabetically LOWER one (so
+    /// `id ASC` alone picks it too). `(trade_key IS NULL) ASC` is the only term
+    /// that can produce the asserted answer.
     #[test]
     fn a_trade_specific_schema_wins_over_a_universal_one() {
         let s = Store::open_in_memory("device-a").unwrap().with_clock(Arc::new(|| 1000));
-        // Universal, and NEWER than the trade-specific one saved next.
-        s.save_document_schema(&custom_schema("universal-rfp", "rfp", None)).unwrap();
+        // Trade-specific first, at the OLDER clock.
+        s.save_document_schema(&custom_schema("b-landscape-rfp", "rfp", Some("landscape")))
+            .unwrap();
         let s = s.with_clock(Arc::new(|| 2000));
-        s.save_document_schema(&custom_schema("landscape-rfp", "rfp", Some("landscape"))).unwrap();
+        s.save_document_schema(&custom_schema("a-universal-rfp", "rfp", None)).unwrap();
 
         let resolved = s.resolve_active_schema("rfp", Some("landscape")).unwrap().unwrap();
-        assert_eq!(resolved.id, "landscape-rfp", "the trade-specific schema must win");
+        assert_eq!(
+            resolved.id, "b-landscape-rfp",
+            "the trade-specific schema must win, though it is older and sorts later"
+        );
         // And on a trade with no specific version, the universal one serves.
         let elsewhere = s.resolve_active_schema("rfp", Some("property")).unwrap().unwrap();
-        assert_eq!(elsewhere.id, "universal-rfp");
+        assert_eq!(elsewhere.id, "a-universal-rfp");
+    }
+
+    /// Two rows of EQUAL rank resolve to the same one every time.
+    ///
+    /// Both are universal `rfp`s saved on the same clock tick, so the trade term
+    /// and `updated_at DESC` are both exhausted and only `id ASC` is left. The
+    /// rows are inserted in DESCENDING id order, so the unordered scan — which
+    /// is what SQLite gives back without a total order — returns the wrong one.
+    ///
+    /// This is not a synthetic tie. Every seeded built-in carries the fixed
+    /// `updated_at = 0`, so a device that has duplicated one and not yet edited
+    /// the copy is in exactly this state.
+    #[test]
+    fn resolve_breaks_an_exact_tie_deterministically_by_id() {
+        let s = Store::open_in_memory("device-a").unwrap().with_clock(Arc::new(|| 1000));
+        s.save_document_schema(&custom_schema("rfp-z", "rfp", None)).unwrap();
+        s.save_document_schema(&custom_schema("rfp-a", "rfp", None)).unwrap();
+
+        for template in [None, Some("landscape"), Some("property")] {
+            let resolved = s.resolve_active_schema("rfp", template).unwrap().unwrap();
+            assert_eq!(
+                resolved.id, "rfp-a",
+                "an exact tie must resolve by lowest id, not by scan order ({template:?})"
+            );
+        }
+
+        // Same, one rank up: a tie between two TRADE-SPECIFIC rows.
+        s.save_document_schema(&custom_schema("hoa-z", "hoa_addendum", Some("landscape"))).unwrap();
+        s.save_document_schema(&custom_schema("hoa-a", "hoa_addendum", Some("landscape"))).unwrap();
+        let resolved = s.resolve_active_schema("hoa_addendum", Some("landscape")).unwrap().unwrap();
+        assert_eq!(resolved.id, "hoa-a");
     }
 
     /// The resurrection consequence: a tombstoned built-in does not resolve —
