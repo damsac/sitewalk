@@ -51,8 +51,9 @@ pub async fn run_scenario(
     let _ = processor.process(&sid).await;
 
     let (observed, cost) = observe(&store, &sid, model)?;
+    let summary = observed.summary_text.clone();
     let score: ScenarioScore = grade(&scenario.truth, &observed);
-    Ok(ScenarioReport { id: scenario.id.clone(), score, cost })
+    Ok(ScenarioReport { id: scenario.id.clone(), score, cost, summary })
 }
 
 /// Drives the LIVE path (`LiveExtractor`) over a scenario, hermetically, with a
@@ -130,15 +131,17 @@ pub fn observe(
         .into_iter()
         .map(|c| ObservedContact { name: c.name, trade: c.trade })
         .collect();
-    let summary_present = guard
+    // The placeholder a silent walk short-circuits to is not a summary the
+    // model wrote, so it counts as neither present nor gradeable voice (#298).
+    let stored_summary = guard
         .get_session(session_id)?
         .summary
-        .map(|s| !s.trim().is_empty() && s != "(empty session)")
-        .unwrap_or(false);
+        .filter(|s| !s.trim().is_empty() && s != "(empty session)");
+    let summary_present = stored_summary.is_some();
     let (input_tokens, output_tokens) = guard
         .list_llm_usage_for_session(session_id)?
         .iter()
         .fold((0u64, 0u64), |(i, o), r| (i + r.input_tokens, o + r.output_tokens));
     let cost = CostReport::estimate(model, input_tokens, output_tokens);
-    Ok((Observed { items, contacts, summary_present }, cost))
+    Ok((Observed { items, contacts, summary_present, summary_text: stored_summary }, cost))
 }

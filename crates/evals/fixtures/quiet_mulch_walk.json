@@ -1,0 +1,12 @@
+{
+  "description": "A quiet walk (#298, from a device): wind and filler, one word audible. Nothing about scope, timing, or price was said, so nothing is an item — R6 says the single word 'mulch' must not be promoted to a line on a client's paperwork. The honest outcome is an empty board and a short summary that names the work and stops, not a paragraph explaining what the recording missed.",
+  "tags": ["quiet", "edge", "summary-voice", "landscaping"],
+  "items": [],
+  "contacts": [],
+  "distractors": [
+    "mulch",
+    "yeah that right okay",
+    "uh mm-hm"
+  ],
+  "expects_summary": true
+}

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::corpus::GroundTruth;
 use crate::normalize::{dice, token_set};
+use crate::summary::{grade_summary, SummaryScore};
 
 /// Dice threshold for "these two texts are the same item". 0.5 = at least half
 /// the combined token mass overlaps. Tuned once, fixed — moving it per-corpus
@@ -22,17 +23,23 @@ const BETA_SQ: f64 = 0.25;
 
 /// Pipeline output as plain data (built from store rows by `run.rs`).
 ///
-/// Plan 14 D3-14/WE-B: `summary_present` is the ONLY summary field the
-/// grader reads — no text/length pin — and there is no artifact read at
-/// all, so a longer narrative summary (D2-14: 2-4 sentences) plus a notes
-/// artifact (written to `kind="notes"`, never to item rows) cannot move
-/// the F0.5 score. `cargo test -p evals` (Task 4 gate) is the byte-identical
-/// pin for every corpus scenario.
+/// Plan 14 D3-14/WE-B: `summary_present` is the only summary field the
+/// EXTRACTION score reads, and there is no artifact read at all, so the
+/// summary text plus a notes artifact (written to `kind="notes"`, never to
+/// item rows) cannot move the F0.5 score. `cargo test -p evals` (Task 4 gate)
+/// is the byte-identical pin for every corpus scenario.
+///
+/// #298 adds `summary_text`, graded SEPARATELY by `summary::grade_summary`
+/// into `ScenarioScore::summary_voice`. It is reported alongside F0.5 and
+/// deliberately kept out of it: extraction quality and summary voice are
+/// different defects and averaging them would hide both.
 #[derive(Clone, Debug)]
 pub struct Observed {
     pub items: Vec<ObservedItem>,
     pub contacts: Vec<ObservedContact>,
     pub summary_present: bool,
+    /// The summary text as stored, `None` when the session has none.
+    pub summary_text: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +106,10 @@ pub struct ScenarioScore {
     /// hits / distractor_count — the R6 over-extraction signal (lower better).
     pub distractor_fp_rate: f64,
     pub summary_ok: bool,
+    /// #298: does the summary read as a record of the JOB? Presence
+    /// (`summary_ok`) and voice are separate questions — the TestFlight
+    /// summaries were present and wrong.
+    pub summary_voice: SummaryScore,
 }
 
 fn ratio(num: usize, den: usize) -> f64 {
@@ -207,6 +218,7 @@ pub fn grade(truth: &GroundTruth, obs: &Observed) -> ScenarioScore {
         distractor_hits,
         distractor_fp_rate,
         summary_ok: obs.summary_present == truth.expects_summary,
+        summary_voice: grade_summary(obs.summary_text.as_deref().unwrap_or("")),
     }
 }
 
@@ -265,7 +277,7 @@ mod tests {
         let obs = Observed {
             items: vec![obs_item("todo", "order the lumber"), obs_item("safety", "railing is loose")],
             contacts: vec![],
-            summary_present: true,
+            summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         };
         let s = grade(&gt, &obs);
         assert_eq!(s.overall.true_positives, 2);
@@ -285,12 +297,12 @@ mod tests {
                 obs_item("todo", "order lumber"), obs_item("todo", "call inspector"),
                 obs_item("todo", "paint the fence"), obs_item("todo", "buy coffee"),
             ],
-            contacts: vec![], summary_present: true,
+            contacts: vec![], summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         // under-extraction: got one, missed one -> P=1.0, R=0.5
         let under = grade(&gt, &Observed {
             items: vec![obs_item("todo", "order lumber")],
-            contacts: vec![], summary_present: true,
+            contacts: vec![], summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         // R6: F0.5 weights precision, so the under-extractor scores HIGHER
         assert!(under.f_half > over.f_half, "under {} !> over {}", under.f_half, over.f_half);
@@ -302,7 +314,7 @@ mod tests {
         // right text, wrong kind (todo) -> FP + FN, and a confusion entry
         let s = grade(&gt, &Observed {
             items: vec![obs_item("todo", "loose railing")],
-            contacts: vec![], summary_present: true,
+            contacts: vec![], summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         assert_eq!(s.overall.true_positives, 0);
         assert_eq!(s.overall.false_positives, 1);
@@ -317,7 +329,7 @@ mod tests {
         // model wrongly turned a distractor into an item
         let s = grade(&gt, &Observed {
             items: vec![obs_item("todo", "order lumber"), obs_item("todo", "grab lunch sometime")],
-            contacts: vec![], summary_present: true,
+            contacts: vec![], summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         assert_eq!(s.distractor_count, 2);
         assert_eq!(s.distractor_hits, 1);
@@ -340,7 +352,7 @@ mod tests {
                 // Hank present, trade unknown — acceptable since expected trade is None
                 ObservedContact { name: "Hank".into(), trade: None },
             ],
-            summary_present: true,
+            summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         assert_eq!(s.contacts_expected, 2);
         assert_eq!(s.contacts_matched, 2);
@@ -356,7 +368,7 @@ mod tests {
         let s = grade(&gt, &Observed {
             items: vec![],
             contacts: vec![ObservedContact { name: "Dev".into(), trade: Some("plumber".into()) }],
-            summary_present: true,
+            summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         assert_eq!(s.contacts_matched, 0);
     }
@@ -364,9 +376,9 @@ mod tests {
     #[test]
     fn summary_presence_is_scored_against_expectation() {
         let gt = truth(vec![]);
-        let missing = grade(&gt, &Observed { items: vec![], contacts: vec![], summary_present: false });
+        let missing = grade(&gt, &Observed { items: vec![], contacts: vec![], summary_present: false, summary_text: None });
         assert!(!missing.summary_ok, "expected a summary, none produced");
-        let present = grade(&gt, &Observed { items: vec![], contacts: vec![], summary_present: true });
+        let present = grade(&gt, &Observed { items: vec![], contacts: vec![], summary_present: true, summary_text: Some("Deck rebuild, north side.".into()) });
         assert!(present.summary_ok);
     }
 
@@ -375,7 +387,7 @@ mod tests {
         let gt = truth(vec![item("todo", "order lumber"), item("safety", "loose railing")]);
         let s = grade(&gt, &Observed {
             items: vec![obs_item("todo", "order lumber")], // missed the safety item
-            contacts: vec![], summary_present: true,
+            contacts: vec![], summary_present: true, summary_text: Some("Deck rebuild, north side.".into()),
         });
         let todo = s.per_kind.iter().find(|k| k.kind == "todo").unwrap();
         assert!((todo.recall - 1.0).abs() < 1e-9);

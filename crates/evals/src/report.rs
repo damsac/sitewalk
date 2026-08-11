@@ -39,6 +39,11 @@ pub struct ScenarioReport {
     pub id: String,
     pub score: ScenarioScore,
     pub cost: CostReport,
+    /// The summary text itself (#298). Scores say a voice regressed; only the
+    /// sentence says how — and a prompt change is argued with the two
+    /// summaries side by side, not with a number.
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,6 +55,12 @@ pub struct Aggregate {
     pub mean_distractor_fp_rate: f64,
     pub mean_contact_accuracy: f64,
     pub summaries_ok: usize,
+    /// #298: summaries that read as a record of the job — no preamble, no
+    /// narration of the recording.
+    pub summary_voice_ok: usize,
+    /// Mean summary length in words. The verbosity half of #298; reported,
+    /// never a pass/fail threshold.
+    pub mean_summary_words: f64,
     pub total_cost_usd: f64,
 }
 
@@ -72,13 +83,17 @@ impl SuiteReport {
         let mean_distractor_fp_rate = scenarios.iter().map(|s| s.score.distractor_fp_rate).sum::<f64>() / n;
         let mean_contact_accuracy = scenarios.iter().map(|s| s.score.contact_accuracy).sum::<f64>() / n;
         let summaries_ok = scenarios.iter().filter(|s| s.score.summary_ok).count();
+        let summary_voice_ok = scenarios.iter().filter(|s| s.score.summary_voice.ok).count();
+        let mean_summary_words =
+            scenarios.iter().map(|s| s.score.summary_voice.words as f64).sum::<f64>() / n;
         let total_cost_usd = scenarios.iter().map(|s| s.cost.est_usd).sum();
         SuiteReport {
             model: model.into(),
             aggregate: Aggregate {
                 scenarios: scenarios.len(),
                 mean_f_half, micro_precision, micro_recall,
-                mean_distractor_fp_rate, mean_contact_accuracy, summaries_ok, total_cost_usd,
+                mean_distractor_fp_rate, mean_contact_accuracy, summaries_ok,
+                summary_voice_ok, mean_summary_words, total_cost_usd,
             },
             scenarios,
         }
@@ -89,18 +104,35 @@ impl SuiteReport {
 pub fn render_table(suite: &SuiteReport) -> String {
     let mut out = String::new();
     out.push_str(&format!("model: {}\n", suite.model));
-    out.push_str(&format!("{:<24} {:>6} {:>6} {:>6} {:>7} {:>8} {:>8}\n",
-        "scenario", "F0.5", "P", "R", "distFP", "contact", "usd"));
+    out.push_str(&format!("{:<24} {:>6} {:>6} {:>6} {:>7} {:>8} {:>6} {:>5} {:>8}\n",
+        "scenario", "F0.5", "P", "R", "distFP", "contact", "voice", "words", "usd"));
     for s in &suite.scenarios {
-        out.push_str(&format!("{:<24} {:>6.2} {:>6.2} {:>6.2} {:>7.2} {:>8.2} {:>8.4}\n",
+        let v = &s.score.summary_voice;
+        out.push_str(&format!("{:<24} {:>6.2} {:>6.2} {:>6.2} {:>7.2} {:>8.2} {:>6} {:>5} {:>8.4}\n",
             s.id, s.score.f_half, s.score.overall.precision, s.score.overall.recall,
-            s.score.distractor_fp_rate, s.score.contact_accuracy, s.cost.est_usd));
+            s.score.distractor_fp_rate, s.score.contact_accuracy,
+            if v.ok { "ok" } else { "BAD" }, v.words, s.cost.est_usd));
     }
     let a = &suite.aggregate;
-    out.push_str(&format!("{:<24} {:>6.2} {:>6.2} {:>6.2} {:>7.2} {:>8.2} {:>8.4}\n",
+    out.push_str(&format!("{:<24} {:>6.2} {:>6.2} {:>6.2} {:>7.2} {:>8.2} {:>6} {:>5.0} {:>8.4}\n",
         "TOTAL (mean)", a.mean_f_half, a.micro_precision, a.micro_recall,
-        a.mean_distractor_fp_rate, a.mean_contact_accuracy, a.total_cost_usd));
+        a.mean_distractor_fp_rate, a.mean_contact_accuracy,
+        format!("{}/{}", a.summary_voice_ok, a.scenarios), a.mean_summary_words, a.total_cost_usd));
     out.push_str(&format!("summaries ok: {}/{}\n", a.summaries_ok, a.scenarios));
+
+    // #298: the summaries themselves, with whatever the voice grader caught.
+    // A voice regression is argued from the sentence, not from the column.
+    out.push_str("\nsummaries:\n");
+    for s in &suite.scenarios {
+        let v = &s.score.summary_voice;
+        out.push_str(&format!("  {}: {}\n", s.id, s.summary.as_deref().unwrap_or("(none)")));
+        if let Some(p) = &v.preamble {
+            out.push_str(&format!("    ! preamble: \"{p}…\"\n"));
+        }
+        if !v.narration.is_empty() {
+            out.push_str(&format!("    ! narrates the recording: {}\n", v.narration.join(", ")));
+        }
+    }
     out
 }
 
@@ -108,6 +140,9 @@ pub fn render_table(suite: &SuiteReport) -> String {
 mod tests {
     use super::*;
     use crate::grade::{PrecisionRecall, ScenarioScore};
+    use crate::summary::grade_summary;
+
+    const GOOD_SUMMARY: &str = "Unit twelve punch list: faucet cartridge, dead outlet, sprung hinge.";
 
     fn score(f_half: f64, distractor_fp: f64) -> ScenarioScore {
         ScenarioScore {
@@ -116,14 +151,24 @@ mod tests {
             contacts_expected: 0, contacts_matched: 0, contact_accuracy: 1.0,
             distractor_count: 2, distractor_hits: (distractor_fp * 2.0) as usize, distractor_fp_rate: distractor_fp,
             summary_ok: true,
+            summary_voice: grade_summary(GOOD_SUMMARY),
+        }
+    }
+
+    fn scenario(id: &str, score: ScenarioScore) -> ScenarioReport {
+        ScenarioReport {
+            id: id.into(),
+            score,
+            cost: CostReport::default(),
+            summary: Some(GOOD_SUMMARY.into()),
         }
     }
 
     #[test]
     fn suite_aggregate_means_across_scenarios() {
         let suite = SuiteReport::assemble("claude-haiku-4-5", vec![
-            ScenarioReport { id: "a".into(), score: score(1.0, 0.0), cost: CostReport::default() },
-            ScenarioReport { id: "b".into(), score: score(0.0, 1.0), cost: CostReport::default() },
+            scenario("a", score(1.0, 0.0)),
+            scenario("b", score(0.0, 1.0)),
         ]);
         assert!((suite.aggregate.mean_f_half - 0.5).abs() < 1e-9);
         assert!((suite.aggregate.mean_distractor_fp_rate - 0.5).abs() < 1e-9);
@@ -132,7 +177,7 @@ mod tests {
     #[test]
     fn report_serializes_to_stable_json() {
         let suite = SuiteReport::assemble("m", vec![
-            ScenarioReport { id: "a".into(), score: score(1.0, 0.0), cost: CostReport::default() },
+            scenario("a", score(1.0, 0.0)),
         ]);
         let json = serde_json::to_string_pretty(&suite).unwrap();
         // round-trips and contains the headline scalar
@@ -152,11 +197,36 @@ mod tests {
     #[test]
     fn table_renders_one_row_per_scenario_and_a_total() {
         let suite = SuiteReport::assemble("m", vec![
-            ScenarioReport { id: "deck".into(), score: score(0.8, 0.0), cost: CostReport::default() },
+            scenario("deck", score(0.8, 0.0)),
         ]);
         let table = render_table(&suite);
         assert!(table.contains("deck"));
         assert!(table.contains("F0.5"));
         assert!(table.contains("TOTAL") || table.contains("mean"));
+    }
+
+    /// #298: a summary that narrates the recording is visible in the report —
+    /// counted in the aggregate, flagged in the table, and quoted in full.
+    #[test]
+    fn a_summary_that_narrates_the_recording_is_visible_in_the_report() {
+        let bad = "Field session to discuss mulch work. Only the word \"mulch\" was clearly \
+                   audible in the recording, with no additional context provided.";
+        let mut bad_score = score(1.0, 0.0);
+        bad_score.summary_voice = grade_summary(bad);
+        let suite = SuiteReport::assemble("m", vec![
+            scenario("good", score(1.0, 0.0)),
+            ScenarioReport {
+                id: "mulch".into(),
+                score: bad_score,
+                cost: CostReport::default(),
+                summary: Some(bad.into()),
+            },
+        ]);
+        assert_eq!(suite.aggregate.summary_voice_ok, 1, "one of two reads as a record of the job");
+        assert!(suite.aggregate.mean_summary_words > 0.0);
+        let table = render_table(&suite);
+        assert!(table.contains("BAD"), "the offending row is flagged");
+        assert!(table.contains("narrates the recording"), "and named");
+        assert!(table.contains(bad), "and quoted verbatim for the before/after read");
     }
 }
