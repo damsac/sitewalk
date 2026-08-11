@@ -1,0 +1,289 @@
+# Cloudflare Worker CI + continuous deploy (services/proxy).
+#
+# WHY THIS FILE EXISTS: the proxy is the thing that keeps the real sk-ant- key
+# out of every shipped IPA, and until now it had neither of the two properties
+# that makes that trustworthy:
+#   - nothing tested it. ci.yml is Rust + iOS only, so the 74 vitest tests ran
+#     only when a human remembered to run them.
+#   - nothing deployed it. It shipped by hand via `wrangler deploy` from a
+#     maintainer's laptop, so code could merge to main while the live worker
+#     kept running an older version — silently, with no signal anywhere.
+#
+# PRIVACY: request bodies carry walk transcripts (customer job-site data). The
+# same rule that governs src/index.ts governs this file: nothing here may log,
+# store, or forward a request or response body. The smoke check below therefore
+# asserts on STATUS CODES only, and the one body it ever prints is /health's,
+# which is a two-field constant emitted by a handler that never reads a request
+# body. See the smoke step for the per-assertion justification.
+#
+# Required GitHub secrets:
+#   CLOUDFLARE_API_TOKEN   Cloudflare API token used by `wrangler deploy`.
+#                          Scopes: Workers Scripts: Edit
+#                                  Workers KV Storage: Edit  (the METER binding)
+#                          SAFE WHEN UNSET — see the deploy job.
+#   CLOUDFLARE_ACCOUNT_ID  Optional. Only needed when the token can see more
+#                          than one account; with a single-account token
+#                          wrangler infers it. Empty is harmless.
+#
+# Optional repo variables:
+#   JEFE_PROXY_URL                     Worker base URL for the smoke check.
+#                                      Already used by release.yml for the app
+#                                      build; reused here rather than adding a
+#                                      second source of truth. Falls back to the
+#                                      known production URL when unset.
+#   PROXY_SMOKE_REQUIRE_STREAM_REJECT  "true" makes the streaming-rejection
+#                                      assertion blocking. See that step.
+
+name: Proxy
+
+on:
+  pull_request:
+    paths:
+      - 'services/proxy/**'
+      - '.github/workflows/proxy.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'services/proxy/**'
+      - '.github/workflows/proxy.yml'
+
+# Cancel superseded PR runs — they are pure checks and the newest push is the
+# only one anyone reads. Do NOT cancel a main run: that one deploys, and killing
+# `wrangler deploy` partway is how you get a live worker in a state no commit
+# describes. Same reasoning release.yml uses for its own `cancel-in-progress`.
+concurrency:
+  group: proxy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Proxy (typecheck + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/proxy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # setup-node's built-in npm cache. The lockfile is not at the repo
+          # root (this is the only Node project in the tree), so the path has
+          # to be named explicitly or the cache silently never hits.
+          cache: 'npm'
+          cache-dependency-path: services/proxy/package-lock.json
+
+      # `ci` not `install`: it installs exactly the committed lockfile and
+      # fails if package.json and package-lock.json have drifted apart.
+      - name: npm ci
+        run: npm ci
+
+      - name: npm run typecheck
+        run: npm run typecheck
+
+      # `vitest run` — 74 tests across test/proxy.test.ts (pricing, credential
+      # parsing, the credential-for-key swap, byte-identical forwarding, both
+      # caps refusing before upstream, fail-closed misconfiguration) and
+      # test/attest.test.ts (App Attest, inert in production but pinned here).
+      # No network, no miniflare: they run on a plain runner in well under a
+      # second, which is why this job has no cache warm-up beyond npm's.
+      - name: npm test
+        run: npm test
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: test
+    # Push-to-main only. `needs: test` is what makes a red suite block the
+    # deploy; without it a failing test would merge and ship in the same minute.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    env:
+      # Trailing slash stripped in the smoke step — a var ending in `/` would
+      # otherwise produce `//health`, which Cloudflare routes differently.
+      PROXY_URL: ${{ vars.JEFE_PROXY_URL || 'https://jefe-proxy.damsac-app.workers.dev' }}
+    steps:
+      # SAFE WHEN UNSET — the same idiom release.yml uses for absent secrets,
+      # for the same reason: this workflow has to be able to land BEFORE the
+      # secret exists.
+      #
+      # GitHub does not expand `secrets.*` in a job-level `if:` (the secrets
+      # context is not available there), so the presence test has to happen in
+      # a step and be re-exported as a step output that later steps gate on.
+      #
+      # It SKIPS rather than fails. A permanently-red main is worse than no
+      # deploy job at all: it trains everyone to ignore the badge, and then the
+      # badge stops meaning anything on the day it does matter. A skipped job
+      # is green-with-a-notice, which is the honest report — "nothing deployed,
+      # here is exactly what to configure."
+      - name: Check for CLOUDFLARE_API_TOKEN
+        id: gate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Not configured — skipping deploy
+        if: ${{ steps.gate.outputs.configured != 'true' }}
+        run: |
+          echo "::notice::CLOUDFLARE_API_TOKEN is not set — the proxy was NOT deployed. The live worker is still running whatever was last pushed by hand. To turn this on: mint a Cloudflare API token with 'Workers Scripts: Edit' and 'Workers KV Storage: Edit' (the latter for the METER namespace binding), then add it as the repo secret CLOUDFLARE_API_TOKEN. Re-run this workflow, or push any change under services/proxy/, to deploy. See services/proxy/README.md."
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.gate.outputs.configured == 'true' }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ steps.gate.outputs.configured == 'true' }}
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: services/proxy/package-lock.json
+
+      # wrangler is a devDependency, so `npx wrangler` below resolves to the
+      # pinned local copy rather than downloading whatever is newest today.
+      - name: npm ci
+        if: ${{ steps.gate.outputs.configured == 'true' }}
+        working-directory: services/proxy
+        run: npm ci
+
+      # Secrets (ANTHROPIC_API_KEY, APP_SECRET) and the KV namespace are NOT
+      # managed here — they were set once with `wrangler secret put` and live in
+      # Cloudflare. `wrangler deploy` uploads code and wrangler.toml config and
+      # leaves existing secrets alone. This job therefore never handles the
+      # Anthropic key at all, which is the point of the service.
+      - name: wrangler deploy
+        if: ${{ steps.gate.outputs.configured == 'true' }}
+        working-directory: services/proxy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      # Wrangler's exit code says "Cloudflare accepted an upload", not "the
+      # thing now answering requests is the code in this commit and it still
+      # has its secrets". Those come apart in exactly the ways that matter:
+      # a deploy can land against the wrong environment, and a worker can go
+      # live having lost ANTHROPIC_API_KEY/APP_SECRET, which src/index.ts turns
+      # into a blanket 500 on every call. So: probe the live URL.
+      #
+      # CI holds no valid APP_SECRET, so everything past /health is probed with
+      # a deliberately-invalid credential. That is not a limitation to work
+      # around — the 401-vs-500 distinction it produces is the single most
+      # useful thing this check can assert (see below).
+      - name: Smoke check the live worker
+        if: ${{ steps.gate.outputs.configured == 'true' }}
+        env:
+          # "true" makes the streaming assertion blocking. See that block.
+          REQUIRE_STREAM_REJECT: ${{ vars.PROXY_SMOKE_REQUIRE_STREAM_REJECT }}
+        run: |
+          set -euo pipefail
+          BASE="${PROXY_URL%/}"
+          echo "Smoke-checking $BASE"
+
+          # A well-formed credential carrying a secret that is definitively not
+          # the real one. Well-formed matters: a malformed credential is
+          # rejected by shape before the secret is ever compared, which would
+          # make the 401 prove less than it looks like it proves.
+          BAD_CRED='jefe.ci-smoke-check.not-the-real-app-secret'
+
+          # ---- 1. GET /health is 200 and says {"ok":true} -------------------
+          # Retried: a fresh deploy takes a moment to propagate to every edge,
+          # and a cold miss here would fail a deploy that is in fact fine.
+          HEALTH_CODE=""
+          for attempt in 1 2 3 4 5; do
+            HEALTH_CODE=$(curl -sS -o "$RUNNER_TEMP/health.json" -w '%{http_code}' \
+              --max-time 20 "$BASE/health" || echo "000")
+            [ "$HEALTH_CODE" = "200" ] && break
+            echo "  /health attempt $attempt returned $HEALTH_CODE — retrying in 5s"
+            sleep 5
+          done
+          if [ "$HEALTH_CODE" != "200" ]; then
+            echo "::error::GET $BASE/health returned $HEALTH_CODE, expected 200. The deploy uploaded but the worker is not serving."
+            exit 1
+          fi
+          # Printing THIS body is safe and is the only body printed anywhere in
+          # this workflow: the /health handler in src/index.ts returns a fixed
+          # two-field literal and never reads the request body, so it cannot
+          # carry a transcript. Every other assertion below discards its body
+          # to /dev/null.
+          HEALTH_BODY=$(cat "$RUNNER_TEMP/health.json")
+          if [ "$HEALTH_BODY" != '{"ok":true}' ]; then
+            echo "::error::GET $BASE/health returned 200 but the body was '$HEALTH_BODY', expected '{\"ok\":true}'. Something other than this worker is answering that URL."
+            exit 1
+          fi
+          echo "  ok  GET /health -> 200 {\"ok\":true}"
+
+          # ---- 2. A wrong credential is 401, NOT 500 ------------------------
+          # This is the assertion that catches a worker which deployed cleanly
+          # but lost its configuration. src/index.ts checks APP_SECRET and
+          # ANTHROPIC_API_KEY BEFORE it authenticates, and returns 500 "proxy is
+          # not configured" when either is missing. So:
+          #   401 -> both secrets are present and the credential was compared
+          #   500 -> the worker is live and broken; every real call is failing
+          #   200 -> alarming: an obviously-wrong secret was accepted
+          # Auth fails before any body is read or any spend is metered, so this
+          # probe costs nothing and touches no counter.
+          AUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            -X POST "$BASE/v1/messages" \
+            -H 'content-type: application/json' \
+            -H "x-api-key: $BAD_CRED" \
+            --data '{"model":"claude-3-5-haiku-20241022","max_tokens":1,"messages":[{"role":"user","content":"ci smoke check"}]}' \
+            || echo "000")
+          if [ "$AUTH_CODE" = "500" ]; then
+            echo "::error::POST /v1/messages returned 500 — the worker deployed but is missing ANTHROPIC_API_KEY and/or APP_SECRET. Every real call is failing right now. Re-set them with 'wrangler secret put' (see services/proxy/README.md); they are NOT managed by this workflow."
+            exit 1
+          fi
+          if [ "$AUTH_CODE" != "401" ]; then
+            echo "::error::POST /v1/messages with a deliberately-invalid credential returned $AUTH_CODE, expected 401. A wrong secret must be refused."
+            exit 1
+          fi
+          echo "  ok  POST /v1/messages (invalid credential) -> 401"
+
+          # ---- 3. A streaming request is refused ---------------------------
+          # The rejection lands in the metering-fix PR
+          # (pr/dam/proxy-only-and-metering-fixes). It is asserted here as a
+          # SET of acceptable codes rather than a single one, because from CI
+          # the two passing shapes are genuinely indistinguishable:
+          #
+          #   400 -> the guard ran and refused the stream. Proven.
+          #   401 -> the credential was refused FIRST, so the request never
+          #          reached the guard. On main today src/index.ts authenticates
+          #          before it reads the body at all, so unless that PR places
+          #          the stream check ahead of the credential check, 401 is what
+          #          a correct worker returns here and no unauthenticated probe
+          #          can ever see the 400. This is NOT proof the guard exists.
+          #   else -> a real failure, including 200 (a stream was accepted).
+          #
+          # This is deliberately not a check that cannot fail: 200/404/500/5xx
+          # all fail it unconditionally. What it cannot do is distinguish
+          # "guard absent" from "guard unreachable without a valid APP_SECRET",
+          # and it says so out loud rather than reporting a pass it did not earn.
+          # Set the repo variable PROXY_SMOKE_REQUIRE_STREAM_REJECT=true once
+          # that PR lands with the guard ahead of auth, and 401 becomes fatal.
+          STREAM_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            -X POST "$BASE/v1/messages" \
+            -H 'content-type: application/json' \
+            -H "x-api-key: $BAD_CRED" \
+            --data '{"model":"claude-3-5-haiku-20241022","max_tokens":1,"stream":true,"messages":[{"role":"user","content":"ci smoke check"}]}' \
+            || echo "000")
+          case "$STREAM_CODE" in
+            400)
+              echo "  ok  POST /v1/messages (stream:true) -> 400, streaming refused"
+              ;;
+            401)
+              if [ "${REQUIRE_STREAM_REJECT:-}" = "true" ]; then
+                echo "::error::POST /v1/messages with stream:true returned 401, not 400. PROXY_SMOKE_REQUIRE_STREAM_REJECT is set, which asserts the streaming guard runs BEFORE the credential check — it did not. Either the guard regressed, or it moved behind auth (in which case unset that variable; the guard is then only pinned by the vitest suite)."
+                exit 1
+              fi
+              echo "::warning::POST /v1/messages with stream:true returned 401, so the streaming rejection was NOT observed. The credential is checked before the body is read, so this is what a correct worker returns to an unauthenticated probe whether the guard exists or not — CI has no valid APP_SECRET and cannot tell the two apart. UNPROVEN, not passed. Once pr/dam/proxy-only-and-metering-fixes lands, check where it put the guard: if ahead of the credential check, set the repo variable PROXY_SMOKE_REQUIRE_STREAM_REJECT=true to make this blocking; if behind it, the vitest suite is the only place this behaviour is pinned and this probe stays advisory."
+              ;;
+            *)
+              echo "::error::POST /v1/messages with stream:true returned $STREAM_CODE, expected 400 (streaming refused) or 401 (credential refused first). A 200 here means the worker accepted a streaming request."
+              exit 1
+              ;;
+          esac
+
+          echo "Smoke check complete."

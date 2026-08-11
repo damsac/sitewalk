@@ -134,6 +134,69 @@ a transcript warehouse. This is asserted by the file header in `src/index.ts`.
 
 ## Deploy
 
+**Merging to `main` deploys this worker.** `.github/workflows/proxy.yml` runs
+the test suite on every PR that touches `services/proxy/**`, and on a push to
+`main` it runs the suite again and then `wrangler deploy`. The deploy `needs:`
+the test job, so a red suite stops the ship.
+
+That workflow exists because the alternative had already bitten: with deploys
+happening by hand from a laptop, code could merge to `main` while the live
+worker kept serving an older version, and nothing anywhere said so.
+
+### One-time setup for the CI deploy
+
+The workflow needs one repo secret. **Until it is set, the deploy job skips
+with a notice rather than failing** — the workflow is safe to have landed
+before the token existed, but nothing is being deployed while it is missing.
+
+| Name | Kind | Value |
+|---|---|---|
+| `CLOUDFLARE_API_TOKEN` | secret | Cloudflare API token (scopes below) |
+| `CLOUDFLARE_ACCOUNT_ID` | secret, optional | Only if the token can see more than one account; a single-account token is inferred |
+| `JEFE_PROXY_URL` | variable, optional | Worker base URL for the post-deploy smoke check. Already set for the app build; reused rather than duplicated |
+
+Mint the token at **My Profile → API Tokens → Create Token → Custom token**
+with exactly these permissions:
+
+| Permission | Level | Why |
+|---|---|---|
+| Account → **Workers Scripts** | **Edit** | Upload the worker itself |
+| Account → **Workers KV Storage** | **Edit** | The `METER` namespace binding in `wrangler.toml` — a deploy that binds KV is refused without it |
+
+Nothing broader is needed. In particular the token grants no access to the
+worker's *secrets*: `ANTHROPIC_API_KEY` and `APP_SECRET` are set once by hand
+(below) and `wrangler deploy` leaves them untouched, so CI never handles the
+Anthropic key. That is the whole point of the service, and it survives the
+move to CI.
+
+### Post-deploy smoke check
+
+CI does not trust wrangler's exit code — that says "Cloudflare accepted an
+upload", not "the running worker is this commit and still has its secrets".
+After each deploy it asserts, against the live URL:
+
+- `GET /health` → `200` `{"ok":true}`
+- `POST /v1/messages` with a deliberately-invalid credential → `401`, **not**
+  `500`. A `500` is `index.ts`'s "proxy is not configured" — a worker that
+  deployed cleanly and lost `ANTHROPIC_API_KEY`/`APP_SECRET`, which fails every
+  real call. That 401-vs-500 distinction is the most useful thing an
+  unauthenticated probe can tell you.
+- `POST /v1/messages` with `stream: true` → `400`. CI holds no valid
+  `APP_SECRET`, and the credential is checked before the body is read, so this
+  probe sees `401` unless the streaming guard runs ahead of authentication. It
+  treats `401` as *unproven* (a loud warning, not a pass) and fails on anything
+  else. Set the repo variable `PROXY_SMOKE_REQUIRE_STREAM_REJECT=true` to make
+  the `400` mandatory once the guard is known to run pre-auth.
+
+It asserts on status codes and never prints a `/v1/messages` response body —
+the privacy rule above governs CI output too.
+
+### First-time (or break-glass) manual deploy
+
+Still the path for standing up a new worker, and for shipping when GitHub is
+down. Steps 1 and 2 are one-time and are **not** automated: CI deliberately has
+no ability to read or write the worker's secrets.
+
 ```sh
 cd services/proxy
 npm install
@@ -218,5 +281,15 @@ pass.
 What the synthetic chain cannot prove is that we accept **Apple's** real root.
 That is the residual risk, and the reason the rollout starts in `monitor`.
 
-These are **not** wired into the repo's GitHub Actions CI, which is Rust +
-iOS only. Run them locally before deploying.
+These run in CI. `.github/workflows/proxy.yml` runs `npm ci`, `npm run
+typecheck`, and `npm test` on every pull request that touches
+`services/proxy/**`, and again on `main` before the deploy — the deploy
+`needs:` that job, so a red suite never ships. They need no network and no
+miniflare, so the whole gate finishes in seconds.
+
+The path filter cuts both ways, and it is worth knowing which way: a
+docs-only change does not run this workflow at all, which is the point (it
+cannot affect the worker). But it also means these checks are **absent**, not
+green, on such a PR — so do not mark them as *required* status checks without
+also adding a path-aware skip job, or every docs PR will sit forever waiting
+on a check that will never report.
