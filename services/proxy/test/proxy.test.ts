@@ -316,6 +316,51 @@ describe('worker', () => {
     expect(kv.store.size).toBe(0);
   });
 
+  it('checks the credential BEFORE it looks at the body', async () => {
+    // Placement is deliberate: no body work happens for an unauthenticated
+    // caller, matching every other body read in this file. The consequence
+    // matters to whoever writes the post-deploy smoke check — an UNAUTHENTICATED
+    // stream:true probe gets 401, not 400, so it cannot prove the guard is
+    // live. Give the probe `jefe.<anything>.$JEFE_APP_SECRET` and it will see
+    // the 400. If this test ever starts failing with 400, someone moved the
+    // validation ahead of auth; read the comment above the body read first.
+    const env = makeEnv();
+    const { ctx } = makeCtx();
+    const res = await worker.fetch(
+      new Request('https://proxy.test/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': 'jefe.someone.wrong-secret', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-fable-5', stream: true, messages: [] }),
+      }),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an authenticated stream probe cheaply enough for a smoke check', async () => {
+    // What the post-deploy smoke check will actually do. Asserts the probe is
+    // free: nothing forwarded, no counter written, so it can run on every
+    // deploy without touching spend.
+    const kv = fakeKv();
+    const env = makeEnv({ METER: kv });
+    const { ctx, settle } = makeCtx();
+    const res = await worker.fetch(
+      new Request('https://proxy.test/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': `jefe.ci-smoke.${APP_SECRET}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5', stream: true, messages: [] }),
+      }),
+      env,
+      ctx,
+    );
+    await settle();
+    expect(res.status).toBe(400);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(kv.store.size).toBe(0);
+  });
+
   it('still forwards when stream is absent or explicitly false', async () => {
     const env = makeEnv();
     const { ctx, settle } = makeCtx();

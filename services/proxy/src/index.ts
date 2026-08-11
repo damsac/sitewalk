@@ -394,6 +394,19 @@ export default {
     // body must be forwarded byte-identically — re-serializing parsed JSON
     // could reorder keys and would break prompt-cache prefix matching upstream.
     // So: parse to VALIDATE, forward the original text.
+    //
+    // BODY WORK STAYS BEHIND AUTH — deliberate, and load-bearing for the two
+    // validations below. Moving them ahead of `authenticate` would let a
+    // post-deploy smoke check probe them without a credential, which was
+    // proposed; it was declined because the same proof is available by giving
+    // the probe a credential (CI already holds JEFE_APP_SECRET, which must
+    // equal APP_SECRET or every shipped build would 401). The costs of moving
+    // them are real: `/v1/messages` has no body size cap, so an unauthenticated
+    // caller could force text()+JSON.parse at will where today it costs one
+    // header compare; the model rejection below names the allowlist, which is
+    // not something to hand an unauthenticated scanner; and every other body
+    // read in this file (readJsonBody, attest routes) is already post-auth and
+    // size-capped. Keep new body-dependent checks below this line.
     const bodyText = await request.text();
     let model = 'unknown';
     let stream: unknown;
