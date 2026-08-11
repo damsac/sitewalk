@@ -256,3 +256,10 @@ Tell the testers before flipping it, not after.
   a `v1.0.0` tag will be rejected as a duplicate.
 - **A real device pass on the current build** — nothing here has been through a
   sandbox purchase.
+- **Move the proxy's Anthropic key into its own Console workspace with a spend
+  limit** (Isaac) — every tester's traffic bills through that one key, and today
+  the only cost bound is the proxy's own $25/day global cap. A workspace limit is
+  a second backstop that holds even if the proxy's caps are wrong or bypassed,
+  and it makes Console's Usage/Cost pages filterable to Jefe alone instead of
+  mixing with everything else on the account. Month-to-date spend at the time of
+  writing was $0.23, so the limit can start low.

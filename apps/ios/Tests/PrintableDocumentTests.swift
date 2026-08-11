@@ -141,4 +141,43 @@ final class PrintableDocumentTests: XCTestCase {
             "a heading over an empty box reads as a broken document, so the block is omitted"
         )
     }
+
+    // MARK: A document with nothing to total prints no total row
+
+    private func model(pricesShown: Bool, staticTotal: String) -> DocumentModel {
+        DocumentModel(
+            rows: [], totalKey: "TOTAL", staticTotal: staticTotal,
+            note: "", send: "SEND", pricesShown: pricesShown
+        )
+    }
+
+    /// The same rule the authored sections above already follow, applied to
+    /// the last row on the page. WO-0002 (2026-08-10) went to a crew with
+    /// `TOTAL ——` under the assignment — a heading over an em dash on a
+    /// document that has no money by design.
+    func testUnpricedDocumentWithNothingToTotalShowsNoTotalRow() {
+        XCTAssertFalse(
+            model(pricesShown: false, staticTotal: DocumentModel.noTotal).showsTotal,
+            "a work order has no money by design; an em dash is not a total"
+        )
+    }
+
+    /// A priced document keeps its total even while it is empty: on an
+    /// estimate that blank is a gap the operator is meant to close before
+    /// sending, not an absence.
+    func testPricedDocumentShowsItsTotalEvenWhenEmpty() {
+        XCTAssertTrue(
+            model(pricesShown: true, staticTotal: DocumentModel.noTotal).showsTotal,
+            "an estimate's empty total is a prompt, not noise"
+        )
+    }
+
+    /// Unpriced does not mean total-less. An inspection's total row carries
+    /// its findings count, and that is the summary line of the document.
+    func testUnpricedDocumentKeepsAStaticTotalItActuallyHas() {
+        XCTAssertTrue(
+            model(pricesShown: false, staticTotal: "1 SAFETY · 3 REPAIR").showsTotal,
+            "a findings summary is a total by another name"
+        )
+    }
 }

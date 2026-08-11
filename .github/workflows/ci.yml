@@ -120,13 +120,27 @@ jobs:
         working-directory: apps/ios
         run: xcodegen generate
 
-      - name: Build for simulator
+      # Build AND test. It used to build only, against a generic destination —
+      # which is why `DocumentIdentityTests` sat red on main for a day after
+      # #325 added the optional CLIENT block: nothing on CI ever ran the suite,
+      # and the iOS tests are where the document rules are actually pinned.
+      #
+      # A concrete simulator is required to run tests (a generic destination
+      # cannot), and it is RESOLVED rather than pinned: the runner image
+      # changes which iPhones exist, and a hardcoded name fails the whole job
+      # the day it disappears. Building for the concrete device also covers
+      # what the generic build covered, so this stays one compile.
+      - name: Build and test on simulator
         working-directory: apps/ios
         run: |
           set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c \
+            "import json,sys; d=json.load(sys.stdin)['devices']; \
+             print(next(x['name'] for k in d for x in d[k] if x['name'].startswith('iPhone')))")
+          echo "Testing on: $DEVICE"
           xcodebuild \
             -project SitewalkGallery.xcodeproj \
             -scheme SitewalkGallery \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            test

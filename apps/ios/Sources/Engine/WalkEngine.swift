@@ -117,6 +117,20 @@ struct DocumentModel {
     /// a crew with prices on it is the wrong document.
     var pricesShown: Bool = true
 
+    /// What `staticTotal` says when a document has no total of its own.
+    static let noTotal = "——"
+
+    /// Whether to print a total row at all.
+    ///
+    /// A priced document always shows one, even before the prices land — an
+    /// estimate's empty total is a gap the operator is meant to close. An
+    /// unpriced document only shows one if it has a static total to show
+    /// (an inspection's "1 SAFETY · 3 REPAIR"). Otherwise the row is a
+    /// heading over an em dash, which is what WO-0002 printed under a crew's
+    /// assignment: `TOTAL ——`. Same rule the optional fields already follow —
+    /// nothing to say, nothing printed.
+    var showsTotal: Bool { pricesShown || staticTotal != Self.noTotal }
+
     var gapCount: Int { rows.filter(\.isGap).count }
 
     /// Sum of $-parseable amounts; falls back to the template total.

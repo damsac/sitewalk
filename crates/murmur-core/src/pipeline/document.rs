@@ -368,14 +368,27 @@ fn compose_document_tool_spec(wants_lines: bool, wants_assignee: bool) -> ToolSp
 /// - A client buying work (`inclusion`) is paying for labor and materials. A
 ///   gate code is not a line item on an estimate.
 /// - A crew executing (`directive`) needs the tasks; the site facts are
-///   already in the block above their heads.
+///   already in the block above their heads, and the money is not theirs to
+///   see — see below.
 /// - A record (`observation`) is the one document where a condition, a note
 ///   and a safety finding ARE the content — that is the whole point of an
 ///   inspection report.
+///
+/// `price` draws on `inclusion` only. A work order is handed to a crew, and a
+/// crew sheet carrying "$500 labor" is the wrong document — the app already
+/// says so twice (`DocumentModel.pricesShown`, and the review sheet refusing
+/// to offer an amount field on an unpriced document); this is the third place,
+/// and the one that was leaking. WO-0002 shipped a bare `$500 labor` line:
+/// unpriced documents never run `price_items`, so the item was rendered raw,
+/// with the figure still in its title — the one thing the extraction prompt
+/// forbids ("a work item never carries a price in its title"). On the estimate
+/// built from the same walk the same item read `Labor` / `$500`, correctly.
 fn draws_kind(line_detail: &str, kind: &str) -> bool {
     match line_detail {
         // Work, materials, and the money for them.
-        "inclusion" | "directive" => matches!(kind, "todo" | "part" | "price"),
+        "inclusion" => matches!(kind, "todo" | "part" | "price"),
+        // Work and materials. Not money.
+        "directive" => matches!(kind, "todo" | "part"),
         // Everything: a report exists to record what was seen.
         _ => true,
     }
@@ -1367,9 +1380,16 @@ mod tests {
         assert!(!asked.contains("Labor"));
     }
 
-    /// The same walk as an INSPECTION (no amount column). Lifting a price out
-    /// of a title would delete it from the only place it can appear, so the
-    /// fold sits out entirely.
+    /// The same walk as a RECORD (no amount column). Lifting a price out of a
+    /// title would delete it from the only place it can appear, so the fold
+    /// sits out entirely.
+    ///
+    /// Built as a report, which is the kind this test's comment always
+    /// described ("an inspection"; `report` is the record kind legal for the
+    /// landscape template). It used to build a `work_order`, and that made it
+    /// the guardian of the WO-0002 bug — asserting that a crew sheet keeps
+    /// `$200 mulch` as a line. A record keeps it (nowhere else to put it); a
+    /// crew sheet no longer draws the kind at all (`draws_kind`).
     #[tokio::test]
     async fn an_unpriced_kind_keeps_every_line_and_every_dollar_in_its_title() {
         let (store, sid) =
@@ -1379,7 +1399,7 @@ mod tests {
             Arc::new(MockProvider::new(vec![compose_response(serde_json::json!([]), serde_json::json!([]))]));
         let b = builder(store.clone(), provider.clone());
 
-        let outcome = b.build(&sid, "work_order").await.unwrap();
+        let outcome = b.build(&sid, "report").await.unwrap();
         let store = store.lock().unwrap();
         let art = store.get_artifact(&outcome.document_artifact_id).unwrap();
         let v: serde_json::Value = serde_json::from_str(&art.body).unwrap();
@@ -2276,6 +2296,7 @@ mod tests {
             ("note", "gate code 4412"),
             ("safety", "loose railing"),
             ("decision", "going with dark mulch"),
+            ("price", "$500 labor"),
         ];
 
         // A work order is for a crew: work and materials, not site trivia —
@@ -2291,7 +2312,12 @@ mod tests {
         let v = decoded_document(&store, &outcome.document_artifact_id);
         let titles: Vec<&str> =
             v["lines"].as_array().unwrap().iter().map(|l| l["title"].as_str().unwrap()).collect();
-        assert_eq!(titles, vec!["mulch the beds", "bark mulch"]);
+        assert_eq!(
+            titles,
+            vec!["mulch the beds", "bark mulch"],
+            "work and materials only — WO-0002 shipped a bare `$500 labor` line, \
+             and money is not a crew directive"
+        );
 
         // …but the FULL item list still reaches the compose pass, or a hazard
         // recorded only as an item would vanish from the safety block too.
@@ -2310,9 +2336,26 @@ mod tests {
         let v2 = decoded_document(&store2, &outcome2.document_artifact_id);
         assert_eq!(
             v2["lines"].as_array().unwrap().len(),
-            5,
+            6,
             "a report records everything — that is what it is for"
         );
+    }
+
+    /// The money rule, stated directly: a price is a line on the document the
+    /// client signs and on nothing else. An estimate and a work order built
+    /// from the SAME walk therefore disagree about one item, on purpose.
+    #[test]
+    fn only_a_document_that_sells_work_draws_its_price() {
+        assert!(draws_kind("inclusion", "price"), "an estimate is the money document");
+        assert!(!draws_kind("directive", "price"), "a crew sheet is not");
+        assert!(draws_kind("observation", "price"), "a record records what was said");
+
+        // Unchanged by this: both still carry the work itself.
+        for detail in ["inclusion", "directive"] {
+            assert!(draws_kind(detail, "todo"));
+            assert!(draws_kind(detail, "part"));
+            assert!(!draws_kind(detail, "note"));
+        }
     }
 
     /// A walk that captured only site conditions has nothing to sell, and

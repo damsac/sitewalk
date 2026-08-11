@@ -140,8 +140,13 @@ private struct PDFPageView: View {
             // `gaps: 0` — the "+3 GAP" badge is the app nudging the operator
             // before they send. Once they have sent, it is a note to the
             // client that the estimate is incomplete.
-            TotalRow(key: document.totalKey, value: document.totalValue, gaps: 0)
-                .padding(.top, 2)
+            //
+            // A document with nothing to total prints no total row — WO-0002
+            // went to a crew with `TOTAL ——` under the assignment.
+            if document.showsTotal {
+                TotalRow(key: document.totalKey, value: document.totalValue, gaps: 0)
+                    .padding(.top, 2)
+            }
             // Structure basics (DocumentLayout): operator terms + signature line.
             if !layout.termsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 TermsBlock(text: layout.termsText)
