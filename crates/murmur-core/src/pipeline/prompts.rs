@@ -74,16 +74,62 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
     )
 }
 
+/// System prompt for the summary/notes pass. Named (not inline) so the voice
+/// rules are pinnable by a test — #298: the summariser was writing about the
+/// RECORDING ("only the word 'mulch' was clearly audible in the recording")
+/// instead of about the job, and opening every walk with the same "Field
+/// session to…" preamble. The operator knows they were there; the summary is
+/// the first line they read afterwards and the one their customer may read too.
+pub(crate) fn summary_system_prompt() -> String {
+    "You are writing the record of one field-work session for a tradesperson \
+     and, sometimes, their customer. Everything you write is about the JOB — \
+     the site, the work, what was found — and never about the recording.\n\
+     summary: ONE sentence, naming the site and the work. \"North wall: water \
+     damage below the window, about three square feet.\" \"Mulch and compost, \
+     three beds in the front yard.\"\n\
+     - No preamble. Never open with \"Field session\", \"Field walk\", \"Site \
+     visit\", \"A brief session\", \"The operator\", \"The user\", or any other \
+     phrase naming the session itself — start with the site or the work. The \
+     operator already knows it was a walk; that is what the app is.\n\
+     - Never mention the recording, the transcript, the audio, or what was \
+     audible, unclear, garbled, or missing from it. Do not explain your own \
+     difficulty, and never narrate the operator (\"the user then walked over \
+     to…\"). Write the record, not the session.\n\
+     - Say less when less was said. If one thing was heard, the whole summary \
+     is that one thing — \"Mulch work discussed.\" is a complete summary. A \
+     short true line beats a paragraph explaining what you could not hear.\n\
+     - If nothing about the job was said at all, the entire summary is exactly: \
+     Nothing captured.\n\
+     notes: comprehensive coordination detail, grouped into three buckets: \
+     scope_of_work (directives with client detail baked in — \"darker mulch \
+     than last year\"), constraints (budget, permits, deadline, site \
+     access/gate codes, client preferences), and conditions_and_issues (site \
+     findings affecting the work). At most 12 notes entries; prefer fewer, \
+     denser entries. Each entry records something that was said about the job — \
+     never a note about what the recording failed to capture. Capture only what \
+     was said; never invent a budget, deadline, or access detail — a missed \
+     note is cheaper than a fabricated constraint."
+        .into()
+}
+
 fn notes_tool_spec() -> ToolSpec {
     ToolSpec {
         name: WRITE_NOTES.into(),
-        description: "Record the session's narrative summary, spoken total (if any), and \
+        description: "Record the session's one-sentence summary, spoken total (if any), and \
                        comprehensive coordination notes."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
-                "summary": { "type": "string", "description": "2-4 plain sentences: what, why, when" },
+                "summary": {
+                    "type": "string",
+                    "description": "ONE sentence naming the site and the work — \"North wall: water \
+                                     damage below the window, about 3 sq ft\". No preamble (\"Field \
+                                     session…\", \"Site visit…\", \"The operator…\") and no mention of \
+                                     the recording, transcript, audio, or what was audible. Say less \
+                                     when less was said (\"Mulch work discussed.\"); exactly \"Nothing \
+                                     captured.\" when nothing about the job was."
+                },
                 "spoken_total_cents": {
                     "type": "integer",
                     "description": "The operator's stated target/grand total for the WHOLE job, in cents \
@@ -96,9 +142,10 @@ fn notes_tool_spec() -> ToolSpec {
                     "description": "At most 12 entries; prefer fewer, denser entries. Each entry is a \
                                      client/team coordination detail the terse board doesn't carry — the \
                                      full spoken context behind a decision, a constraint, or a site \
-                                     condition. Capture only what was said; never invent a budget, \
-                                     deadline, or access detail — a missed note is cheaper than a \
-                                     fabricated constraint.",
+                                     condition. Never an entry about the recording itself or about what \
+                                     it failed to capture. Capture only what was said; never invent a \
+                                     budget, deadline, or access detail — a missed note is cheaper than \
+                                     a fabricated constraint.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -145,16 +192,7 @@ pub(crate) async fn summarize(
 ) -> Result<(Option<String>, Option<i64>, Vec<NotesEntry>, Usage), HarnessError> {
     let response = provider
         .complete(CompletionRequest {
-            system: "You are building a client/team coordination artifact from one transcribed \
-                     field-work session. Write a narrative summary (2-4 plain sentences: what, \
-                     why, when) AND comprehensive notes grouped into three buckets: \
-                     scope_of_work (directives with client detail baked in — \"darker mulch than \
-                     last year\"), constraints (budget, permits, deadline, site access/gate \
-                     codes, client preferences), and conditions_and_issues (site findings \
-                     affecting the work). At most 12 notes entries; prefer fewer, denser entries. \
-                     Capture only what was said; never invent a budget, deadline, or access \
-                     detail — a missed note is cheaper than a fabricated constraint."
-                .into(),
+            system: summary_system_prompt(),
             messages: vec![Message::user_text(transcript_excerpt)],
             tools: vec![notes_tool_spec()],
             max_tokens,
@@ -364,11 +402,47 @@ mod tests {
         assert_eq!(buckets, Vec::new(), "garbled notes -> [] not a hard failure");
     }
 
+    /// #298: the two rules the summary voice turns on, in BOTH places the
+    /// model reads them (system prompt and tool schema) — a rule that lives in
+    /// only one of the two is a rule the model can miss.
+    #[test]
+    fn the_summary_asks_for_the_job_not_the_recording() {
+        let spec = notes_tool_spec();
+        let summary_desc = spec.input_schema["properties"]["summary"]["description"]
+            .as_str()
+            .unwrap()
+            .to_lowercase();
+        let system = summary_system_prompt().to_lowercase();
+        for text in [&system, &summary_desc] {
+            assert!(text.contains("one sentence"), "one sentence, not 2-4");
+            assert!(text.contains("no preamble"), "no \"Field session…\" opener");
+            assert!(text.contains("field session"), "the banned opener is named");
+            assert!(text.contains("recording"), "the recording is named as off-limits");
+            assert!(text.contains("transcript"));
+            assert!(text.contains("audible"));
+            assert!(
+                text.contains("say less when less was said"),
+                "a quiet walk gets a short summary, not an apology"
+            );
+        }
+        assert!(
+            summary_system_prompt().contains("the entire summary is exactly: Nothing captured."),
+            "the silent-walk answer is pinned verbatim, so it can't drift into an apology"
+        );
+    }
+
+    /// The apologetic paragraph moved into the notes screen would be the same
+    /// defect one level down, so the notes bucket carries the rule too.
+    #[test]
+    fn notes_entries_are_about_the_job_not_the_recording() {
+        let spec = notes_tool_spec();
+        let notes_desc = spec.input_schema["properties"]["notes"]["description"].as_str().unwrap();
+        assert!(notes_desc.contains("Never an entry about the recording itself"));
+        assert!(summary_system_prompt().contains("never a note about what the recording failed"));
+    }
+
     #[test]
     fn notes_prompt_carries_r6_and_the_entry_cap() {
-        // The system prompt text is constructed inline in `summarize`; pin the
-        // static tool schema's cap/R6 language instead (schema description is
-        // sent to the model exactly like the system prompt).
         let spec = notes_tool_spec();
         let notes_desc = spec.input_schema["properties"]["notes"]["description"].as_str().unwrap();
         assert!(notes_desc.contains("At most 12 entries"), "entry-count cap");
