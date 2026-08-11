@@ -97,19 +97,42 @@ final class DocumentIdentityTests: XCTestCase {
     /// assignment. A document whose sections all said the same thing would be
     /// the old "every document looks like an estimate" bug wearing a hat.
     func testEachKindCarriesItsOwnAuthoredBlocks() async throws {
+        // `client` (PREPARED FOR) leads the money documents: an estimate is an
+        // offer to a named person and an invoice without a payer is a weak
+        // accounting record. It is `fill: "manual"` — the operator types it —
+        // so on a walk that never named a client it is legitimately EMPTY.
         let cases: [(kind: String, sections: [String])] = [
-            ("estimate", ["scope"]),
-            ("invoice", ["work"]),
+            ("estimate", ["client", "scope"]),
+            ("invoice", ["client", "work"]),
             ("work_order", ["assignment", "site"]),
             ("report", ["summary"]),
         ]
         for row in cases {
             let doc = try await build(row.kind)
             XCTAssertEqual(doc.sections.map(\.key), row.sections, "\(row.kind) sections")
+
+            // Walk-filled blocks must say something — a heading over an empty
+            // box reads as a broken document. An all-optional block is the
+            // exception and the reason this filter exists: blank is a fine
+            // final state for one, and `hasContent` false is precisely what
+            // keeps it off the printed page.
+            let authored = doc.sections.filter { !$0.fields.allSatisfy(\.isOptional) }
             XCTAssertTrue(
-                doc.sections.allSatisfy(\.hasContent),
+                authored.allSatisfy(\.hasContent),
                 "\(row.kind): a heading over an empty box reads as a broken document"
             )
         }
+    }
+
+    /// The optional block is present to be typed into and absent from the page
+    /// until it is. Pinned here because the two halves live apart — the schema
+    /// decides it exists, `hasContent` decides it prints — and a regression in
+    /// either one is silent: a PREPARED FOR heading over nothing, sent.
+    func testTheClientBlockIsOfferedButEmptyUntilTyped() async throws {
+        let estimate = try await build("estimate")
+        let client = try XCTUnwrap(estimate.sections.first { $0.key == "client" })
+        XCTAssertTrue(client.fields.allSatisfy(\.isOptional), "the operator types it, not the walk")
+        XCTAssertFalse(client.fields.contains { $0.isGap }, "an optional field is not a gap")
+        XCTAssertFalse(client.hasContent, "and nothing was typed, so nothing prints")
     }
 }
