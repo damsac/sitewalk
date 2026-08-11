@@ -22,21 +22,33 @@ A fresh clone builds and runs on the demo engine with no dependencies: the base
 ./build-ffi.sh       # regenerates the gitignored MurmurCoreFFI xcframework +
                      # Swift bindings (slow first run). Only needed when the
                      # xcframework is missing or crates/ffi changed.
-./generate.sh        # detects the xcframework, injects the API key, and
-                     # generates from project-real.yml (real MurmurCoreFFI dep)
+./generate.sh        # detects the xcframework and generates from
+                     # project-real.yml (real MurmurCoreFFI dep)
 xcodebuild -project SitewalkGallery.xcodeproj -scheme SitewalkGallery \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
 `./generate.sh` writes the gitignored `project.local.yml` (from
-`project.local.yml.template`) with `PPQ_API_KEY` pulled from the repo-root
-`.env`'s `ANTHROPIC_API_KEY`, then runs `xcodegen generate --spec
-project-real.yml` (which merges `project.yml` + `project.local.yml` + the
-MurmurCoreFFI package dependency). If the xcframework is absent it falls back to
-the demo build and tells you to run `./build-ffi.sh`. The key flows only into the
-gitignored `project.local.yml` and the generated (gitignored) `.xcodeproj`;
-xcodebuild expands `$(PPQ_API_KEY)` into the built app's Info.plist at build
-time. No tracked file ever holds the secret.
+`project.local.yml.template`) with `ANTHROPIC_BASE_URL` pulled from the
+repo-root `.env`, then runs `xcodegen generate --spec project-real.yml` (which
+merges `project.yml` + `project.local.yml` + the MurmurCoreFFI package
+dependency). If the xcframework is absent it falls back to the demo build and
+tells you to run `./build-ffi.sh`.
+
+**No Anthropic key is baked into the build.** A key in `Info.plist` is
+extractable from any downloaded IPA, so shipped builds reach Anthropic only
+through the proxy (`services/proxy`), and `Info.plist` has no key field at all.
+For a local real-core run, supply the key through the **environment** — Xcode
+scheme env vars, or:
+
+```sh
+SIMCTL_CHILD_ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+  xcrun simctl launch booted com.damsac.sitewalk.gallery
+```
+
+— or set `JEFE_PROXY_URL` + `JEFE_APP_SECRET` in `project.local.yml` to go
+through the proxy locally. With neither configured the app runs the scripted
+demo engine. See `EngineResolution.swift` → `resolveCredential()`.
 
 `./generate.sh` also fetches the on-device whisper model via
 `./fetch-whisper-model.sh` (gitignored binary, sha256-verified, cached after

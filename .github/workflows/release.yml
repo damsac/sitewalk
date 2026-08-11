@@ -36,7 +36,8 @@
 #     upload is a SEPARATE, conditional altool step so a dry-run can verify the
 #     whole chain through signing without publishing.
 #   - NO App Group, NO entitlements, NO analytics injection: apps/ios uses none
-#     (it reads only PPQ_API_KEY from Info.plist) — simpler than Era-I.
+#     (it reads only the proxy URL + app secret from Info.plist) — simpler
+#     than Era-I.
 #
 # Two release lanes:
 #   - Push to main         -> internal TestFlight (continuous; team dogfoods)
@@ -54,7 +55,12 @@
 #   ASC_API_KEY_P8         Full contents of AuthKey_*.p8 (text, not base64)
 #   APPLE_CERT_P12         base64 Apple Distribution cert + private key (.p12)
 #   APPLE_CERT_PASSWORD    password for the .p12
-#   PPQ_API_KEY            LLM API key (expanded into Info.plist at build time)
+#   JEFE_APP_SECRET        shared secret the app presents to the LLM proxy
+#
+# Required GitHub variables:
+#   JEFE_PROXY_URL         the Cloudflare Worker URL (services/proxy)
+#
+# NOTE: no Anthropic key is a build input any more. The proxy holds it.
 
 name: Release
 
@@ -253,7 +259,6 @@ jobs:
       - name: Archive
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          PPQ_API_KEY: ${{ secrets.PPQ_API_KEY }}
           JEFE_PROXY_URL: ${{ vars.JEFE_PROXY_URL }}
           JEFE_APP_SECRET: ${{ secrets.JEFE_APP_SECRET }}
           MARKETING_VERSION_OVERRIDE: ${{ steps.version.outputs.marketing_version }}
@@ -274,30 +279,29 @@ jobs:
             "PROVISIONING_PROFILE_SPECIFIER=Murmur App Store"
             "DEVELOPMENT_TEAM=$APPLE_TEAM_ID"
             "CURRENT_PROJECT_VERSION=${{ github.run_number }}"
-            "PPQ_API_KEY=$PPQ_API_KEY"
-            # The proxy (services/proxy). When BOTH are non-empty the app
-            # routes through it and NO Anthropic key is present in the build —
-            # which is the point: a key in Info.plist is extractable from any
-            # downloaded IPA (EngineResolution.swift resolveCredential()).
+            # The proxy (services/proxy) is the ONLY path to Anthropic for a
+            # shipped build. No Anthropic key is baked into the app at all:
+            # Info.plist no longer has a key field to expand into, so there is
+            # nothing in a downloaded IPA to extract. The real sk-ant- key
+            # lives in Cloudflare and never enters a build artifact.
             #
-            # SAFE WHEN UNSET: absent secrets expand to empty strings, the app
-            # falls through to the direct-key path, and the build behaves
-            # exactly as it does today. So this can land before the secrets
-            # exist without changing a single shipped build.
+            # BOTH must be set. With either missing, resolveCredential()
+            # (EngineResolution.swift) finds no proxy and no dev key, and the
+            # app degrades to the scripted demo engine — it does NOT fall back
+            # to a direct key, because there is no longer a direct-key field in
+            # Info.plist to fall back to. A release build with these unset
+            # ships a demo app; that is loud, not silent.
             #
             # JEFE_PROXY_URL is a plain var (a URL is not a secret); the app
-            # secret is a repo secret. Both must be set together — a URL
-            # without the secret is rejected by the proxy on every call.
+            # secret is a repo secret.
             "JEFE_PROXY_URL=$JEFE_PROXY_URL"
             "JEFE_APP_SECRET=$JEFE_APP_SECRET"
-            # NO ANTHROPIC_BASE_URL override: the key in the PPQ_API_KEY secret
-            # is a direct Anthropic key (sk-ant-…), verified live against
-            # api.anthropic.com and REJECTED (401) by api.ppq.ai. Builds #24–#32
-            # shipped with the ppq.ai override and every walk degraded to
-            # "saved offline" — the key/host pair must match; empty here means
-            # the provider default (api.anthropic.com), which this key wants.
-            # If the account ever moves to a PPQ-issued key, restore the
-            # override AND rotate the secret together.
+            # NO ANTHROPIC_BASE_URL override: on the proxy path the base URL
+            # comes from JEFE_PROXY_URL, and the provider default
+            # (api.anthropic.com) is what the proxy itself talks to. Builds
+            # #24–#32 shipped a ppq.ai override paired with a direct
+            # api.anthropic.com key and every walk degraded to "saved offline"
+            # — key and host are a matched pair. Leave this unset.
           )
           if [ -n "$MARKETING_VERSION_OVERRIDE" ]; then
             BUILD_SETTINGS+=("MARKETING_VERSION=$MARKETING_VERSION_OVERRIDE")

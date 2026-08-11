@@ -59,14 +59,17 @@ monotonic vs the Era-I builds already on App Store Connect.
   `false`): a dry-run builds → signs → exports the `.ipa` but does **not**
   publish. Pushes to `main` / `v*` tags always upload.
 - **No App Group, no entitlements, no analytics.** `apps/ios` uses none — it
-  reads only `PPQ_API_KEY` from `Info.plist`. So **step 1 below (App Group
-  registration) is NOT required** for the rebuilt app, and the profile is a plain
-  App Store profile. `STUDIO_ANALYTICS_API_KEY_RELEASE` is no longer injected
-  (there is no analytics SDK in the rebuild).
+  reads only `JEFE_PROXY_URL` + `JEFE_APP_SECRET` from `Info.plist`. So **step 1
+  below (App Group registration) is NOT required** for the rebuilt app, and the
+  profile is a plain App Store profile. `STUDIO_ANALYTICS_API_KEY_RELEASE` is no
+  longer injected (there is no analytics SDK in the rebuild).
+- **No Anthropic key in the build.** Shipped builds reach Anthropic only through
+  the proxy (`services/proxy`), which holds the real `sk-ant-` key server-side.
+  `Info.plist` has no key field, so there is nothing to extract from an IPA.
 
 **Required secrets (rebuild):** `APPLE_TEAM_ID`, `ASC_API_KEY_ID`,
 `ASC_API_ISSUER_ID`, `ASC_API_KEY_P8`, `APPLE_CERT_P12`, `APPLE_CERT_PASSWORD`,
-`PPQ_API_KEY`. (All verified present in the repo's secrets.)
+`JEFE_APP_SECRET`. **Required variable:** `JEFE_PROXY_URL`.
 
 **One-time steps you may still need before the first real upload:**
 
@@ -142,7 +145,8 @@ on the repository. Add each as a "Repository secret":
 | `ASC_API_KEY_ID` | Key ID from step 2 (e.g., `2X9YPDMS47`). |
 | `ASC_API_ISSUER_ID` | Issuer UUID from step 2. |
 | `ASC_API_KEY_P8` | **Full contents** of the `.p8` file from step 2. Paste the file as text, including the `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` lines. Do not base64-encode. |
-| `PPQ_API_KEY` | The PPQ.ai key that production builds should use. |
+| `JEFE_APP_SECRET` | Shared secret the app presents to the LLM proxy. Must match the `APP_SECRET` set on the Cloudflare worker (`wrangler secret put APP_SECRET`). |
+| `JEFE_PROXY_URL` (a **variable**, not a secret) | The deployed worker URL, e.g. `https://jefe-proxy.damsac-app.workers.dev`. |
 | `STUDIO_ANALYTICS_API_KEY_RELEASE` | `sk_murmur` (the Release-config Studio Analytics key). |
 
 ## 5. Verify
