@@ -149,22 +149,78 @@ struct DocumentSchemaModel: Identifiable, Hashable {
         let matching = schemas.filter { $0.tradeKey == tradeKey || $0.tradeKey == nil }
         return Dictionary(grouping: matching, by: \.kind)
             .compactMap { _, group in
-                // Mirrors the resolver's ORDER BY exactly: a trade-specific
-                // schema beats a universal one for the same kind whatever the
-                // timestamps say, so an operator's own version is never
-                // shadowed by a shared default. Newest breaks the remaining tie.
-                // Trade-specific ranks 1, universal ranks 0, so `max` picks
-                // the specific one. (Getting this backwards made the shared
-                // default win — caught by
-                // `testATradeSpecificSchemaBeatsAUniversalOneOfTheSameKind`.)
-                // Core expresses the same order as `ORDER BY (trade_key IS
-                // NULL) ASC` with LIMIT 1.
-                group.max {
-                    ($0.tradeKey == nil ? 0 : 1, $0.updatedAt)
-                        < ($1.tradeKey == nil ? 0 : 1, $1.updatedAt)
+                // The winner is the FIRST row under core's ORDER BY, term
+                // for term:
+                //
+                //   (trade_key IS NULL) ASC — a trade-specific schema beats a
+                //     universal one for the same kind whatever the timestamps
+                //     say, so an operator's own version is never shadowed by a
+                //     shared default. (Getting this backwards made the shared
+                //     default win — caught by
+                //     `testATradeSpecificSchemaBeatsAUniversalOneOfTheSameKind`.)
+                //   updated_at DESC — newest breaks the remaining tie.
+                //   id ASC — closes the order. Without it a tie (two universal
+                //     rows, same `updatedAt` — the state a device is in the
+                //     moment it duplicates a built-in and has not edited the
+                //     copy) is broken by whichever order the rows happened to
+                //     arrive in, and the mirror can disagree with the resolver
+                //     on the same data.
+                group.min { a, b in
+                    if (a.tradeKey == nil) != (b.tradeKey == nil) { return b.tradeKey == nil }
+                    if a.updatedAt != b.updatedAt { return a.updatedAt > b.updatedAt }
+                    return a.id < b.id
                 }
             }
             .sorted { $0.label < $1.label }
+    }
+
+    /// The stable `kind` derived from an operator-typed name: lowercased, every
+    /// run of non-alphanumerics collapsed to one underscore, no leading or
+    /// trailing underscore.
+    static func slug(_ s: String) -> String {
+        s.lowercased()
+            .map { $0.isLetter || $0.isNumber ? String($0) : "_" }
+            .joined()
+            .split(separator: "_", omittingEmptySubsequences: true)
+            .joined(separator: "_")
+    }
+
+    /// What the Document Builder actually sends to `save_document_schema` when
+    /// the operator saves `draft`, which they opened from `original`.
+    ///
+    /// Only a BUILT-IN is reshaped; an operator's own type saves as-is.
+    ///
+    /// `save` upserts BY ID, so sending a built-in's id back overwrites the
+    /// built-in in place — while the screen promised "saving creates your own
+    /// copy, the default stays available." That was simply false, and it took
+    /// the shipped default with it. Clearing the id makes core mint a new one,
+    /// so the copy is real.
+    ///
+    /// Two things deliberately survive the copy:
+    ///
+    /// 1. **The kind, unless the operator renamed it.** A built-in keeps its
+    ///    kind frozen (that is what `buildDocument` resolves against), but a
+    ///    RENAMED copy is a different document type and must not keep answering
+    ///    to "estimate" — otherwise a button labelled RFP builds an estimate.
+    /// 2. **The source's trade.** #283 stamped the operator's current trade
+    ///    here, to work around a nil-trade copy being unbuildable. Core now
+    ///    treats nil as universal (#306), so the workaround is not only
+    ///    unnecessary but backwards: stamping would pin a copy of the universal
+    ///    Report to one trade, and Isaac's call (2026-07-30) is the opposite —
+    ///    *"They should come in regardless of trade!"* A duplicate of Report
+    ///    stays universal; a duplicate of the landscape Estimate stays
+    ///    landscape. The copy keeps whatever scope the thing it came from had.
+    static func saveShape(
+        of draft: DocumentSchemaModel, editedFrom original: DocumentSchemaModel
+    ) -> DocumentSchemaModel {
+        guard draft.isBuiltin else { return draft }
+        var copy = draft
+        copy.id = ""            // create, don't overwrite the shipped default
+        copy.isBuiltin = false
+        if draft.label != original.label {
+            copy.kind = slug(draft.label)
+        }
+        return copy
     }
 
     init(

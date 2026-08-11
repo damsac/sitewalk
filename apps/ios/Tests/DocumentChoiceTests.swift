@@ -119,6 +119,24 @@ final class DocumentChoiceTests: XCTestCase {
         )
     }
 
+    func testAnExactTieIsBrokenByIdSoThePickerAgreesWithCore() {
+        // Two schemas of equal rank — same trade-ness, same `updatedAt` — must
+        // collapse to the SAME one the resolver picks, whatever order they
+        // arrive in. Core closes its ORDER BY with `id ASC`; this mirrors it.
+        //
+        // Not a synthetic tie: every seeded built-in carries `updatedAt = 0`,
+        // so a device that has duplicated one and not yet edited the copy is in
+        // exactly this state.
+        let a = schema("report", label: "A report", trade: nil, updatedAt: 0, id: "aaa")
+        let z = schema("report", label: "Z report", trade: nil, updatedAt: 0, id: "zzz")
+        for input in [[z, a], [a, z]] {
+            XCTAssertEqual(
+                DocumentSchemaModel.buildable(from: input, tradeKey: "landscape").first?.id, "aaa",
+                "a tie must resolve by lowest id, not by input order"
+            )
+        }
+    }
+
     func testDistinctKindsAreAllKeptAndSortedByLabel() {
         let all = [
             schema("work_order", label: "Work Order", trade: "landscape"),
