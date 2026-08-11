@@ -10,6 +10,7 @@ import {
   issueChallenge,
   mintToken,
   parseAuthenticatorData,
+  saveAttestedKey,
   toBase64Url,
   verifyAssertion,
   verifyAttestation,
@@ -17,6 +18,7 @@ import {
 } from '../src/attest';
 import worker, { attestMode, type Env } from '../src/index';
 import {
+  basicConstraintsExtension,
   buildWorld,
   encodeCbor,
   generateKeyPair,
@@ -28,6 +30,8 @@ import {
 } from './appattest-fixtures';
 
 const APP_SECRET = 'test-app-secret';
+/** The one the app never sees. Distinct from APP_SECRET in every test. */
+const TOKEN_SECRET = 'server-only-token-secret';
 const INSTALL = 'install-abc-123';
 
 let world: AttestWorld;
@@ -282,6 +286,39 @@ describe('verifyAttestation', () => {
       'too_large'
     );
   });
+
+  it('refuses a chain longer than any real one, before parsing a certificate', async () => {
+    // Apple sends two. Without a bound, a hostile client picks the number of
+    // DER parses and ECDSA verifies the worker performs on its behalf.
+    const attestation = await world.attestationFor(CHALLENGE, { padChainTo: 5 });
+    await expectCode(
+      verifyAttestation(attestation, world.keyId, challengeBytes(), config()),
+      'chain_too_long'
+    );
+  });
+
+  it('lets a chain AT the bound through the length gate', async () => {
+    // Four is allowed, so this one gets past the length check and dies later on
+    // the padding's broken issuer/subject linkage instead. That distinction is
+    // the point: it proves `chain_too_long` above is a bound at 4 and not a
+    // blanket refusal of anything the fixture pads.
+    const attestation = await world.attestationFor(CHALLENGE, { padChainTo: 4 });
+    await expectCode(
+      verifyAttestation(attestation, world.keyId, challengeBytes(), config()),
+      'chain_broken'
+    );
+  });
+
+  it('refuses an intermediate that does not claim to be a CA', async () => {
+    // Same key, same name, same valid signature over the leaf — the ONLY
+    // difference is basicConstraints cA. Without the check, any end-entity
+    // certificate Apple ever issued is a usable signer.
+    const attestation = await world.attestationFor(CHALLENGE, { nonCaIntermediate: true });
+    await expectCode(
+      verifyAttestation(attestation, world.keyId, challengeBytes(), config()),
+      'issuer_not_ca'
+    );
+  });
 });
 
 // --------------------------------------------------------------- assertion
@@ -335,51 +372,119 @@ describe('verifyAssertion', () => {
 // ------------------------------------------------------------------ token
 
 describe('attestation token', () => {
+  const KEY_ID = toBase64Url(new Uint8Array(32).fill(3));
+  const OTHER_KEY_ID = toBase64Url(new Uint8Array(32).fill(9));
+
+  /** KV holding one attested key, as enrolment would have left it. */
+  async function kvWithKey(installId = INSTALL, keyId = KEY_ID) {
+    const kv = fakeKv();
+    await saveAttestedKey(kv, keyId, {
+      spki: '',
+      curve: 'P-256',
+      counter: 0,
+      installId,
+      attestedAt: Date.now(),
+    });
+    return kv;
+  }
+
   it('round-trips', async () => {
-    const token = await mintToken(APP_SECRET, INSTALL, 'key-1');
-    expect(await verifyToken(APP_SECRET, token, INSTALL)).toEqual({ ok: true, keyId: 'key-1' });
+    const kv = await kvWithKey();
+    const token = await mintToken(TOKEN_SECRET, INSTALL, KEY_ID);
+    expect(await verifyToken(kv, TOKEN_SECRET, token, INSTALL)).toEqual({
+      ok: true,
+      keyId: KEY_ID,
+    });
   });
 
   it('rejects a token minted under a different secret', async () => {
-    const token = await mintToken('some-other-secret', INSTALL, 'key-1');
-    expect(await verifyToken(APP_SECRET, token, INSTALL)).toEqual({
+    const kv = await kvWithKey();
+    const token = await mintToken('some-other-secret', INSTALL, KEY_ID);
+    expect(await verifyToken(kv, TOKEN_SECRET, token, INSTALL)).toEqual({
       ok: false,
       reason: 'bad_signature',
+    });
+  });
+
+  it('rejects a token signed with the secret that ships in the app', async () => {
+    // The finding this binding exists for. APP_SECRET is extractable from any
+    // IPA, so a token signed with it is a token anyone can mint — and it would
+    // have sailed through, making every attestation check above unreachable.
+    const kv = await kvWithKey();
+    const token = await mintToken(APP_SECRET, INSTALL, KEY_ID);
+    expect(await verifyToken(kv, TOKEN_SECRET, token, INSTALL)).toEqual({
+      ok: false,
+      reason: 'bad_signature',
+    });
+  });
+
+  it('rejects a token naming a key that was never attested', async () => {
+    // Correctly signed, correct install, correct expiry — and `k` names
+    // nothing. Before the lookup this was a valid token.
+    const kv = await kvWithKey();
+    const token = await mintToken(TOKEN_SECRET, INSTALL, OTHER_KEY_ID);
+    expect(await verifyToken(kv, TOKEN_SECRET, token, INSTALL)).toEqual({
+      ok: false,
+      reason: 'unknown_key',
+    });
+  });
+
+  it('rejects a token whose key was attested by a different install', async () => {
+    const kv = await kvWithKey('some-other-install');
+    const token = await mintToken(TOKEN_SECRET, INSTALL, KEY_ID);
+    expect(await verifyToken(kv, TOKEN_SECRET, token, INSTALL)).toEqual({
+      ok: false,
+      reason: 'key_install_mismatch',
     });
   });
 
   it('rejects a tampered payload', async () => {
-    const token = await mintToken(APP_SECRET, INSTALL, 'key-1');
+    const kv = await kvWithKey();
+    const token = await mintToken(TOKEN_SECRET, INSTALL, KEY_ID);
     const parts = token.split('.');
     const forged = toBase64Url(
-      new TextEncoder().encode(JSON.stringify({ i: 'someone-else', k: 'x', e: 2 ** 40 }))
+      new TextEncoder().encode(JSON.stringify({ i: 'someone-else', k: KEY_ID, e: 2 ** 40 }))
     );
-    expect(await verifyToken(APP_SECRET, `jat.${forged}.${parts[2]}`, 'someone-else')).toEqual({
-      ok: false,
-      reason: 'bad_signature',
-    });
+    expect(await verifyToken(kv, TOKEN_SECRET, `jat.${forged}.${parts[2]}`, 'someone-else')).toEqual(
+      { ok: false, reason: 'bad_signature' }
+    );
   });
 
   it('rejects an expired token', async () => {
-    const token = await mintToken(APP_SECRET, INSTALL, 'key-1', new Date(Date.now() - 7200_000));
-    expect(await verifyToken(APP_SECRET, token, INSTALL)).toEqual({ ok: false, reason: 'expired' });
+    const kv = await kvWithKey();
+    const token = await mintToken(TOKEN_SECRET, INSTALL, KEY_ID, new Date(Date.now() - 7200_000));
+    expect(await verifyToken(kv, TOKEN_SECRET, token, INSTALL)).toEqual({
+      ok: false,
+      reason: 'expired',
+    });
   });
 
   it('refuses a valid token presented by another install', async () => {
     // Without this, one attested device could mint tokens and hand them to
     // every other install id, spreading its spend across everyone's caps.
-    const token = await mintToken(APP_SECRET, INSTALL, 'key-1');
-    expect(await verifyToken(APP_SECRET, token, 'different-install')).toEqual({
+    const kv = await kvWithKey();
+    const token = await mintToken(TOKEN_SECRET, INSTALL, KEY_ID);
+    expect(await verifyToken(kv, TOKEN_SECRET, token, 'different-install')).toEqual({
       ok: false,
       reason: 'wrong_install',
     });
   });
 
   it('rejects structurally broken tokens without throwing', async () => {
+    const kv = await kvWithKey();
     for (const bad of ['', 'nope', 'jat.only-two', 'jat.a.b.c', 'xxx.a.b', 'jat.!!!.###']) {
-      const result = await verifyToken(APP_SECRET, bad, INSTALL);
+      const result = await verifyToken(kv, TOKEN_SECRET, bad, INSTALL);
       expect(result.ok, bad).toBe(false);
     }
+  });
+
+  it('never touches KV for a token it cannot authenticate', async () => {
+    // Order matters: the MAC gates the lookup, so an unauthenticated caller
+    // cannot use token verification to probe or hammer the keyspace.
+    const kv = (await kvWithKey()) as KVNamespace & { store: Map<string, string> };
+    const gets = (kv.get as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    await verifyToken(kv, TOKEN_SECRET, await mintToken(APP_SECRET, INSTALL, KEY_ID), INSTALL);
+    expect((kv.get as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(gets);
   });
 });
 
@@ -457,6 +562,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     UPSTREAM_BASE_URL: 'https://upstream.test',
     APP_ATTEST_APP_ID: TEST_APP_ID,
     APP_ATTEST_ROOT_CA: world.rootPem,
+    ATTEST_TOKEN_SECRET: TOKEN_SECRET,
     ...overrides,
   } as Env;
 }
@@ -492,6 +598,35 @@ describe('attest mode parsing', () => {
     expect(attestMode({ ATTEST_MODE: 'enfroce' } as Env)).toBe('off');
     expect(attestMode({ ATTEST_MODE: ' Monitor ' } as Env)).toBe('monitor');
     expect(attestMode({ ATTEST_MODE: 'enforce' } as Env)).toBe('enforce');
+  });
+
+  it('says so out loud when it does not recognise the value', () => {
+    // `off` is also what a CORRECT deployment looks like, so falling back
+    // silently means a typo is indistinguishable from working config.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(attestMode({ ATTEST_MODE: 'enfroce' } as Env)).toBe('off');
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = JSON.parse(String(warn.mock.calls[0]?.[0])) as Record<string, unknown>;
+      expect(logged.event).toBe('attest_mode_unrecognised');
+      expect(logged.value).toBe('enfroce');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('stays quiet for the three real modes and for no value at all', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const mode of ['off', 'monitor', 'enforce', ' Monitor ']) {
+        attestMode({ ATTEST_MODE: mode } as Env);
+      }
+      attestMode({} as Env);
+      attestMode({ ATTEST_MODE: '  ' } as Env);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -583,6 +718,67 @@ describe('worker attestation flow', () => {
     const env = makeEnv({ ATTEST_MODE: 'enforce', APP_ATTEST_ROOT_CA: undefined });
     const res = await worker.fetch(messagesRequest(`jefe.${INSTALL}.${APP_SECRET}`), env, ctx);
     expect(res.status).toBe(500);
+  });
+
+  it('fails closed when the token-signing secret is missing', async () => {
+    const env = makeEnv({ ATTEST_MODE: 'enforce', ATTEST_TOKEN_SECRET: undefined });
+    const res = await worker.fetch(messagesRequest(`jefe.${INSTALL}.${APP_SECRET}`), env, ctx);
+    expect(res.status).toBe(500);
+  });
+
+  it('fails closed when the token secret is the secret the app already holds', async () => {
+    // Configured, complete, and worthless: signing the token with a value that
+    // ships in the IPA means anyone can mint one. Refuse to run rather than
+    // pretend to check.
+    const env = makeEnv({ ATTEST_MODE: 'enforce', ATTEST_TOKEN_SECRET: APP_SECRET });
+    const res = await worker.fetch(messagesRequest(`jefe.${INSTALL}.${APP_SECRET}`), env, ctx);
+    expect(res.status).toBe(500);
+    const enrolment = await worker.fetch(attestRequest('/v1/attest/challenge', {}), env, ctx);
+    expect(enrolment.status).toBe(503);
+  });
+
+  it('refuses a token forged with the app secret', async () => {
+    // The whole finding, end to end: an attacker with the extracted IPA secret
+    // mints a well-formed token for an install id of their choosing and names
+    // a key that WAS genuinely attested. It must not be enough.
+    const env = makeEnv({ ATTEST_MODE: 'enforce' });
+    await enrol(env);
+    const forged = await mintToken(APP_SECRET, INSTALL, toBase64Url(world.keyId));
+    const res = await worker.fetch(
+      messagesRequest(`jefeA.${INSTALL}.${forged}~${APP_SECRET}`),
+      env,
+      ctx
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses a token naming a key that was never attested', async () => {
+    // Minted with the REAL signing secret — so this is what a compromised
+    // server-side minting path or a stale token looks like — but `k` points at
+    // nothing, which is what makes the attestation load-bearing.
+    const env = makeEnv({ ATTEST_MODE: 'enforce' });
+    await enrol(env);
+    const unattested = toBase64Url(new Uint8Array(32).fill(1));
+    const token = await mintToken(TOKEN_SECRET, INSTALL, unattested);
+    const res = await worker.fetch(
+      messagesRequest(`jefeA.${INSTALL}.${token}~${APP_SECRET}`),
+      env,
+      ctx
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses a token for a key another install attested', async () => {
+    const env = makeEnv({ ATTEST_MODE: 'enforce' });
+    await enrol(env); // key belongs to INSTALL
+    const keyId = toBase64Url(world.keyId);
+    const token = await mintToken(TOKEN_SECRET, 'squatter-install', keyId);
+    const res = await worker.fetch(
+      messagesRequest(`jefeA.squatter-install.${token}~${APP_SECRET}`),
+      env,
+      ctx
+    );
+    expect(res.status).toBe(401);
   });
 
   it('refuses a token minted for a different install', async () => {

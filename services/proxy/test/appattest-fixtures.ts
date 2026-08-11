@@ -93,6 +93,23 @@ function bitString(body: Uint8Array): Uint8Array {
   return tlv(0x03, cat(Uint8Array.of(0), body));
 }
 
+/** DER BOOLEAN. TRUE is 0xFF and nothing else. */
+function boolean(value: boolean): Uint8Array {
+  return tlv(0x01, Uint8Array.of(value ? 0xff : 0x00));
+}
+
+/**
+ * `basicConstraints` as an extension pair, ready for `CertOptions.extensions`.
+ *
+ * `cA` is DEFAULT FALSE, so a real encoder omits it when false — which is why
+ * `basicConstraintsExtension(false)` produces an EMPTY SEQUENCE rather than an
+ * explicit FALSE. That is the shape a non-CA certificate actually has, and it
+ * is what the verifier has to read as "not a CA".
+ */
+export function basicConstraintsExtension(isCa: boolean): [string, Uint8Array] {
+  return ['2.5.29.19', isCa ? seq(boolean(true)) : seq()];
+}
+
 function utcTime(date: Date): Uint8Array {
   const pad = (n: number) => String(n).padStart(2, '0');
   const text =
@@ -272,7 +289,8 @@ export async function sha256(...parts: Uint8Array[]): Promise<Uint8Array> {
 
 // -------------------------------------------------------------- the world
 
-export const TEST_APP_ID = 'ABCDE12345.com.isaacwm.sitewalk';
+/** A synthetic team id on the real bundle id. See wrangler.toml for the real one. */
+export const TEST_APP_ID = 'ABCDE12345.com.isaacwm.murmur';
 
 export interface AttestWorld {
   rootPem: string;
@@ -292,6 +310,10 @@ export interface AttestWorld {
       /** Put a different nonce in the certificate extension. */
       nonce?: Uint8Array;
       notAfter?: Date;
+      /** Issue the leaf from an intermediate that does not claim to be a CA. */
+      nonCaIntermediate?: boolean;
+      /** Pad `x5c` out to this many entries, to test the length bound. */
+      padChainTo?: number;
     }
   ): Promise<Uint8Array>;
   /** Builds an assertion signed by the device key. */
@@ -309,23 +331,38 @@ export async function buildWorld(): Promise<AttestWorld> {
   const deviceKey = await generateKeyPair('P-256');
   const keyId = await sha256(deviceKey.point);
 
+  // Every CA here carries basicConstraints cA:TRUE, because Apple's real ones
+  // do and because the verifier now requires it of anything that signs.
   const rootDer = await makeCertificate({
     subject: 'Test App Attest Root',
     issuer: 'Test App Attest Root',
     subjectKey: root,
     issuerKey: root,
+    extensions: [basicConstraintsExtension(true)],
   });
   const intermediateDer = await makeCertificate({
     subject: 'Test App Attest CA 1',
     issuer: 'Test App Attest Root',
     subjectKey: intermediate,
     issuerKey: root,
+    extensions: [basicConstraintsExtension(true)],
   });
   const rogueIntermediateDer = await makeCertificate({
     subject: 'Test App Attest CA 1',
     issuer: 'Test App Attest Root',
     subjectKey: rogueRoot,
     issuerKey: rogueRoot,
+    extensions: [basicConstraintsExtension(true)],
+  });
+  // Correctly signed by the root and correctly named, but claiming to be an
+  // end-entity certificate. Only the cA flag separates it from the real one.
+  const nonCaIntermediateDer = await makeCertificate({
+    subject: 'Test App Attest CA 1',
+    issuer: 'Test App Attest Root',
+    subjectKey: intermediate,
+    issuerKey: root,
+    serial: 2,
+    extensions: [basicConstraintsExtension(false)],
   });
 
   return {
@@ -357,10 +394,18 @@ export async function buildWorld(): Promise<AttestWorld> {
         notAfter: overrides.notAfter,
       });
 
+      const issuerDer = overrides.rogueIssuer
+        ? rogueIntermediateDer
+        : overrides.nonCaIntermediate
+          ? nonCaIntermediateDer
+          : intermediateDer;
+      const x5c: Uint8Array[] = [leafDer, issuerDer];
+      while (x5c.length < (overrides.padChainTo ?? 0)) x5c.push(intermediateDer);
+
       return encodeCbor({
         fmt: 'apple-appattest',
         attStmt: {
-          x5c: [leafDer, overrides.rogueIssuer ? rogueIntermediateDer : intermediateDer],
+          x5c,
           receipt: new Uint8Array([1, 2, 3]),
         },
         authData,

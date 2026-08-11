@@ -80,6 +80,27 @@ jefeA.<installId>.<attestToken>~<appSecret>      # Phase 2
 The app secret is still checked on attested credentials. Attestation adds a
 layer; it does not remove the one underneath.
 
+### What makes the token mean anything
+
+The token is `jat.<payload>.<mac>`; the payload names the install `i`, the
+attested key `k`, and an expiry `e`. Two properties carry all of its weight, and
+without either one the entire attestation path above is decorative:
+
+1. **It is signed with `ATTEST_TOKEN_SECRET`, which the app never sees.** Not
+   `APP_SECRET` — that ships inside the IPA, so signing with it would mean
+   anyone who unzipped a build could mint a token that verified, without ever
+   touching the Secure Enclave. A secret the client holds cannot certify
+   anything about the client. The worker refuses to run attestation at all if
+   `ATTEST_TOKEN_SECRET` is missing or equal to `APP_SECRET`.
+2. **`k` is looked up.** The MAC proves `k` is the key id the worker itself
+   wrote, but a name nobody resolves is not a binding. `verifyToken` loads that
+   key from KV and refuses a token naming a key that was never attested
+   (`unknown_key`) or that a different install attested (`key_install_mismatch`).
+   That lookup is the only thing connecting a `/v1/messages` request back to a
+   hardware key Apple's certificate chain vouched for — which is why
+   `verifyToken` takes the KV namespace as an argument rather than leaving the
+   check to its caller.
+
 ### Rolling it out
 
 Move one notch at a time, and never skip `monitor`:
@@ -95,9 +116,21 @@ Move one notch at a time, and never skip `monitor`:
 builds carrying the device half roll out. Going straight to `enforce` bricks
 every already-installed build the moment it lands, testers included.
 
+Before `ATTEST_MODE` can leave `off`, all four of these must be true:
+
+| | |
+|---|---|
+| `APP_ATTEST_APP_ID` set | `98GXNZ6NKZ.com.isaacwm.murmur` — team id and the shipped bundle id. Anything else is `app_id_mismatch` on every attestation |
+| `APP_ATTEST_ROOT_CA` set | Apple's App Attest root, PEM |
+| `ATTEST_TOKEN_SECRET` set | A fresh random string. **Never** the same value as `APP_SECRET`, and never given to the app |
+| A real-device `monitor` soak | The verifier has never seen a genuine Apple certificate chain. The tests build a synthetic one — see **Tests** |
+
 Anything unrecognised in `ATTEST_MODE` means `off`, so a typo cannot lock the
-fleet out. But `monitor`/`enforce` with missing config is a hard 500 — asking
-for enforcement and quietly getting none is worse than a visibly failed deploy.
+fleet out — but it is logged as `attest_mode_unrecognised`, because `off` is
+also what a correct deployment looks like and a silent fallback would leave a
+misspelled `enfroce` indistinguishable from working config. `monitor`/`enforce`
+with missing config is a hard 500 — asking for enforcement and quietly getting
+none is worse than a visibly failed deploy.
 
 ### What is deliberately not implemented
 
@@ -203,9 +236,9 @@ with exactly these permissions:
 | Account → **Workers KV Storage** | **Edit** | The `METER` namespace binding in `wrangler.toml` — a deploy that binds KV is refused without it |
 
 Nothing broader is needed. In particular the token grants no access to the
-worker's *secrets*: `ANTHROPIC_API_KEY` and `APP_SECRET` are set once by hand
-(below) and `wrangler deploy` leaves them untouched, so CI never handles the
-Anthropic key. That is the whole point of the service, and it survives the
+worker's *secrets*: `ANTHROPIC_API_KEY`, `APP_SECRET`, and `ATTEST_TOKEN_SECRET`
+are set once by hand (below) and `wrangler deploy` leaves them untouched, so CI
+never handles the Anthropic key. That is the whole point of the service, and it survives the
 move to CI.
 
 ### Post-deploy smoke check
@@ -300,9 +333,13 @@ npm install
 #    into wrangler.toml (replacing REPLACE_ME).
 npx wrangler kv namespace create METER
 
-# 2. Set the two secrets. Neither is committed.
+# 2. Set the secrets. None are committed.
 npx wrangler secret put ANTHROPIC_API_KEY   # the real sk-ant-… key
 npx wrangler secret put APP_SECRET          # a fresh random string; also goes in the iOS build
+# Only needed before ATTEST_MODE leaves `off`. A DIFFERENT random string —
+# the app must never see it, and the worker refuses to run attestation if it
+# equals APP_SECRET.
+npx wrangler secret put ATTEST_TOKEN_SECRET
 
 # 3. Ship it.
 npx wrangler deploy
@@ -386,8 +423,11 @@ prove one happy path, and every negative test against it degenerates into
 "garbage in, error out", which a verifier that rejects everything would also
 pass.
 
-What the synthetic chain cannot prove is that we accept **Apple's** real root.
-That is the residual risk, and the reason the rollout starts in `monitor`.
+What the synthetic chain cannot prove is that we accept **Apple's** real root —
+including the two strictness choices that are asserted only against our own
+certificates: that every issuing certificate carries `basicConstraints` with
+`cA` TRUE, and that `x5c` is at most four entries (Apple sends two). That is the
+residual risk, and it is the whole reason the rollout starts in `monitor`.
 
 These run in CI. `.github/workflows/proxy.yml` runs `npm ci`, `npm run
 typecheck`, and `npm test` on every pull request that touches

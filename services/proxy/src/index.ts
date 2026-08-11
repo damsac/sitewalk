@@ -68,6 +68,13 @@ export interface Env {
   APP_ATTEST_ROOT_CA?: string;
   /** `"true"` to also accept development attestations. Never in production. */
   APP_ATTEST_ALLOW_DEVELOPMENT?: string;
+  /**
+   * Secret. HMAC key for attestation tokens — and, unlike `APP_SECRET`, it is
+   * NEVER shared with the app. That asymmetry is the whole point: a token
+   * signed with a secret the client holds proves nothing the client could not
+   * have claimed for itself. Required before `ATTEST_MODE` may leave `off`.
+   */
+  ATTEST_TOKEN_SECRET?: string;
 }
 
 const DEFAULT_DAILY_CAP_USD = 25;
@@ -152,25 +159,64 @@ async function addSpend(kv: KVNamespace, key: string, delta: number): Promise<vo
 
 export function attestMode(env: Env): AttestMode {
   const raw = env.ATTEST_MODE?.trim().toLowerCase();
-  if (raw === 'monitor' || raw === 'enforce') return raw;
+  if (raw === 'monitor' || raw === 'enforce' || raw === 'off') return raw;
   // Anything else — unset, a typo, an empty string — is `off`. A misspelled
   // mode must not fail into rejecting every request in the field.
+  //
+  // But it must not be SILENT either. `off` is also what a correct deployment
+  // looks like, so an operator who typed `enfroce` sees a service behaving
+  // exactly as they configured it, forever. Truncated because it is echoed
+  // into a log line; it is operator config, not caller input, so there is no
+  // privacy question here — no request body is involved.
+  if (raw !== undefined && raw !== '') {
+    console.warn(
+      JSON.stringify({ event: 'attest_mode_unrecognised', value: raw.slice(0, 32), using: 'off' }),
+    );
+  }
   return 'off';
 }
 
+interface AttestSetup {
+  appId: string;
+  rootCaPem: string;
+  allowDevelopment: boolean;
+  /** Server-only HMAC key. Never `APP_SECRET` — see below. */
+  tokenSecret: string;
+}
+
 /**
- * The attestation config, or `null` if it is incomplete.
+ * The attestation config, or the name of the first thing wrong with it.
+ *
+ * One function rather than a boolean and a message, so the two can never
+ * disagree about what "configured" means. The reason is carried because "the
+ * proxy is not configured" is a fine thing to tell a caller and a useless thing
+ * to tell the operator who has to fix it.
  *
  * Incomplete config in `enforce` mode is a hard 500 at the call site rather
  * than a silent downgrade: an operator who asked for enforcement and quietly
  * got none is strictly worse off than one whose deploy visibly fails.
  */
-function attestConfig(env: Env) {
-  if (!env.APP_ATTEST_APP_ID || !env.APP_ATTEST_ROOT_CA) return null;
+function attestSetup(env: Env): { ok: true; config: AttestSetup } | { ok: false; problem: string } {
+  const appId = env.APP_ATTEST_APP_ID;
+  const rootCaPem = env.APP_ATTEST_ROOT_CA;
+  const tokenSecret = env.ATTEST_TOKEN_SECRET;
+  if (!appId) return { ok: false, problem: 'missing_app_attest_app_id' };
+  if (!rootCaPem) return { ok: false, problem: 'missing_app_attest_root_ca' };
+  if (!tokenSecret) return { ok: false, problem: 'missing_attest_token_secret' };
+  // Setting them equal is the exact failure this binding exists to prevent, and
+  // it is one copy-paste away. Fail closed rather than quietly restoring a
+  // token that anyone holding the IPA can mint.
+  if (tokenSecret === env.APP_SECRET) {
+    return { ok: false, problem: 'attest_token_secret_equals_app_secret' };
+  }
   return {
-    appId: env.APP_ATTEST_APP_ID,
-    rootCaPem: env.APP_ATTEST_ROOT_CA,
-    allowDevelopment: env.APP_ATTEST_ALLOW_DEVELOPMENT === 'true',
+    ok: true,
+    config: {
+      appId,
+      rootCaPem,
+      allowDevelopment: env.APP_ATTEST_ALLOW_DEVELOPMENT === 'true',
+      tokenSecret,
+    },
   };
 }
 
@@ -208,10 +254,12 @@ async function handleAttestRoute(
   env: Env,
   installId: string
 ): Promise<Response> {
-  const config = attestConfig(env);
-  if (!config) {
+  const setup = attestSetup(env);
+  if (!setup.ok) {
+    console.error(JSON.stringify({ event: 'attest_misconfigured', problem: setup.problem }));
     return errorResponse(503, 'api_error', 'attestation is not configured on this deployment');
   }
+  const config = setup.config;
 
   try {
     if (path === '/v1/attest/challenge') {
@@ -272,7 +320,9 @@ async function handleAttestRoute(
       );
       await saveAttestedKey(env.METER, keyId, { ...stored, counter });
 
-      const token = await mintToken(env.APP_SECRET, installId, keyId);
+      // Signed with the server-only secret, NOT `APP_SECRET`. A token the
+      // client could have minted for itself certifies nothing.
+      const token = await mintToken(config.tokenSecret, installId, keyId);
       return json(200, { token, expires_in: TOKEN_TTL_SECONDS });
     }
 
@@ -330,14 +380,19 @@ export default {
 
     const mode = attestMode(env);
     if (mode !== 'off') {
-      if (!attestConfig(env)) {
+      const setup = attestSetup(env);
+      if (!setup.ok) {
         // Asked to enforce, unable to. Fail closed and loudly rather than
         // serving traffic an operator believes is being checked.
-        console.error(JSON.stringify({ event: 'attest_misconfigured', mode }));
+        console.error(
+          JSON.stringify({ event: 'attest_misconfigured', mode, problem: setup.problem }),
+        );
         return errorResponse(500, 'api_error', 'proxy is not configured');
       }
+      // `env.METER` is passed because verifying a token means looking up the
+      // attested key it names — the check that makes the token mean anything.
       const result = attestToken
-        ? await verifyToken(env.APP_SECRET, attestToken, installId)
+        ? await verifyToken(env.METER, setup.config.tokenSecret, attestToken, installId)
         : ({ ok: false, reason: 'malformed' } as const);
 
       if (!result.ok) {
