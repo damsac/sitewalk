@@ -4,6 +4,13 @@
 **Branch:** `dam`
 **Auditor:** Claude (automated)
 
+> **HISTORICAL — Era-I snapshot.** Section 2 ("API Key Injection") and blocking
+> item 2 describe the `PPQ_API_KEY` → `Info.plist` chain and `APIKeyProvider.swift`,
+> neither of which exists any more. **Closed:** shipped builds now reach Anthropic
+> only through the Cloudflare proxy (`services/proxy`), and `Info.plist` carries no
+> Anthropic key field, so there is nothing to extract from an IPA. Kept as a record
+> of what the audit found at the time.
+
 ---
 
 ## 1. Signing Configuration

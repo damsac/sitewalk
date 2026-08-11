@@ -14,7 +14,7 @@
  */
 
 import { authenticate, type AuthFailure } from './auth';
-import { costUsd, type Usage } from './pricing';
+import { ALLOWED_MODELS_FOR_MESSAGE, costUsd, isAllowedModel, type Usage } from './pricing';
 import {
   AttestError,
   CHALLENGE_TTL_SECONDS,
@@ -53,9 +53,9 @@ export interface Env {
   APP_SECRET: string;
   /** KV namespace holding daily spend counters. */
   METER: KVNamespace;
-  /** Whole-service daily ceiling in USD. */
+  /** Whole-service daily ceiling in USD. `"0"` is the emergency kill switch. */
   DAILY_SPEND_CAP_USD?: string;
-  /** Per-install daily ceiling in USD. */
+  /** Per-install daily ceiling in USD. `"0"` blocks every install. */
   PER_INSTALL_DAILY_CAP_USD?: string;
   /** Override for tests / staging. Defaults to Anthropic. */
   UPSTREAM_BASE_URL?: string;
@@ -101,11 +101,33 @@ export function dayKey(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
+/**
+ * Parses a configured cap. An explicit `0` MEANS ZERO.
+ *
+ * Setting `DAILY_SPEND_CAP_USD = "0"` in wrangler.toml is the obvious move
+ * during an incident, and it has to actually stop the service. The old
+ * `parsed > 0` test silently turned that into the $25 default — a kill switch
+ * that failed OPEN. Zero is a legitimate configured value, not garbage.
+ *
+ * Everything that is NOT a non-negative finite number still falls back:
+ * unset, empty/whitespace (`Number('')` is 0, which would be an accidental
+ * kill switch from a stray `= ""`), a typo, or a negative.
+ */
 function num(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+/**
+ * Reads a spend counter.
+ *
+ * The `> 0` test here is deliberately NOT the same bug as `num` above: this
+ * function's fallback IS zero, so a stored "0" and a rejected "0" produce the
+ * same answer. What the test buys is clamping a negative or corrupt value to
+ * zero — and for a SPEND counter that is the fail-closed direction, since a
+ * negative would manufacture headroom under the cap. Leave it alone.
+ */
 async function readSpend(kv: KVNamespace, key: string): Promise<number> {
   const raw = await kv.get(key);
   const parsed = Number(raw);
@@ -368,16 +390,66 @@ export default {
       );
     }
 
-    // Read the body once, as text. We need `model` for pricing, and the body
-    // must be forwarded byte-identically — re-serializing parsed JSON could
-    // reorder keys and would break prompt-cache prefix matching upstream.
+    // Read the body once, as text. We inspect `model` and `stream`, but the
+    // body must be forwarded byte-identically — re-serializing parsed JSON
+    // could reorder keys and would break prompt-cache prefix matching upstream.
+    // So: parse to VALIDATE, forward the original text.
+    //
+    // BODY WORK STAYS BEHIND AUTH — deliberate, and load-bearing for the two
+    // validations below. Moving them ahead of `authenticate` would let a
+    // post-deploy smoke check probe them without a credential, which was
+    // proposed; it was declined because the same proof is available by giving
+    // the probe a credential (CI already holds JEFE_APP_SECRET, which must
+    // equal APP_SECRET or every shipped build would 401). The costs of moving
+    // them are real: `/v1/messages` has no body size cap, so an unauthenticated
+    // caller could force text()+JSON.parse at will where today it costs one
+    // header compare; the model rejection below names the allowlist, which is
+    // not something to hand an unauthenticated scanner; and every other body
+    // read in this file (readJsonBody, attest routes) is already post-auth and
+    // size-capped. Keep new body-dependent checks below this line.
     const bodyText = await request.text();
     let model = 'unknown';
+    let stream: unknown;
     try {
-      const parsed = JSON.parse(bodyText) as { model?: unknown };
+      const parsed = JSON.parse(bodyText) as { model?: unknown; stream?: unknown };
       if (typeof parsed.model === 'string') model = parsed.model;
+      stream = parsed.stream;
     } catch {
       return errorResponse(400, 'invalid_request_error', 'body is not valid JSON');
+    }
+
+    // Streaming is a complete metering bypass, so it is refused outright.
+    // An SSE response comes back 200 with a body that is not JSON; the pricing
+    // path below would throw, log `unpriceable_response`, and return the
+    // response having called `addSpend` exactly zero times. Both daily counters
+    // would stay at 0 forever and every subsequent request would sail past the
+    // cap check. Nothing in crates/harness/src/providers/ ever sets `stream`
+    // (AnthropicProvider::complete builds model/max_tokens/system/messages/
+    // tools, plus optional tool_choice and cache_control), so refusing it costs
+    // the app nothing. Metering streamed responses means parsing the SSE
+    // `message_delta` usage frame — a real feature, not a patch.
+    if (stream === true) {
+      return errorResponse(
+        400,
+        'invalid_request_error',
+        'streaming responses are not supported by this proxy; omit "stream" or set it to false',
+      );
+    }
+
+    // The body is forwarded verbatim, so `model` is attacker-chosen. Anything
+    // the app does not actually send is refused rather than metered against a
+    // rate we may have guessed wrong. See pricing.ts for how the list was
+    // derived and why this is an allowlist and not a larger fallback number.
+    if (!isAllowedModel(model)) {
+      // Truncated: `model` is attacker-supplied and otherwise unbounded, and it
+      // goes into both a log line and a response body.
+      const shown = model.slice(0, 64);
+      console.warn(JSON.stringify({ event: 'model_rejected', installId, model: shown }));
+      return errorResponse(
+        400,
+        'invalid_request_error',
+        `model "${shown}" is not permitted by this proxy; allowed: ${ALLOWED_MODELS_FOR_MESSAGE}`,
+      );
     }
 
     let upstream: Response;

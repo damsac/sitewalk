@@ -115,7 +115,7 @@ jobs:
 
       # Demo path only: base project.yml has no MurmurCoreFFI dependency, so
       # `#if canImport(MurmurCoreFFI)` is false and real-core code compiles out.
-      # No FFI xcframework, no PPQ_API_KEY, no signing. Verified locally: BUILD SUCCEEDED.
+      # No FFI xcframework, no credentials, no signing. Verified locally: BUILD SUCCEEDED.
       - name: Generate demo Xcode project
         working-directory: apps/ios
         run: xcodegen generate

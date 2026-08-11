@@ -135,9 +135,12 @@ private struct ResolvedCredential {
 
 /// Prefers the proxy; falls back to a direct key for local development.
 ///
-/// An env var beats Info.plist for both, so a simulator run can be pointed at
-/// a staging proxy (or a personal key) without regenerating the project — the
-/// pre-existing `ANTHROPIC_BASE_URL` override behavior, generalized.
+/// An env var beats Info.plist for the proxy pair and the base URL, so a
+/// simulator run can be pointed at a staging proxy without regenerating the
+/// project — the pre-existing `ANTHROPIC_BASE_URL` override behavior,
+/// generalized. The direct key is env-var-ONLY: nothing reads an Anthropic
+/// key out of Info.plist any more, because a shipped build must not contain
+/// one (see the `ANTHROPIC_API_KEY` branch below).
 private func resolveCredential() -> ResolvedCredential? {
     func plist(_ key: String) -> String? {
         (Bundle.main.object(forInfoDictionaryKey: key) as? String)
@@ -160,10 +163,16 @@ private func resolveCredential() -> ResolvedCredential? {
         )
     }
 
-    // 2. Direct key (local dev). PPQ_API_KEY is the historical Info.plist name;
-    //    the key and the base URL are a MATCHED PAIR (a PPQ key only works
-    //    against PPQ's host, a direct sk-ant- key only against Anthropic's).
-    if let apiKey = env("ANTHROPIC_API_KEY") ?? plist("PPQ_API_KEY") {
+    // 2. Direct key (local dev only) — ENVIRONMENT VARIABLE ONLY.
+    //    There is deliberately no Info.plist fallback here: a key baked into
+    //    Info.plist is extractable from any downloaded IPA, which is the whole
+    //    reason the proxy exists. An env var reaches a simulator run (scheme
+    //    env vars, or SIMCTL_CHILD_ANTHROPIC_API_KEY with `simctl launch`) and
+    //    never survives into a distributed build.
+    //    The key and the base URL are a MATCHED PAIR (a PPQ key only works
+    //    against PPQ's host, a direct sk-ant- key only against Anthropic's),
+    //    so ANTHROPIC_BASE_URL still resolves from env or Info.plist.
+    if let apiKey = env("ANTHROPIC_API_KEY") {
         return ResolvedCredential(
             apiKey: apiKey,
             baseURL: env("ANTHROPIC_BASE_URL") ?? plist("ANTHROPIC_BASE_URL"),
@@ -183,13 +192,15 @@ func resolveEngine(demo: Bool) -> WalkEngine? {
     #if canImport(MurmurCoreFFI)
     // Two ways to reach the model, tried in this order:
     //
-    //   1. THE PROXY (what ships). `JEFE_PROXY_URL` + `JEFE_APP_SECRET` in
-    //      Info.plist. The real sk-ant- key lives in Cloudflare and never
-    //      enters a build, which is the whole point — a key baked into
-    //      Info.plist is extractable from any downloaded IPA.
-    //   2. A DIRECT KEY (local dev only). The pre-proxy path, kept so dam and
-    //      anyone else can run real-core against a personal key without
-    //      standing up a proxy.
+    //   1. THE PROXY (the only path a shipped build has). `JEFE_PROXY_URL` +
+    //      `JEFE_APP_SECRET` in Info.plist. The real sk-ant- key lives in
+    //      Cloudflare and never enters a build, which is the whole point — a
+    //      key baked into Info.plist is extractable from any downloaded IPA.
+    //   2. A DIRECT KEY (local dev only), from the `ANTHROPIC_API_KEY`
+    //      ENVIRONMENT VARIABLE. Kept so dam and anyone else can run real-core
+    //      against a personal key without standing up a proxy. An env var
+    //      cannot ride along in a distributed build, so this path is
+    //      structurally unreachable in an IPA.
     //
     // Neither configured -> demo (D10), unchanged.
     //

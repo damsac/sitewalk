@@ -1,7 +1,11 @@
 # TestFlight Release Pipeline — Design
 
 **Date:** 2026-04-28
-**Status:** Approved
+**Status:** Approved — **amended:** the `PPQ_API_KEY` secret described below is
+gone. Shipped builds reach Anthropic only through the Cloudflare proxy
+(`services/proxy`); CI injects `JEFE_PROXY_URL` + `JEFE_APP_SECRET` and no
+Anthropic key enters the build. See `meta/TESTFLIGHT_CI_SETUP.md` for the
+current secret list.
 **Replaces:** scaffold in PR #126 (`pr/dam/ci-archive`)
 
 ## Goal

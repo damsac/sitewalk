@@ -116,11 +116,49 @@ optional, and half-shipping it would be worse than not shipping it.
    both values into that one field keeps this a config change, not an FFI one.
 3. Refuses **before forwarding** if the global or per-install daily USD cap is
    already reached.
-4. Swaps the caller's credential for the real key and forwards the body
+4. Validates the body: rejects `stream: true` and any model outside the
+   allowlist, both with a 400. See **Request validation** below.
+5. Swaps the caller's credential for the real key and forwards the body
    **byte-identically** — re-serializing could reorder JSON keys and break
-   upstream prompt-cache prefix matching.
-5. Meters actual spend from the response's own `usage`, pricing the three input
+   upstream prompt-cache prefix matching. The body is parsed only to *validate*;
+   the original text is what gets forwarded.
+6. Meters actual spend from the response's own `usage`, pricing the three input
    classes separately (full / ~1.25x cache write / ~0.1x cache read).
+
+### Request validation
+
+Two checks, both of which exist because everything that reaches metering has to
+be meterable, and the body is attacker-controlled.
+
+**`stream: true` is refused.** A streamed response is a 200 whose body is SSE,
+not JSON. The metering path would fail to parse it, log `unpriceable_response`,
+and return the response having called `addSpend` zero times — so both daily
+counters would stay at 0 forever and every later request would pass the cap
+check. That is a complete, silent metering bypass. Nothing in
+`crates/harness/src/providers/` ever sets `stream` (`AnthropicProvider::complete`
+builds `model` / `max_tokens` / `system` / `messages` / `tools`, plus optional
+`tool_choice` and `cache_control`), so refusing it costs the app nothing.
+Metering streams means parsing the SSE `message_delta` usage frame — a feature,
+not a patch.
+
+**Models are allowlisted**, matched by prefix (`pricing.ts`):
+
+| Allowed prefix | Sent by |
+|---|---|
+| `claude-haiku-4-5` | `modelLive`, `modelReflection` |
+| `claude-sonnet-4-5` | `modelProcessing` |
+
+That is the complete set the shipped app can send — the three strings are
+hardcoded in `EngineResolution.swift` and flow through `build_providers`
+(`crates/ffi/src/engine.rs`) into the request body verbatim, with no launch arg
+or env override on that path. Dated snapshots (`claude-haiku-4-5-20251001`) pass,
+since a snapshot bills at its family's rate.
+
+An allowlist rather than a bigger fallback number: the pricing table cannot be
+kept exhaustive, and being wrong about an unlisted model is a *silent
+under-meter*. `UNKNOWN_MODEL_RATE` remains as defense in depth, priced above
+every model Anthropic currently sells so the "unknown must overestimate"
+invariant actually holds.
 
 ### Privacy rule
 
@@ -169,6 +207,16 @@ than a code change:
 Start them low. At the modeled ~$0.15/walk, $2/install/day is ~13 walks — far
 above real use, far below an abuser's ambitions.
 
+#### Emergency kill switch
+
+Set `DAILY_SPEND_CAP_USD = "0"` in `wrangler.toml` and `npx wrangler deploy`.
+Zero is honored **literally**: the global cap trips on the very next request and
+the worker stops forwarding. Anything that is *not* a non-negative number —
+unset, empty, a typo, a negative — falls back to the built-in default instead,
+so `"0"` is the only spelling of the kill switch. (An empty string is
+deliberately treated as garbage rather than as zero: `Number('')` is `0`, and a
+stray `= ""` must not silently take the service down.)
+
 Counters are KV read-modify-write, so concurrent calls can lose an increment
 and the cap can overshoot slightly. That is accepted: this is a blast-radius
 limiter, not a billing ledger. Durable Objects are the upgrade if it ever needs
@@ -176,21 +224,24 @@ to be exact.
 
 ---
 
-## Wiring the app (next step, not yet done)
+## Wiring the app (done)
 
-`EngineResolution.swift` currently reads `PPQ_API_KEY` from `Info.plist`. To
-move onto the proxy, it needs to instead:
+`EngineResolution.swift` → `resolveCredential()`:
 
-- set `EngineConfig.baseUrl` to the worker URL,
-- set `EngineConfig.apiKey` to `jefe.<installId>.<appSecret>`, where
-  `installId` is generated once and kept in the Keychain and `appSecret` comes
-  from `Info.plist`.
+- sets `EngineConfig.baseUrl` to `JEFE_PROXY_URL` from `Info.plist`,
+- sets `EngineConfig.apiKey` to `jefe.<installId>.<appSecret>`, where
+  `installId` is generated once and kept in the Keychain and `appSecret` is
+  `JEFE_APP_SECRET` from `Info.plist`.
 
-**No core or FFI change is required** — `EngineConfig` already carries
+**No core or FFI change was required** — `EngineConfig` already carries
 `baseUrl`, and `AnthropicProvider` already has `with_base_url`.
 
-Keep the existing direct-key path working when no proxy URL is configured, so
-local real-core development against a personal key still works.
+The proxy is the **only** path a shipped build has. `Info.plist` carries no
+Anthropic key field at all, so there is nothing to extract from a downloaded
+IPA. Local real-core development against a personal key still works, but only
+through the `ANTHROPIC_API_KEY` **environment variable** — an env var cannot
+ride along in a distributed build. With neither a proxy nor a dev key, the app
+degrades to the scripted demo engine.
 
 ---
 

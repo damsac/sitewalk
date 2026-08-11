@@ -22,11 +22,13 @@
 # xcodegen deep-merges includes (this file wins on conflicts), so the target keeps
 # its type/sources/fonts/usage-strings from project.yml and only the keys below change.
 #
-# SECRET FLOW (no secret ever in a tracked file): Info.plist keeps the literal
-# "$(PPQ_API_KEY)"; CI passes PPQ_API_KEY=<secret> as an xcodebuild build setting
-# on the archive command, which xcodebuild expands into the built Info.plist —
+# SECRET FLOW (no secret ever in a tracked file, and no Anthropic key in the
+# built app at all): Info.plist keeps the literal "$(JEFE_APP_SECRET)" and
+# "$(JEFE_PROXY_URL)"; CI passes both as xcodebuild build settings on the
+# archive command, which xcodebuild expands into the built Info.plist —
 # identical mechanism to the dev path (project.local.yml), just supplied on the
-# command line instead of a gitignored file. apps/ios uses no App Group, no
+# command line instead of a gitignored file. The real sk-ant- key lives only in
+# the Cloudflare worker (services/proxy). apps/ios uses no App Group, no
 # entitlements, and no analytics SDK, so the profile is a plain App Store profile.
 include:
   - path: project.yml
