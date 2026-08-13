@@ -393,8 +393,8 @@ mod tests {
         // this short walk never mentioned.
         assert_eq!(
             payload.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
-            vec!["crew", "schedule", "access", "safety"],
-            "the assignment block, in schema order"
+            vec!["crew", "schedule", "access", "safety", "instructions"],
+            "the assignment, site and instructions blocks, in schema order"
         );
         assert_eq!(payload.fields[0].value.as_deref(), Some("Jose"));
         assert!(payload.fields[1].is_gap, "no schedule was stated — a gap, not an invented date");

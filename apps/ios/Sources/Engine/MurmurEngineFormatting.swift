@@ -191,6 +191,9 @@ extension MurmurEngine {
         case "work": return "WORK PERFORMED"
         case "assignment": return "ASSIGNMENT"
         case "site": return "SITE NOTES"
+        // The default would already uppercase this key correctly; it is here
+        // so the work order's three blocks read as one set in this switch.
+        case "instructions": return "INSTRUCTIONS"
         case "summary": return "SUMMARY"
         default: return key.replacingOccurrences(of: "_", with: " ").uppercased()
         }

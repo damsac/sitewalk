@@ -528,6 +528,31 @@ pub fn builtin_schemas() -> Vec<DocumentSchema> {
                          chemicals. Only what was said.",
                     ),
                 ]),
+                // The crew's paragraph, and the reason this section exists:
+                // every other document type had prose and this one had none,
+                // so a walk that named no crew and no gate code rendered a
+                // work order as a bare checklist (Isaac's WO-0001,
+                // 2026-08-12). Worse, the sequencing he DID state — "compost
+                // and mulch after weeding is complete" — reached the client
+                // in the estimate's scope paragraph and reached the crew only
+                // as a grey sub-line on one row. The reader who has to act on
+                // an ordering was the one getting it as a fragment.
+                //
+                // Deliberately NOT the estimate's scope paragraph reworded.
+                // That one sells; this one instructs, and the difference is
+                // the whole point of keying prose to its reader.
+                filled("instructions", "Instructions", vec![walk_field(
+                    "instructions", "long_text", "Instructions",
+                    "The crew's only paragraph: 2-4 imperative sentences telling the people \
+                     doing this job how to run it. WRITE THIS whenever the operator said \
+                     anything about how the work goes — an order or a prerequisite (\"strip \
+                     the old bark before laying\"), who takes which part, a method or material \
+                     they specified, or what finished looks like. Naming a task while \
+                     sequencing it is correct and expected; listing the tasks back is not, \
+                     because the crew is holding that list already. Leave it blank only when \
+                     the walk said nothing at all about how — an invented order of operations \
+                     is worse than none. No prices, no client-facing framing.",
+                )]),
             ],
         ),
         // CONDITION REPORT — evidence of a property's state at a moment,

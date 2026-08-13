@@ -273,16 +273,55 @@ async fn real_walk_becomes_a_work_order() {
     // Structure: the fields the schema authored, in order, all present.
     let keys: Vec<&str> =
         doc["fields"].as_array().unwrap().iter().map(|f| f["key"].as_str().unwrap()).collect();
-    assert_eq!(keys, vec!["crew", "schedule", "access", "safety"]);
+    assert_eq!(keys, vec!["crew", "schedule", "access", "safety", "instructions"]);
 
     // A work order NEVER carries money, whatever the model returns.
     for line in doc["lines"].as_array().unwrap() {
         assert!(line["amount_cents"].is_null(), "money on a work order: {line}");
     }
 
+    // The crew's paragraph. This walk states an ordering out loud ("strip the
+    // old bark before laying"), so on THIS transcript the block must be
+    // written rather than a gap — and it must add to the list rather than
+    // repeat it, which is the failure mode #320 hit on every other kind.
+    let instructions = doc["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["key"] == "instructions")
+        .expect("the instructions field");
+    let text = instructions["value"].as_str().unwrap_or_default();
+    assert!(!text.is_empty(), "an ordering was stated and the crew was not told it");
+    assert!(!text.contains('$'), "money reached a crew sheet through the prose: {text:?}");
+    // Naming ONE task while sequencing it is the point ("strip old bark
+    // before laying mulch" contains the line "Strip old bark", and should).
+    // Naming most of them means the paragraph became the list again.
+    let restated = doc["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| text.contains(line["title"].as_str().unwrap()))
+        .count();
+    assert!(
+        restated <= 1,
+        "the instructions restate {restated} of the lines the crew is already holding: {text:?}"
+    );
+
     // Line count and titles are the deterministic render's, not the model's:
     // the compose pass may only write onto lines, never author them.
-    let items = guard.list_items_for_session(&session.id).unwrap();
+    //
+    // Compared against the items this KIND DRAWS, not against every item the
+    // walk captured. Since #326 a work order draws work and materials only —
+    // the gate code and the hazard belong in the blocks above, not in the
+    // crew's task list. This assertion still compared against all seven and
+    // had been failing since that merge; nothing noticed, because it is the
+    // real-API test and CI never runs it.
+    let items: Vec<_> = guard
+        .list_items_for_session(&session.id)
+        .unwrap()
+        .into_iter()
+        .filter(|i| matches!(i.kind.as_str(), "todo" | "part"))
+        .collect();
     assert_eq!(
         doc["lines"].as_array().unwrap().len(),
         items.len(),
