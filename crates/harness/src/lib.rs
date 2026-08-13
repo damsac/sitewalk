@@ -12,8 +12,9 @@ pub use agent::{Agent, AgentConfig, RunError, TurnOutcome};
 pub use context::{approx_tokens, budget_chars, AssembledContext, ContextAssembler, ContextSection};
 pub use error::HarnessError;
 pub use llm::{
-    CompletionRequest, CompletionResponse, ContentBlock, LlmProvider, Message, Role, StopReason,
-    ToolSpec, Usage,
+    CitationsConfig, CompletionRequest, CompletionResponse, ContentBlock, DocumentMediaType,
+    DocumentSource, ImageMediaType, ImageSource, LlmProvider, Message, Role, StopReason, ToolSpec,
+    Usage,
 };
 pub use mock::MockProvider;
 pub use providers::AnthropicProvider;

@@ -25,11 +25,96 @@ pub enum ContentBlock {
         content: String,
         is_error: bool,
     },
+    /// An image the model can see. Send-only: the API never returns one.
+    ///
+    /// Image and Document are two variants rather than one merged `Media`
+    /// variant because the `#[serde(tag = "type")]` above already maps the
+    /// variant name to the wire `type` string for free. A merged variant would
+    /// have to choose between `"image"` and `"document"` at runtime, which
+    /// means a hand-written Serialize impl reimplementing the discriminator the
+    /// enum already provides. The block shapes differ anyway — document blocks
+    /// carry optional `title`/`context`/`citations` that image blocks do not.
+    Image {
+        source: ImageSource,
+    },
+    /// A document (today: a PDF) the model can read. Send-only.
+    Document {
+        source: DocumentSource,
+        /// Passed to the model but never cited from; length-limited by the API.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// Metadata about the document. Passed to the model, never cited from —
+        /// this is where longer provenance belongs, since `title` is short.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        citations: Option<CitationsConfig>,
+    },
     /// Any block type this crate doesn't know yet (e.g. thinking, server_tool_use).
     /// Lenient on purpose. Unknown blocks are dropped before messages are re-sent
     /// to a provider (see Agent::run) — we can't faithfully round-trip them.
     #[serde(other)]
     Unknown,
+}
+
+/// Where the bytes of an image block come from.
+///
+/// A tagged enum rather than a struct even though base64 is the only source we
+/// need today: the API also accepts `{"type":"url", ...}` and
+/// `{"type":"file", "file_id": ...}`. One level of nesting now makes adding
+/// those an additive change here instead of a breaking change at every call
+/// site — the same reason `ContentBlock` itself is an enum.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ImageSource {
+    Base64 {
+        media_type: ImageMediaType,
+        /// Standard base64, no line breaks.
+        data: String,
+    },
+}
+
+/// The image formats the API accepts. Animations are not supported — only the
+/// first frame of a GIF or animated WebP is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageMediaType {
+    #[serde(rename = "image/jpeg")]
+    Jpeg,
+    #[serde(rename = "image/png")]
+    Png,
+    #[serde(rename = "image/gif")]
+    Gif,
+    #[serde(rename = "image/webp")]
+    Webp,
+}
+
+/// Where the bytes of a document block come from. Tagged for the same reason as
+/// [`ImageSource`] — `url`, `file`, `text`, and `content` sources exist on the
+/// wire and can be added without touching callers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DocumentSource {
+    Base64 {
+        media_type: DocumentMediaType,
+        /// Standard base64, no line breaks.
+        data: String,
+    },
+}
+
+/// The only media type a base64 document source accepts. An enum with one
+/// variant on purpose: it puts "PDF is the only option" in the type system
+/// instead of a doc comment, and a second format stays additive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DocumentMediaType {
+    #[serde(rename = "application/pdf")]
+    Pdf,
+}
+
+/// Opt in to citations for one document block. All-or-nothing per request:
+/// the API rejects a mix of cited and uncited documents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CitationsConfig {
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -167,6 +252,106 @@ mod tests {
         assert_eq!(v["type"], "tool_result");
         let back: ContentBlock = serde_json::from_value(v).unwrap();
         assert_eq!(back, block);
+    }
+
+    #[test]
+    fn image_block_serializes_to_anthropic_wire_shape() {
+        let block = ContentBlock::Image {
+            source: ImageSource::Base64 {
+                media_type: ImageMediaType::Png,
+                data: "aGVsbG8=".into(),
+            },
+        };
+        let v = serde_json::to_value(&block).unwrap();
+        // The serde tag IS the wire type — no per-provider mapping exists to
+        // catch a rename, so pin the exact strings the API accepts.
+        assert_eq!(v["type"], "image");
+        assert_eq!(v["source"]["type"], "base64");
+        assert_eq!(v["source"]["media_type"], "image/png");
+        assert_eq!(v["source"]["data"], "aGVsbG8=");
+        let back: ContentBlock = serde_json::from_value(v).unwrap();
+        assert_eq!(back, block);
+    }
+
+    #[test]
+    fn every_image_media_type_serializes_to_its_mime_string() {
+        // A wrong variant rename here is a 400 at the API, not a compile error.
+        for (variant, mime) in [
+            (ImageMediaType::Jpeg, "image/jpeg"),
+            (ImageMediaType::Png, "image/png"),
+            (ImageMediaType::Gif, "image/gif"),
+            (ImageMediaType::Webp, "image/webp"),
+        ] {
+            assert_eq!(serde_json::to_value(variant).unwrap(), mime);
+            let back: ImageMediaType = serde_json::from_value(mime.into()).unwrap();
+            assert_eq!(back, variant);
+        }
+    }
+
+    #[test]
+    fn document_block_serializes_to_anthropic_wire_shape() {
+        let block = ContentBlock::Document {
+            source: DocumentSource::Base64 {
+                media_type: DocumentMediaType::Pdf,
+                data: "JVBERi0=".into(),
+            },
+            title: Some("Invoice template".into()),
+            context: Some("Operator-uploaded".into()),
+            citations: Some(CitationsConfig { enabled: true }),
+        };
+        let v = serde_json::to_value(&block).unwrap();
+        assert_eq!(v["type"], "document");
+        assert_eq!(v["source"]["type"], "base64");
+        assert_eq!(v["source"]["media_type"], "application/pdf");
+        assert_eq!(v["source"]["data"], "JVBERi0=");
+        assert_eq!(v["title"], "Invoice template");
+        assert_eq!(v["context"], "Operator-uploaded");
+        assert_eq!(v["citations"]["enabled"], true);
+        let back: ContentBlock = serde_json::from_value(v).unwrap();
+        assert_eq!(back, block);
+    }
+
+    #[test]
+    fn document_optional_fields_are_absent_not_null_when_unset() {
+        // `"title": null` is not the same as an omitted key to the API — a
+        // null would be rejected where an absent field is fine.
+        let block = ContentBlock::Document {
+            source: DocumentSource::Base64 {
+                media_type: DocumentMediaType::Pdf,
+                data: "JVBERi0=".into(),
+            },
+            title: None,
+            context: None,
+            citations: None,
+        };
+        let v = serde_json::to_value(&block).unwrap();
+        assert!(v.get("title").is_none(), "title must be absent: {v}");
+        assert!(v.get("context").is_none(), "context must be absent: {v}");
+        assert!(v.get("citations").is_none(), "citations must be absent: {v}");
+        let back: ContentBlock = serde_json::from_value(v).unwrap();
+        assert_eq!(back, block);
+    }
+
+    #[test]
+    fn a_whole_message_of_media_blocks_serializes_as_the_provider_sends_it() {
+        // AnthropicProvider builds its body with `"messages": req.messages`, so
+        // serde IS the wire format — this is the shape that actually goes out.
+        let msg = Message {
+            role: Role::User,
+            content: vec![
+                ContentBlock::Image {
+                    source: ImageSource::Base64 {
+                        media_type: ImageMediaType::Png,
+                        data: "aGVsbG8=".into(),
+                    },
+                },
+                ContentBlock::Text { text: "what is this?".into() },
+            ],
+        };
+        let v = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v["role"], "user");
+        assert_eq!(v["content"][0]["type"], "image");
+        assert_eq!(v["content"][1]["type"], "text");
     }
 
     #[test]
