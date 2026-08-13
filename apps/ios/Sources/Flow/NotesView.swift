@@ -607,7 +607,7 @@ struct NotesView: View {
                     .frame(maxWidth: .infinity).frame(height: 40)
                     .overlay(RoundedRectangle(cornerRadius: Theme.S.radiusCard).stroke(Theme.C.hairline, lineWidth: 1.5))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bareTap)  // commits: EXPORT NOTES leaves the phone
         }
         .padding(.horizontal, Theme.S.screenPad)
         .padding(.top, 11).padding(.bottom, 10)
@@ -845,7 +845,7 @@ private struct NoteItemEditSheet: View {
                             .overlay(RoundedRectangle(cornerRadius: Theme.S.radius)
                                 .stroke(Theme.C.redTag, lineWidth: 2))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bareTap)  // commits: REMOVE deletes a line
                 }
                 Button { commitSave() } label: {
                     Text(isEdit ? "SAVE" : "ADD")
@@ -854,7 +854,7 @@ private struct NoteItemEditSheet: View {
                         .frame(maxWidth: .infinity).frame(height: 54)
                         .background(RoundedRectangle(cornerRadius: Theme.S.radius).fill(Theme.C.orange))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bareTap)  // commits: SAVE/ADD writes the line
                 .disabled(!canSave)
                 .opacity(canSave ? 1 : 0.4)
             }
