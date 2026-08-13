@@ -3552,6 +3552,22 @@ public struct WalkSummary {
     public var itemCount: UInt32
     public var hasDocument: Bool
     public var queued: Bool
+    /**
+     * The kind of the LATEST document built from this walk, `""` when none.
+     *
+     * Distinct from `doc_kind` above, which is advisory — the template's
+     * DEFAULT kind, known before anything is built. This one is what the
+     * operator actually made, and it is the difference between a row that
+     * says "Estimate" because the walk was a landscape walk and a row that
+     * says it because an estimate exists.
+     */
+    public var builtDocKind: String
+    /**
+     * That document's total in cents, `None` when it has no money to report:
+     * an unpriced kind, a priced one still all gaps, or a document written
+     * before core computed totals. Never 0 — see `murmur_core::WalkSummary`.
+     */
+    public var builtTotalCents: Int64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -3576,7 +3592,21 @@ public struct WalkSummary {
          */startedAt: UInt64, 
         /**
          * Live items only.
-         */itemCount: UInt32, hasDocument: Bool, queued: Bool) {
+         */itemCount: UInt32, hasDocument: Bool, queued: Bool, 
+        /**
+         * The kind of the LATEST document built from this walk, `""` when none.
+         *
+         * Distinct from `doc_kind` above, which is advisory — the template's
+         * DEFAULT kind, known before anything is built. This one is what the
+         * operator actually made, and it is the difference between a row that
+         * says "Estimate" because the walk was a landscape walk and a row that
+         * says it because an estimate exists.
+         */builtDocKind: String, 
+        /**
+         * That document's total in cents, `None` when it has no money to report:
+         * an unpriced kind, a priced one still all gaps, or a document written
+         * before core computed totals. Never 0 — see `murmur_core::WalkSummary`.
+         */builtTotalCents: Int64?) {
         self.id = id
         self.jobId = jobId
         self.docKind = docKind
@@ -3586,6 +3616,8 @@ public struct WalkSummary {
         self.itemCount = itemCount
         self.hasDocument = hasDocument
         self.queued = queued
+        self.builtDocKind = builtDocKind
+        self.builtTotalCents = builtTotalCents
     }
 }
 
@@ -3620,6 +3652,12 @@ extension WalkSummary: Equatable, Hashable {
         if lhs.queued != rhs.queued {
             return false
         }
+        if lhs.builtDocKind != rhs.builtDocKind {
+            return false
+        }
+        if lhs.builtTotalCents != rhs.builtTotalCents {
+            return false
+        }
         return true
     }
 
@@ -3633,6 +3671,8 @@ extension WalkSummary: Equatable, Hashable {
         hasher.combine(itemCount)
         hasher.combine(hasDocument)
         hasher.combine(queued)
+        hasher.combine(builtDocKind)
+        hasher.combine(builtTotalCents)
     }
 }
 
@@ -3652,7 +3692,9 @@ public struct FfiConverterTypeWalkSummary: FfiConverterRustBuffer {
                 startedAt: FfiConverterUInt64.read(from: &buf), 
                 itemCount: FfiConverterUInt32.read(from: &buf), 
                 hasDocument: FfiConverterBool.read(from: &buf), 
-                queued: FfiConverterBool.read(from: &buf)
+                queued: FfiConverterBool.read(from: &buf), 
+                builtDocKind: FfiConverterString.read(from: &buf), 
+                builtTotalCents: FfiConverterOptionInt64.read(from: &buf)
         )
     }
 
@@ -3666,6 +3708,8 @@ public struct FfiConverterTypeWalkSummary: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.itemCount, into: &buf)
         FfiConverterBool.write(value.hasDocument, into: &buf)
         FfiConverterBool.write(value.queued, into: &buf)
+        FfiConverterString.write(value.builtDocKind, into: &buf)
+        FfiConverterOptionInt64.write(value.builtTotalCents, into: &buf)
     }
 }
 

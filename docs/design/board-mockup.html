@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jefe — board redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Theme.swift, verbatim */
+  --paper:#FAFAF7; --paper-deep:#F1F0EA; --sheet:#FFFFFE;
+  --ink:#141412; --ink-60:#5E5C54; --ink-45:#6E6B62; --ink-35:#A7A49A;
+  --hair:rgba(20,20,18,.16); --hair-soft:rgba(20,20,18,.09);
+  --amber:#FFBB26; --amber-deep:#9A6A00; --amber-ink:#6B4900; --amber-tint:#FAF1D9;
+  --on-amber:#141412;
+  --green:#3E6B35; --green-tint:#E9F0E4;
+  --ui:'Barlow',sans-serif; --mono:'IBM Plex Mono',monospace; --serif:'Source Serif 4',serif;
+
+  /* Direction A — the outstanding work is the bright thing (default) */
+  --file-bg:var(--amber); --file-fg:var(--on-amber); --file-edge:var(--amber-deep);
+  --cta-bg:var(--ink); --cta-fg:#FAF9F2; --cta-edge:#000; --cta-dot:var(--amber);
+}
+body.dir-b{
+  /* Direction B — the button you press is the bright thing (today's rule) */
+  --file-bg:var(--paper-deep); --file-fg:var(--ink); --file-edge:transparent;
+  --cta-bg:var(--amber); --cta-fg:var(--on-amber); --cta-edge:var(--amber-deep); --cta-dot:var(--ink);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:var(--ui); color:var(--ink); padding:32px 20px 64px;
+  background:
+    repeating-linear-gradient(0deg,transparent 0 31px,var(--hair-soft) 31px 32px),
+    repeating-linear-gradient(90deg,transparent 0 31px,var(--hair-soft) 31px 32px),
+    var(--paper);
+}
+header{max-width:1240px;margin:0 auto 28px}
+h1{font-family:var(--serif);font-size:26px;letter-spacing:-.01em}
+.sub{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-45);margin-top:6px}
+.switch{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
+.switch button{
+  font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  padding:9px 14px;border:1px solid var(--hair);border-radius:8px;background:var(--sheet);
+  color:var(--ink-60);cursor:pointer
+}
+.switch button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+.rack{display:flex;gap:28px;justify-content:center;flex-wrap:wrap;max-width:1240px;margin:0 auto}
+.slot{width:372px}
+.cap{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--amber-ink);margin-bottom:10px}
+.note{font-size:13.5px;line-height:1.5;color:var(--ink-60);margin-top:14px}
+.note b{color:var(--ink);font-weight:600}
+
+/* ── phone ─────────────────────────────────────────────────────── */
+.phone{
+  width:372px;height:770px;border-radius:42px;background:var(--paper);
+  border:1px solid var(--hair);overflow:hidden;position:relative;
+  display:flex;flex-direction:column;
+  box-shadow:0 1px 2px rgba(20,20,18,.10),0 18px 40px rgba(20,20,18,.13);
+}
+.status{display:flex;justify-content:space-between;align-items:center;padding:16px 24px 4px;font-size:15px;font-weight:600}
+.status .pills{display:flex;gap:4px;align-items:center}
+.status .pills i{display:block;background:var(--ink);border-radius:2px;height:10px}
+.scroll{flex:1;overflow:hidden;padding:0 20px;display:flex;flex-direction:column}
+
+/* masthead */
+.mast{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 0 0}
+.mast .who{font-family:var(--mono);font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--amber-ink);padding-top:9px}
+.avatar{
+  width:38px;height:38px;border-radius:50%;background:var(--ink);color:var(--paper);
+  display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;flex:none
+}
+h2{font-size:31px;font-weight:800;letter-spacing:-.02em;line-height:1.08;margin:10px 0 0}
+h2 .qty{font-variant-numeric:tabular-nums}
+.ledger{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-45);margin-top:7px;font-variant-numeric:tabular-nums}
+
+/* job chips */
+.chips{display:flex;gap:7px;margin:16px 0 0;overflow:hidden;mask-image:linear-gradient(90deg,#000 88%,transparent)}
+.chip{
+  font-size:14px;font-weight:600;padding:9px 15px;border-radius:999px;background:var(--paper-deep);
+  color:var(--ink-60);white-space:nowrap;flex:none
+}
+.chip.on{background:var(--ink);color:var(--paper)}
+.chip.add{background:transparent;border:1px solid var(--hair);color:var(--ink-45);font-family:var(--mono);font-size:12px;letter-spacing:.06em}
+
+/* to-file card */
+.tofile{margin-top:18px;border:1.5px solid var(--amber-deep);border-radius:12px;overflow:hidden;background:var(--sheet)}
+.tofile .head{
+  display:flex;justify-content:space-between;align-items:center;background:var(--amber-tint);
+  padding:9px 14px;font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--amber-ink)
+}
+.tofile .head .n{font-weight:600}
+.frow{display:flex;align-items:center;gap:12px;padding:13px 14px;border-top:1px solid var(--hair-soft)}
+.frow:first-of-type{border-top:0}
+.frow .body{flex:1;min-width:0}
+.frow .t{font-size:15.5px;font-weight:600;line-height:1.25;letter-spacing:-.005em}
+.frow .m{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-45);margin-top:5px}
+.filebtn{
+  font-size:14px;font-weight:700;letter-spacing:.02em;padding:10px 17px;border-radius:9px;flex:none;
+  background:var(--file-bg);color:var(--file-fg);box-shadow:0 2px 0 var(--file-edge)
+}
+
+/* activity */
+.sec{display:flex;justify-content:space-between;align-items:baseline;margin:22px 0 0;padding-bottom:7px;border-bottom:1px solid var(--hair)}
+.sec b{font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;color:var(--ink-60)}
+.sec span{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;color:var(--ink-35)}
+.arow{display:flex;gap:13px;padding:14px 0;border-bottom:1px solid var(--hair-soft)}
+.arow .time{font-family:var(--mono);font-size:12px;color:var(--ink-35);padding-top:2px;flex:none;width:38px}
+.arow .body{flex:1;min-width:0}
+.arow .t{font-size:15.5px;font-weight:600;line-height:1.28;letter-spacing:-.005em}
+.arow .m{font-size:13px;color:var(--ink-45);margin-top:4px}
+.tag{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;font-weight:600;
+  background:var(--green-tint);color:var(--green);padding:4px 7px;border-radius:5px;height:fit-content;flex:none
+}
+
+/* empty */
+.empty{margin-top:auto;margin-bottom:auto;text-align:center;padding:0 26px}
+.empty .mark{font-family:var(--serif);font-size:15px;color:var(--ink-45);line-height:1.5}
+.empty .hint{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-35);margin-top:12px}
+
+/* cta */
+.dock{padding:14px 20px 26px;background:linear-gradient(180deg,rgba(250,250,247,0),var(--paper) 34%)}
+.cta{
+  border-radius:12px;background:var(--cta-bg);color:var(--cta-fg);box-shadow:0 3px 0 var(--cta-edge);
+  height:58px;display:flex;align-items:center;justify-content:center;gap:11px;
+  font-size:17px;font-weight:700;letter-spacing:.06em;text-transform:uppercase
+}
+.cta i{width:9px;height:9px;border-radius:50%;background:var(--cta-dot);display:block}
+.cta small{font-family:var(--mono);font-size:11px;letter-spacing:.08em;opacity:.72;text-transform:none;font-weight:500}
+.spacer{flex:1}
+</style>
+</head>
+<body class="dir-b">
+
+<header>
+  <h1>The board, rebuilt around the day's output</h1>
+  <div class="sub">Three states · headline is the day's output · amber decided: B</div>
+  <div class="switch">
+    <button id="a" aria-pressed="false">A · outstanding is bright</button>
+    <button id="b" aria-pressed="true">B · the CTA is bright</button>
+  </div>
+</header>
+
+<div class="rack">
+
+  <!-- ── FIRST RUN ─────────────────────────────────────────────── -->
+  <div class="slot">
+    <div class="cap">First run — no jobs, no walks</div>
+    <div class="phone">
+      <div class="status"><span>2:46</span><span class="pills"><i style="width:16px"></i><i style="width:16px"></i><i style="width:24px"></i></span></div>
+      <div class="scroll">
+        <div class="mast">
+          <div class="who">Trimmers LLC · Thu Aug 13</div>
+          <div class="avatar">TL</div>
+        </div>
+        <h2>Ready to walk</h2>
+        <div class="empty">
+          <div class="mark">Talk your way through a property.<br>Jefe writes the paperwork.</div>
+          <div class="hint">Nothing here yet</div>
+        </div>
+      </div>
+      <div class="dock"><div class="cta"><i></i>Start walk</div></div>
+    </div>
+    <p class="note">No job chips, no card, no headers — <b>the screen has one thing on it.</b> Every element here earns its place by existing only when it has content.</p>
+  </div>
+
+  <!-- ── WORKING DAY ───────────────────────────────────────────── -->
+  <div class="slot">
+    <div class="cap">Working day — 2 to file, 3 filed</div>
+    <div class="phone">
+      <div class="status"><span>2:46</span><span class="pills"><i style="width:16px"></i><i style="width:16px"></i><i style="width:24px"></i></span></div>
+      <div class="scroll">
+        <div class="mast">
+          <div class="who">Trimmers LLC · Thu Aug 13</div>
+          <div class="avatar">TL</div>
+        </div>
+        <h2><span class="qty">$1,915</span> today</h2>
+        <div class="ledger">1,075 quoted · 840 invoiced · 3 sent</div>
+
+        <div class="chips">
+          <div class="chip on">All</div>
+          <div class="chip">117 Lex</div>
+          <div class="chip">42 Alder</div>
+          <div class="chip">9 Pine Ct</div>
+          <div class="chip add">+ Job</div>
+        </div>
+
+        <div class="tofile">
+          <div class="head"><span>To file</span><span class="n">2</span></div>
+          <div class="frow">
+            <div class="body">
+              <div class="t">Three beds in the back, weeding and mulch</div>
+              <div class="m">6 items · Estimate sent</div>
+            </div>
+            <div class="filebtn">File</div>
+          </div>
+          <div class="frow">
+            <div class="body">
+              <div class="t">Quick look at the side yard drainage</div>
+              <div class="m">3 items · Condition</div>
+            </div>
+            <div class="filebtn">File</div>
+          </div>
+        </div>
+
+        <div class="sec"><b>Today</b><span>3 filed</span></div>
+        <div class="arow">
+          <div class="time">8:03</div>
+          <div class="body">
+            <div class="t">Walk-through identified damage to the fence line</div>
+            <div class="m">42 Alder</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+        <div class="arow">
+          <div class="time">7:59</div>
+          <div class="body">
+            <div class="t">Landscaping work at 117 today with the crew</div>
+            <div class="m">117 Lex</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+        <div class="arow" style="border-bottom:0">
+          <div class="time">7:12</div>
+          <div class="body">
+            <div class="t">Front hedge trim, two hours with the small crew</div>
+            <div class="m">9 Pine Ct</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+      </div>
+      <div class="dock"><div class="cta"><i></i>Start walk</div></div>
+    </div>
+    <p class="note">The headline is <b>the money the day produced</b> — the scoreboard, not a chore count. The to-file number lives in the card badge, where it already was. To-file rows carry <b>no job name</b>, because filing is what assigns one.</p>
+  </div>
+
+  <!-- ── SCOPED / ALL FILED ────────────────────────────────────── -->
+  <div class="slot">
+    <div class="cap">A job selected — nothing outstanding</div>
+    <div class="phone">
+      <div class="status"><span>2:46</span><span class="pills"><i style="width:16px"></i><i style="width:16px"></i><i style="width:24px"></i></span></div>
+      <div class="scroll">
+        <div class="mast">
+          <div class="who">Trimmers LLC · Thu Aug 13</div>
+          <div class="avatar">TL</div>
+        </div>
+        <h2><span class="qty">$2,385</span> at 117 Lex</h2>
+        <div class="ledger">4 walks · since Aug 2</div>
+
+        <div class="chips">
+          <div class="chip">All</div>
+          <div class="chip on">117 Lex</div>
+          <div class="chip">42 Alder</div>
+          <div class="chip">9 Pine Ct</div>
+          <div class="chip add">+ Job</div>
+        </div>
+
+        <div class="sec"><b>Today</b><span>2 walks</span></div>
+        <div class="arow">
+          <div class="time">7:59</div>
+          <div class="body">
+            <div class="t">Landscaping work at 117 today with the crew</div>
+            <div class="m">Estimate · $1,075</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+        <div class="arow">
+          <div class="time">7:12</div>
+          <div class="body">
+            <div class="t">Compost delivery and bed prep out front</div>
+            <div class="m">Work order</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+        <div class="sec"><b>Earlier</b><span>2 walks</span></div>
+        <div class="arow">
+          <div class="time">Aug 9</div>
+          <div class="body">
+            <div class="t">Flagstone path, grading the walkway run</div>
+            <div class="m">Estimate · $1,310</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+        <div class="arow" style="border-bottom:0">
+          <div class="time">Aug 2</div>
+          <div class="body">
+            <div class="t">First look before the season starts</div>
+            <div class="m">Report</div>
+          </div>
+          <div class="tag">SENT</div>
+        </div>
+        <div class="spacer"></div>
+      </div>
+      <div class="dock"><div class="cta"><i></i>Start walk<small>117 Lex</small></div></div>
+    </div>
+    <p class="note">Scoped, the headline becomes <b>the job's value to date</b>. A chip is a <b>filter and an intent</b>: with a job selected the button reads <b>Start walk · 117 Lex</b> and the walk files itself on finish. Nothing outstanding means <b>no card at all</b> — the reward for being caught up.</p>
+  </div>
+
+</div>
+
+<script>
+const a=document.getElementById('a'),b=document.getElementById('b');
+function set(dir){
+  document.body.classList.toggle('dir-b',dir==='b');
+  a.setAttribute('aria-pressed',dir==='a');b.setAttribute('aria-pressed',dir==='b');
+}
+a.onclick=()=>set('a');b.onclick=()=>set('b');
+</script>
+</body>
+</html>

@@ -406,7 +406,24 @@ impl Store {
                       WHERE i.session_id = s.id AND i.deleted_at IS NULL) AS item_count,
                     EXISTS(SELECT 1 FROM artifacts a
                             WHERE a.session_id = s.id AND a.kind = 'document'
-                              AND a.deleted_at IS NULL) AS has_document
+                              AND a.deleted_at IS NULL) AS has_document,
+                    -- The latest document's kind and total, read straight out
+                    -- of the artifact body. `json_extract` rather than a new
+                    -- column so this needs no migration and no backfill: a
+                    -- document written before core computed totals simply has
+                    -- no `total_cents` key and reads NULL, which is exactly
+                    -- what it means — unknown, not zero.
+                    --
+                    -- `ORDER BY id DESC` matches `latest_document_artifact`;
+                    -- ids are UUIDv7 so id order is creation order.
+                    (SELECT json_extract(a.body, '$.doc_kind') FROM artifacts a
+                      WHERE a.session_id = s.id AND a.kind = 'document'
+                        AND a.deleted_at IS NULL
+                      ORDER BY a.id DESC LIMIT 1) AS document_kind,
+                    (SELECT json_extract(a.body, '$.total_cents') FROM artifacts a
+                      WHERE a.session_id = s.id AND a.kind = 'document'
+                        AND a.deleted_at IS NULL
+                      ORDER BY a.id DESC LIMIT 1) AS document_total_cents
              FROM sessions s
              WHERE s.deleted_at IS NULL AND s.status != 'recording'
              ORDER BY s.started_at DESC, s.id DESC",
@@ -422,6 +439,10 @@ impl Store {
                 status: SessionStatus::parse(&status_raw)?,
                 summary: row.get("summary").map_err(CoreError::Sqlite)?,
                 started_at: row.get::<_, i64>("started_at").map_err(CoreError::Sqlite)? as u64,
+                document_kind: row.get("document_kind").map_err(CoreError::Sqlite)?,
+                document_total_cents: row
+                    .get::<_, Option<i64>>("document_total_cents")
+                    .map_err(CoreError::Sqlite)?,
                 ended_at: row
                     .get::<_, Option<i64>>("ended_at")
                     .map_err(CoreError::Sqlite)?
@@ -1168,7 +1189,69 @@ mod tests {
             ended_at: _,
             item_count: _,
             has_document: _,
+            document_kind: _,
+            document_total_cents: _,
         } = walks[0].clone();
+    }
+
+    /// The board never opens a document, so the projection is the only place
+    /// it can learn what a walk was worth. Latest artifact wins: regenerating
+    /// mints a fresh snapshot and the board shows what the operator last made.
+    #[test]
+    fn walk_summary_reports_the_latest_documents_kind_and_total() {
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        s.end_session(&session.id).unwrap();
+        s.mark_session_processed(&session.id, "walked it").unwrap();
+
+        // No document yet: both unknown, and unknown is not zero.
+        let walks = s.list_walk_summaries().unwrap();
+        assert_eq!(walks[0].document_kind, None);
+        assert_eq!(walks[0].document_total_cents, None);
+
+        s.mint_document_number_and_add_artifact(
+            &session.id,
+            "estimate",
+            None,
+            serde_json::json!({"doc_kind": "estimate", "total_cents": 107500}),
+        )
+        .unwrap();
+        let walks = s.list_walk_summaries().unwrap();
+        assert_eq!(walks[0].document_kind.as_deref(), Some("estimate"));
+        assert_eq!(walks[0].document_total_cents, Some(107500));
+
+        // A work order off the same walk carries no money — and reporting it
+        // as 0 would put a free job on the board.
+        s.mint_document_number_and_add_artifact(
+            &session.id,
+            "work_order",
+            None,
+            serde_json::json!({"doc_kind": "work_order", "total_cents": serde_json::Value::Null}),
+        )
+        .unwrap();
+        let walks = s.list_walk_summaries().unwrap();
+        assert_eq!(walks[0].document_kind.as_deref(), Some("work_order"));
+        assert_eq!(walks[0].document_total_cents, None);
+    }
+
+    /// A document written before core computed totals has no `total_cents`
+    /// key at all. It must read as unknown rather than breaking the query or
+    /// arriving as 0 — every walk on every existing install is one of these.
+    #[test]
+    fn a_document_from_before_totals_reads_as_unknown() {
+        let s = store();
+        let session = s.start_session(None).unwrap();
+        s.end_session(&session.id).unwrap();
+        s.mint_document_number_and_add_artifact(
+            &session.id,
+            "estimate",
+            None,
+            serde_json::json!({"doc_kind": "estimate", "lines": []}),
+        )
+        .unwrap();
+        let walks = s.list_walk_summaries().unwrap();
+        assert_eq!(walks[0].document_kind.as_deref(), Some("estimate"));
+        assert_eq!(walks[0].document_total_cents, None, "absent is unknown, never $0");
     }
 
     #[test]
