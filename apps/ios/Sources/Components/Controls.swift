@@ -125,6 +125,40 @@ struct FieldRowStyle: ButtonStyle {
     }
 }
 
+/// Tier 5: a bare tap that still answers. Looks exactly like `.plain` — no
+/// chrome, no fill, no travel — but dims under the finger and ticks on
+/// touch-down like every other control.
+///
+/// It exists because of what the tick MEANS. Isaac, 2026-08-12: *"I like how
+/// START WALK and my business have a physical click feel… can we make the
+/// other buttons like that? Maybe not every single one but the ones that make
+/// sense."* The ones that make sense are the ones where something HAPPENS —
+/// a line saved or removed, notes exported, a photo deleted. A tick is the
+/// phone saying "that landed", which is worth most when the screen's answer
+/// is a sheet closing behind your own thumb, or when you are wearing gloves
+/// and looking at a yard instead of the glass.
+///
+/// Deliberately NOT applied to CLOSE, CANCEL, `‹ NOTES`, or a photo zoom.
+/// Those navigate: nothing committed, nothing to confirm, and a tick that
+/// fires when nothing happened teaches the hand to stop trusting it. Same
+/// reason `FieldRowStyle` (tier 4) stays silent — twenty job rows buzzing
+/// past under a scrolling thumb is noise, and worse, it fires on the drag
+/// that was meant to scroll.
+struct BareTapStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let down = configuration.isPressed
+        return configuration.label
+            .opacity(down ? 0.55 : 1)
+            .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.09), value: down)
+            // Touch-down only, matching the other tiers — a second tick on
+            // release reads as a double-tap.
+            .sensoryFeedback(trigger: down) { _, isDown in
+                isDown ? .impact(flexibility: .rigid) : nil
+            }
+    }
+}
+
 // MARK: - Tier presets
 //
 // Named so a call site picks a TIER, never a colour. One amber fill per screen
@@ -211,6 +245,12 @@ extension ButtonStyle where Self == WellChipStyle {
 extension ButtonStyle where Self == FieldRowStyle {
     /// Tier 4 — a list row with a fill under the finger.
     static var fieldRow: FieldRowStyle { FieldRowStyle() }
+}
+
+extension ButtonStyle where Self == BareTapStyle {
+    /// Tier 5 — an unchromed tap that COMMITS something. Use `.plain` when it
+    /// only navigates.
+    static var bareTap: BareTapStyle { BareTapStyle() }
 }
 
 // MARK: - Labels

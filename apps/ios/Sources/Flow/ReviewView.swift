@@ -287,7 +287,7 @@ struct ReviewView: View {
                         .frame(width: 18, height: 18)
                         .background(Theme.C.ink)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bareTap)  // commits: removing a photo is a deletion
             }
             HStack(spacing: 4) {
                 Text(String(format: "PH-%02d", index + 1))
