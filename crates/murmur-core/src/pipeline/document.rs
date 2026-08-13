@@ -989,9 +989,29 @@ impl DocumentBuilder {
 
         // §4 step 6 — the total shape comes from the schema envelope (for
         // every built-in this equals the old total_shape(doc_kind) exactly).
+        // The document's own total, computed HERE because this is the only
+        // place that can compute it once. The app has been summing
+        // `amount_cents` itself (`DocumentModel.totalValue`), so a document
+        // could disagree with itself across the boundary — and the board,
+        // which never opens a document, could not see money at all.
+        //
+        // `null` rather than 0 when there is nothing to total: an unpriced
+        // kind, or a priced one whose lines are all still gaps. A zero states
+        // an amount nobody agreed to, which is the same reason `price_items`
+        // drops `amount_cents <= 0`.
+        let total_cents: Option<i64> = priced
+            .then(|| {
+                lines
+                    .iter()
+                    .filter_map(|line| line["amount_cents"].as_i64())
+                    .fold(None::<i64>, |sum, cents| Some(sum.unwrap_or(0) + cents))
+            })
+            .flatten();
+
         let payload = serde_json::json!({
             "doc_kind": doc_kind,
             "job_date_unix": session.started_at,
+            "total_cents": total_cents,
             "total_kind": schema.total_kind,
             "total_label_key": schema.total_label_key,
             "static_total_cents": serde_json::Value::Null,
@@ -2339,6 +2359,37 @@ mod tests {
             6,
             "a report records everything — that is what it is for"
         );
+    }
+
+    /// The total the app has been computing in Swift, computed once, here.
+    /// Both halves matter: an estimate reports what it adds up to, and a work
+    /// order reports NOTHING rather than a tidy $0 — a crew sheet showing a
+    /// total of zero reads as a free job.
+    #[tokio::test]
+    async fn a_priced_document_carries_its_own_total_and_an_unpriced_one_carries_none() {
+        let fixture = &[("part", "5 yards mulch"), ("price", "$200 mulch")];
+
+        let (store, sid) = processed_session_with_items(fixture);
+        let store = Arc::new(Mutex::new(store));
+        let provider = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([]),
+            serde_json::json!([]),
+        )]));
+        let outcome =
+            builder(store.clone(), provider).build(&sid, "estimate").await.unwrap();
+        let v = decoded_document(&store, &outcome.document_artifact_id);
+        assert_eq!(v["total_cents"], 20000, "the spoken $200, summed once");
+
+        let (store2, sid2) = processed_session_with_items(fixture);
+        let store2 = Arc::new(Mutex::new(store2));
+        let provider2 = Arc::new(MockProvider::new(vec![compose_response(
+            serde_json::json!([]),
+            serde_json::json!([]),
+        )]));
+        let outcome2 =
+            builder(store2.clone(), provider2).build(&sid2, "work_order").await.unwrap();
+        let v2 = decoded_document(&store2, &outcome2.document_artifact_id);
+        assert!(v2["total_cents"].is_null(), "a crew sheet has no total, not a zero one");
     }
 
     /// The money rule, stated directly: a price is a line on the document the

@@ -660,6 +660,20 @@ pub struct WalkSummary {
     pub ended_at: Option<u64>,
     pub item_count: u64,
     pub has_document: bool,
+    /// The kind of the LATEST document built from this walk ("estimate",
+    /// "work_order", …), or `None` if none has been built.
+    ///
+    /// Latest, not first: regenerating mints a fresh snapshot artifact and
+    /// leaves the old ones intact (D7), and the board shows the document the
+    /// operator last produced.
+    pub document_kind: Option<String>,
+    /// That document's total in cents, or `None` when it has no money to
+    /// report — an unpriced kind, a priced one still all gaps, or a document
+    /// written before core computed totals at all.
+    ///
+    /// `None` is "unknown or not applicable" and never renders as $0. It is
+    /// the same distinction the amount column already makes on a line.
+    pub document_total_cents: Option<i64>,
 }
 
 #[cfg(test)]

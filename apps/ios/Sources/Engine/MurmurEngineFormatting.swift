@@ -270,7 +270,9 @@ extension MurmurEngine {
             startedAt: summary.startedAt,
             itemCount: summary.itemCount,
             hasDocument: summary.hasDocument,
-            queued: summary.queued
+            queued: summary.queued,
+            builtDocKind: summary.builtDocKind,
+            builtTotalCents: summary.builtTotalCents
         )
     }
 

@@ -44,6 +44,18 @@ pub struct WalkSummary {
     pub item_count: u32,
     pub has_document: bool,
     pub queued: bool,
+    /// The kind of the LATEST document built from this walk, `""` when none.
+    ///
+    /// Distinct from `doc_kind` above, which is advisory — the template's
+    /// DEFAULT kind, known before anything is built. This one is what the
+    /// operator actually made, and it is the difference between a row that
+    /// says "Estimate" because the walk was a landscape walk and a row that
+    /// says it because an estimate exists.
+    pub built_doc_kind: String,
+    /// That document's total in cents, `None` when it has no money to report:
+    /// an unpriced kind, a priced one still all gaps, or a document written
+    /// before core computed totals. Never 0 — see `murmur_core::WalkSummary`.
+    pub built_total_cents: Option<i64>,
 }
 
 fn walk_status(status: murmur_core::SessionStatus) -> WalkStatus {
@@ -69,6 +81,8 @@ pub(crate) fn walk_summary(core: &murmur_core::WalkSummary) -> WalkSummary {
         item_count: core.item_count.min(u32::MAX as u64) as u32,
         has_document: core.has_document,
         queued: core.status != murmur_core::SessionStatus::Processed,
+        built_doc_kind: core.document_kind.clone().unwrap_or_default(),
+        built_total_cents: core.document_total_cents,
     }
 }
 
@@ -221,6 +235,8 @@ mod tests {
             item_count: _,
             has_document: _,
             queued: _,
+            built_doc_kind: _,
+            built_total_cents: _,
         } = walks[0].clone();
     }
 

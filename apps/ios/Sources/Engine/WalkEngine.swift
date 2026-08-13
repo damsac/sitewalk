@@ -243,6 +243,14 @@ struct WalkSummary: Identifiable, Equatable {
     var itemCount: UInt32
     var hasDocument: Bool
     var queued: Bool
+    /// The kind of the document actually BUILT from this walk ("estimate"),
+    /// empty when none has been. Distinct from `docKind` above, which is the
+    /// template's advisory default and is known before anything exists.
+    var builtDocKind: String = ""
+    /// What that document came to, in cents — `nil` when there is no money to
+    /// report. Never 0: an unpriced kind and a $0 job are different claims,
+    /// and only one of them is ever true.
+    var builtTotalCents: Int64?
 }
 
 /// App-facing mirror of the uniffi `SeedReport` record (Plan 15): the exact
