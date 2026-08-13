@@ -2504,11 +2504,16 @@ mod tests {
         let outcome = b.build(&sid, "work_order").await.unwrap();
         let v = decoded_document(&store, &outcome.document_artifact_id);
 
-        // The four fields a crew standing at the gate actually needs, in
-        // schema order — two written, two honestly blank.
+        // The five fields a crew standing at the gate actually needs, in
+        // schema order — two written, three honestly blank.
         let keys: Vec<&str> =
             v["fields"].as_array().unwrap().iter().map(|f| f["key"].as_str().unwrap()).collect();
-        assert_eq!(keys, vec!["crew", "schedule", "access", "safety"]);
+        assert_eq!(keys, vec!["crew", "schedule", "access", "safety", "instructions"]);
+        assert_eq!(
+            v["fields"][4]["is_gap"], true,
+            "the crew's paragraph is a gap when the walk said nothing about how — \
+             an invented order of operations is worse than none"
+        );
         assert_eq!(v["fields"][0]["value"], "Jose, Michael");
         assert_eq!(v["fields"][0]["label"], "Assigned to");
         assert_eq!(v["fields"][1]["is_gap"], true, "no date was said — never invented");
