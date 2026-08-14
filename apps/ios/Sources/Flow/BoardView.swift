@@ -231,7 +231,7 @@ struct BoardView: View {
                             if index > 0 {
                                 Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
                             }
-                            WalkLogRow(walk: walk) {
+                            ToFileRow(walk: walk) {
                                 model.reopenWalk(sessionId: walk.sessionId)
                             } trailing: {
                                 FileChip(walk: walk, jobs: activeJobs) { jobId in
@@ -483,14 +483,23 @@ extension BoardView {
                         selectedJobId = job.id
                     }
                 }
+                // Same capsule as its neighbours. It used to be a rounded-rect
+                // well chip, which read as a different KIND of control sitting
+                // in a row of pills (Isaac, 2026-08-13: "it looks out of
+                // place"). It belongs to this row and should be shaped like it
+                // — amber ink is enough to say it makes something rather than
+                // filters something.
                 Button { showNewJob = true } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "plus").font(.system(size: 11, weight: .bold))
                         Text("Job").font(Theme.F.ui(13.5, .semibold))
                     }
                     .foregroundStyle(Theme.C.amberInk)
+                    .padding(.horizontal, 15)
+                    .frame(minHeight: 36)
+                    .background(Capsule().fill(Theme.C.orangeTint))
                 }
-                .buttonStyle(WellChipStyle(minHeight: 36))
+                .buttonStyle(.bareTap)
                 .accessibilityLabel("Add a new job")
             }
             .padding(.horizontal, Theme.S.screenPad)
@@ -972,6 +981,63 @@ private struct ToFileCard<Content: View>: View {
             RoundedRectangle(cornerRadius: Theme.S.radiusCard)
                 .stroke(Theme.C.orangeDeep, lineWidth: 1.5)
         )
+    }
+}
+
+/// A row inside TO FILE, which is a different row from the walk log's.
+///
+/// The card tidied the container and left the contents busy — Isaac's device
+/// shot, 2026-08-13: *"it still looks really busy."* Each row was carrying a
+/// timestamp, a chevron, a SENT tag and the File button around a title that
+/// truncated at about 60% width, three rows deep. Four decorations winning
+/// space from the one thing being read.
+///
+/// So this row drops all four:
+///
+/// - **No time.** TO FILE is a pile, not a log. "When" is the question the
+///   FILED list answers, which is why that one keeps its date heads.
+/// - **No chevron.** The text area is the tap target and the File button is
+///   the only other one; a third mark pointing at the first is decoration.
+/// - **No SENT tag.** Sent and unfiled are different axes, and side by side
+///   they read as contradictory. It becomes a word on the metadata line, where
+///   "REPORT SENT" is a phrase rather than a badge fighting a button.
+/// - **No truncated title.** Two lines, full width, because the sentence is
+///   the only part of the row that is content.
+private struct ToFileRow<Trailing: View>: View {
+    let walk: AppModel.WalkRecord
+    let onOpen: () -> Void
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(walk.title)
+                        .font(Theme.F.ui(16, .semibold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(meta)
+                        .font(Theme.F.mono(9.5, .medium))
+                        .tracking(0.9)
+                        .foregroundStyle(Theme.C.ink45)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            trailing
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 13)
+    }
+
+    /// "6 ITEMS · ESTIMATE SENT" — one quiet line instead of a line plus a tag.
+    private var meta: String {
+        let base = walk.subtitle.uppercased()
+        guard walk.sent, !base.isEmpty else { return base }
+        return "\(base) SENT"
     }
 }
 
