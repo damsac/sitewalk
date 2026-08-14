@@ -1383,15 +1383,6 @@ final class AppModel {
         profile == nil ? trade.dateLabel : Self.dateString("EEE — MMM dd")
     }
 
-    /// Board headline in profile mode — honest walk count, never fixture jobs.
-    var sessionTitle: String {
-        switch sessionWalks.count {
-        case 0: return "Ready to walk"
-        case 1: return "1 walk today"
-        default: return "\(sessionWalks.count) walks today"
-        }
-    }
-
     var letterheadBiz: String { profile?.businessName ?? trade.biz }
     var letterheadSub: String { profile?.letterheadSub ?? trade.bizSub }
     /// Document date — real today in profile mode ("JUL 08 2026"); a

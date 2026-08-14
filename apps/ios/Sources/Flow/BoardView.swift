@@ -46,13 +46,30 @@ struct BoardView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .top) {
-                    // Real current date once a profile exists; the frozen
-                    // fixture date only survives on the no-profile demo path.
-                    Text(model.boardDateLabel)
-                        .font(Theme.F.mono(10, .semibold))
-                        .tracking(2.0)
-                        .foregroundStyle(Theme.C.amberInk)
-                    Spacer()
+                    // THE MASTHEAD. The business name is the headline — set
+                    // in the same serif that tops every document this app
+                    // sends, so the board opens the way the paperwork opens.
+                    //
+                    // It replaces a status readout ("4 walks today"), and that
+                    // is the point rather than a side effect. A count at the
+                    // top has to answer "which count?" forever — walks, walks
+                    // today, to file, documents, money — and every answer is
+                    // wrong on some ordinary day. A name is true on all of
+                    // them. The counts still exist, in the section headers,
+                    // which is where you look when you actually want one.
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(model.letterheadBiz)
+                            .font(Theme.F.serif(28))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.7)
+                        // Real current date once a profile exists; the frozen
+                        // fixture date only survives on the no-profile demo path.
+                        Text(model.boardDateLabel)
+                            .font(Theme.F.mono(10, .semibold))
+                            .tracking(2.0)
+                            .foregroundStyle(Theme.C.amberInk)
+                    }
+                    Spacer(minLength: 12)
                     // Practice-run marker: the armed dry run is visible on the
                     // board (the old mode chip carried this; the chip is gone —
                     // per Isaac, input mode is voice-only for users — so the
@@ -90,20 +107,10 @@ struct BoardView: View {
                     // label; capped so the words survive at accessibility sizes.
                     .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 }
-                if let profile = model.profile {
-                    // Operator mode: the board carries THEIR business. Trade
-                    // comes from the profile, so no switcher — plain text.
-                    Text(model.sessionTitle)
-                        .font(Theme.F.ui(26, .bold))
-                    Text(profile.businessName.uppercased())
-                        .font(Theme.F.mono(9.5))
-                        .tracking(0.8)
-                        .foregroundStyle(Theme.C.ink60)
-                        .lineLimit(1)
-                        .padding(.top, 1)
-                } else {
-                    Text(model.trade.countTitle)
-                        .font(Theme.F.ui(26, .bold))
+                // No profile = the fixture/demo path, which still needs its
+                // trade switcher. With the name now in the masthead above,
+                // only the switcher itself survives here.
+                if model.profile == nil {
                     Menu {
                         ForEach(Fixtures.all, id: \.key) { trade in
                             Button(trade.biz) { model.switchTrade(trade) }

@@ -45,6 +45,7 @@ h1{font-family:var(--serif);font-size:26px;letter-spacing:-.01em}
   color:var(--ink-60);cursor:pointer
 }
 .switch button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+body.head-count .h-tally{display:none} body:not(.head-count) .h-count{display:none}
 
 .rack{display:flex;gap:28px;justify-content:center;flex-wrap:wrap;max-width:1240px;margin:0 auto}
 .slot{width:372px}
@@ -65,8 +66,9 @@ h1{font-family:var(--serif);font-size:26px;letter-spacing:-.01em}
 .scroll{flex:1;overflow:hidden;padding:0 20px;display:flex;flex-direction:column}
 
 /* masthead */
-.mast{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 0 0}
-.mast .who{font-family:var(--mono);font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--amber-ink);padding-top:9px}
+.mast{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 0 0;gap:14px}
+.mast .biz{font-family:var(--serif);font-size:29px;font-weight:700;letter-spacing:-.015em;line-height:1.05}
+.mast .when{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--amber-ink);margin-top:7px}
 .avatar{
   width:38px;height:38px;border-radius:50%;background:var(--ink);color:var(--paper);
   display:grid;place-items:center;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.04em;flex:none
@@ -76,7 +78,7 @@ h2 .qty{font-variant-numeric:tabular-nums}
 .ledger{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-45);margin-top:7px;font-variant-numeric:tabular-nums}
 
 /* job chips */
-.chips{display:flex;gap:7px;margin:16px 0 0;overflow:hidden;mask-image:linear-gradient(90deg,#000 88%,transparent)}
+.chips{display:flex;gap:7px;margin:20px 0 0;overflow:hidden;mask-image:linear-gradient(90deg,#000 88%,transparent)}
 .chip{
   font-size:14px;font-weight:600;padding:9px 15px;border-radius:999px;background:var(--paper-deep);
   color:var(--ink-60);white-space:nowrap;flex:none
@@ -85,7 +87,7 @@ h2 .qty{font-variant-numeric:tabular-nums}
 .chip.add{background:transparent;border:1px solid var(--hair);color:var(--ink-45);font-family:var(--mono);font-size:12px;letter-spacing:.06em}
 
 /* to-file card */
-.tofile{margin-top:18px;border:1.5px solid var(--amber-deep);border-radius:12px;overflow:hidden;background:var(--sheet)}
+.tofile{margin-top:20px;border:1.5px solid var(--amber-deep);border-radius:12px;overflow:hidden;background:var(--sheet)}
 .tofile .head{
   display:flex;justify-content:space-between;align-items:center;background:var(--amber-tint);
   padding:9px 14px;font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--amber-ink)
@@ -135,11 +137,10 @@ h2 .qty{font-variant-numeric:tabular-nums}
 <body class="dir-b">
 
 <header>
-  <h1>The board, rebuilt around the day's output</h1>
-  <div class="sub">Three states · headline is the day's output · amber decided: B</div>
+  <h1>The board opens with your letterhead</h1>
+  <div class="sub">Direction A · the business name is the headline · counts live in section headers</div>
   <div class="switch">
-    <button id="a" aria-pressed="false">A · outstanding is bright</button>
-    <button id="b" aria-pressed="true">B · the CTA is bright</button>
+    
   </div>
 </header>
 
@@ -152,10 +153,9 @@ h2 .qty{font-variant-numeric:tabular-nums}
       <div class="status"><span>2:46</span><span class="pills"><i style="width:16px"></i><i style="width:16px"></i><i style="width:24px"></i></span></div>
       <div class="scroll">
         <div class="mast">
-          <div class="who">Trimmers LLC · Thu Aug 13</div>
+          <div><div class="biz">Trimmers LLC</div><div class="when">Thu — Aug 13</div></div>
           <div class="avatar">TL</div>
         </div>
-        <h2>Ready to walk</h2>
         <div class="empty">
           <div class="mark">Talk your way through a property.<br>Jefe writes the paperwork.</div>
           <div class="hint">Nothing here yet</div>
@@ -163,7 +163,7 @@ h2 .qty{font-variant-numeric:tabular-nums}
       </div>
       <div class="dock"><div class="cta"><i></i>Start walk</div></div>
     </div>
-    <p class="note">No job chips, no card, no headers — <b>the screen has one thing on it.</b> Every element here earns its place by existing only when it has content.</p>
+    <p class="note">First run is <b>your name, the date, and one button</b>. Every other element exists only when it has content.</p>
   </div>
 
   <!-- ── WORKING DAY ───────────────────────────────────────────── -->
@@ -173,11 +173,9 @@ h2 .qty{font-variant-numeric:tabular-nums}
       <div class="status"><span>2:46</span><span class="pills"><i style="width:16px"></i><i style="width:16px"></i><i style="width:24px"></i></span></div>
       <div class="scroll">
         <div class="mast">
-          <div class="who">Trimmers LLC · Thu Aug 13</div>
+          <div><div class="biz">Trimmers LLC</div><div class="when">Thu — Aug 13</div></div>
           <div class="avatar">TL</div>
         </div>
-        <h2><span class="qty">$1,915</span> today</h2>
-        <div class="ledger">1,075 quoted · 840 invoiced · 3 sent</div>
 
         <div class="chips">
           <div class="chip on">All</div>
@@ -210,7 +208,7 @@ h2 .qty{font-variant-numeric:tabular-nums}
           <div class="time">8:03</div>
           <div class="body">
             <div class="t">Walk-through identified damage to the fence line</div>
-            <div class="m">42 Alder</div>
+            <div class="m">42 Alder · Condition</div>
           </div>
           <div class="tag">SENT</div>
         </div>
@@ -218,7 +216,7 @@ h2 .qty{font-variant-numeric:tabular-nums}
           <div class="time">7:59</div>
           <div class="body">
             <div class="t">Landscaping work at 117 today with the crew</div>
-            <div class="m">117 Lex</div>
+            <div class="m">117 Lex · Estimate · $1,075</div>
           </div>
           <div class="tag">SENT</div>
         </div>
@@ -226,14 +224,14 @@ h2 .qty{font-variant-numeric:tabular-nums}
           <div class="time">7:12</div>
           <div class="body">
             <div class="t">Front hedge trim, two hours with the small crew</div>
-            <div class="m">9 Pine Ct</div>
+            <div class="m">9 Pine Ct · Invoice · $840</div>
           </div>
           <div class="tag">SENT</div>
         </div>
       </div>
       <div class="dock"><div class="cta"><i></i>Start walk</div></div>
     </div>
-    <p class="note">The headline is <b>the money the day produced</b> — the scoreboard, not a chore count. The to-file number lives in the card badge, where it already was. To-file rows carry <b>no job name</b>, because filing is what assigns one.</p>
+    <p class="note">No status readout at the top. The name is set in the <b>same serif as the letterhead on every document you send</b> — it never goes stale and never needs a special case. The loudest thing on the screen becomes <b>the work asking for something</b>, and counts live in the section headers where you look for them.</p>
   </div>
 
   <!-- ── SCOPED / ALL FILED ────────────────────────────────────── -->
@@ -243,11 +241,9 @@ h2 .qty{font-variant-numeric:tabular-nums}
       <div class="status"><span>2:46</span><span class="pills"><i style="width:16px"></i><i style="width:16px"></i><i style="width:24px"></i></span></div>
       <div class="scroll">
         <div class="mast">
-          <div class="who">Trimmers LLC · Thu Aug 13</div>
+          <div><div class="biz">Trimmers LLC</div><div class="when">Thu — Aug 13</div></div>
           <div class="avatar">TL</div>
         </div>
-        <h2><span class="qty">$2,385</span> at 117 Lex</h2>
-        <div class="ledger">4 walks · since Aug 2</div>
 
         <div class="chips">
           <div class="chip">All</div>
@@ -295,18 +291,18 @@ h2 .qty{font-variant-numeric:tabular-nums}
       </div>
       <div class="dock"><div class="cta"><i></i>Start walk<small>117 Lex</small></div></div>
     </div>
-    <p class="note">Scoped, the headline becomes <b>the job's value to date</b>. A chip is a <b>filter and an intent</b>: with a job selected the button reads <b>Start walk · 117 Lex</b> and the walk files itself on finish. Nothing outstanding means <b>no card at all</b> — the reward for being caught up.</p>
+    <p class="note">Scoped, the headline becomes <b>that job's paperwork to date</b>. A chip is a <b>filter and an intent</b>: with a job selected the button reads <b>Start walk · 117 Lex</b> and the walk files itself on finish. Nothing outstanding means <b>no card at all</b> — the reward for being caught up.</p>
   </div>
 
 </div>
 
 <script>
-const a=document.getElementById('a'),b=document.getElementById('b');
-function set(dir){
-  document.body.classList.toggle('dir-b',dir==='b');
-  a.setAttribute('aria-pressed',dir==='a');b.setAttribute('aria-pressed',dir==='b');
+const t=document.getElementById('t'),c=document.getElementById('c');
+function set(v){
+  document.body.classList.toggle('head-count',v==='c');
+  t.setAttribute('aria-pressed',v==='t');c.setAttribute('aria-pressed',v==='c');
 }
-a.onclick=()=>set('a');b.onclick=()=>set('b');
+t.onclick=()=>set('t');c.onclick=()=>set('c');
 </script>
 </body>
 </html>
