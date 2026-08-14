@@ -23,6 +23,13 @@ struct BoardView: View {
     @State private var showNewJob = ProcessInfo.processInfo.arguments.contains("newjob=1")
     @State private var newJobName = ""
     /// TODAY collapses so JOBS clears the fold. Expanding shows the rest.
+    /// Which job the board is filtered to; `nil` = All.
+    ///
+    /// Deliberately NOT persisted. A filter set yesterday and forgotten is
+    /// indistinguishable from missing walks — and the people using this will
+    /// not think "a filter is active", they will think the app lost their
+    /// work. Every launch opens on All.
+    @State private var selectedJobId: String?
     @State private var showAllWalks = false
     /// Apple's own manage-subscriptions sheet, raised by the PRO chip.
     @State private var showManageSubscription = false
@@ -179,6 +186,7 @@ struct BoardView: View {
                 // under their job card). Now a walk lives in exactly one place —
                 // loose here until filed, then under its job alone — and the
                 // loose list is honestly labelled TODAY / EARLIER by date.
+                jobChips
                 if model.sessionWalks.isEmpty {
                     // Fresh board — no walks at all yet.
                     SectionHead(left: "TODAY", right: "0 WALKS", rightColor: Theme.C.amberInk)
@@ -188,14 +196,13 @@ struct BoardView: View {
                         .padding(.horizontal, Theme.S.screenPad)
                         .padding(.top, 16)
                 } else if model.looseWalks.isEmpty {
-                    // Walks exist but every one is filed under a job below —
-                    // nothing loose to list. Say so rather than showing an empty
-                    // "TODAY"; this is also filing's payoff ("it moved under the
-                    // job").
-                    SectionHead(left: "UNFILED", right: "0 WALKS", rightColor: Theme.C.amberInk)
-                    EmptyPanel("Everything's filed under a job below.")
-                        .padding(.horizontal, Theme.S.screenPad)
-                        .padding(.top, 16)
+                    // Nothing outstanding: the card is simply absent. An empty
+                    // "UNFILED — 0 WALKS" head used to sit here announcing the
+                    // absence of work, which is a heading over nothing — the
+                    // same defect the authored sections and the total row were
+                    // already fixed for. Being caught up should LOOK like being
+                    // caught up.
+                    EmptyView()
                 } else {
                     // Plan 20 D5: rows are tappable — reopen the walk's notes.
                     // // sac: the reopen affordance visuals (chevron? row
@@ -205,13 +212,25 @@ struct BoardView: View {
                     // in that order, so the collapsed view shows the 3 newest
                     // unfiled walks (in practice all TODAY) and expanding reveals
                     // the older ones under their own head.
-                    ForEach(visibleSections) { section in
-                        SectionHead(
-                            left: section.title,
-                            right: "\(section.walks.count) \(section.walks.count == 1 ? "WALK" : "WALKS")",
-                            rightColor: Theme.C.amberInk
-                        )
-                        ForEach(section.walks) { walk in
+                    // TO FILE — one bordered zone for the walks that still
+                    // want something, replacing a per-date run of section heads.
+                    //
+                    // The old shape put a File chip on EVERY row, filed or not,
+                    // which is how a secondary action ended up repeated down the
+                    // screen with the same weight as the walk itself (Isaac,
+                    // 2026-08-13: "a bit cluttered"). Filing is only ever
+                    // pending for unfiled walks, so the action belongs to a zone
+                    // that exists only while there is filing to do — and the
+                    // count belongs on that zone rather than on each date.
+                    //
+                    // No TODAY/EARLIER split inside the card: this is a triage
+                    // pile, newest first. Dates still group the walks that have
+                    // been filed, where "when" is the question being asked.
+                    ToFileCard(count: model.looseWalks.count) {
+                        ForEach(Array(visibleWalks.enumerated()), id: \.element.id) { index, walk in
+                            if index > 0 {
+                                Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
+                            }
                             WalkLogRow(walk: walk) {
                                 model.reopenWalk(sessionId: walk.sessionId)
                             } trailing: {
@@ -221,6 +240,8 @@ struct BoardView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.top, 16)
                     if model.looseWalks.count > Self.collapsedWalkCount {
                         // Tier 3: was 8.5pt amber text with no bounds at all
                         // (~27pt tall). Amber also goes — a disclosure toggle
@@ -413,54 +434,19 @@ extension BoardView {
     /// Only ACTIVE jobs show. A contractor juggling ten live jobs does not want
     /// last spring's finished work in the way; done/archived stay in the model
     /// (and sync) but are out of the daily view.
+    /// Jobs as a filter strip, plus the walks already filed under them.
+    ///
+    /// Replaces a second full list — its own head, count, create button and a
+    /// stack of job cards — sitting under the walk log. Two lists with two
+    /// hierarchies is what made this screen read as cluttered (Isaac,
+    /// 2026-08-13): a job is a LENS on the walks, not a parallel thing to
+    /// browse. The walks that were nested inside each job card now sit in one
+    /// list the chips narrow.
     var jobsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // SectionHead's grammar, composed inline rather than used directly:
-            // SectionHead draws its own full-width bottom rule, so putting the
-            // + beside it as a sibling shrinks the head and truncates the rule.
-            // Same padding, same labels, same heavy rule — one row.
-            HStack(spacing: 10) {
-                SectionLabel("JOBS")
-                Spacer()
-                SectionLabel("\(activeJobs.count) OPEN", color: Theme.C.amberInk)
-                // Labeled, not a bare glyph: Isaac's field report was "the plus
-                // sign to add a new job isn't apparent enough." A lone + next
-                // to a count reads as decoration. Words and a border make it
-                // read as a control — the same grammar the Document Builder's
-                // "NEW DOCUMENT TYPE" already uses.
-                Button { showNewJob = true } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Add job")
-                            .font(Theme.F.ui(13, .semibold))
-                    }
-                    .foregroundStyle(Theme.C.amberInk)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.S.radiusCard)
-                            .stroke(Theme.C.orangeDeep.opacity(0.45), lineWidth: 1)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Add a new job")
-            }
-            .padding(.leading, Theme.S.screenPad)
-            .padding(.trailing, Theme.S.screenPad - 8)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-            // JOBS · N OPEN · Add job share one line.
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-            .overlay(alignment: .bottom) {
-                Theme.C.ink.frame(height: 1.5)
-            }
-
             if let jobsError {
-                // Sentence case. Caps for a stamped LABEL is correct; caps for
-                // a whole sentence costs 10–20% reading speed because it
-                // destroys word shapes — and this is a message that has to land.
+                // Sentence case: caps for a stamped LABEL is correct, caps for
+                // a whole sentence destroys word shapes, and this has to land.
                 Text(jobsError)
                     .font(Theme.F.ui(13, .medium))
                     .foregroundStyle(Theme.C.redTag)
@@ -468,38 +454,7 @@ extension BoardView {
                     .padding(.horizontal, Theme.S.screenPad)
                     .padding(.top, 8)
             }
-
-            if activeJobs.isEmpty {
-                EmptyPanel("No jobs yet. Add one and your walks will file under it.")
-                    .padding(.horizontal, Theme.S.screenPad)
-                    .padding(.top, 12)
-                    .padding(.bottom, 14)
-            } else {
-                // Spaced, inset cards on a paperDeep bed — the container is
-                // what does the grouping now, so the cards need air between
-                // them and a darker ground to read as sheets ON something.
-                //
-                // The bed is on the CARDS, not on the section: without it,
-                // sheet-white cards on paper-white are invisible as
-                // containers and the grouping does nothing — but a bed under
-                // the header too made JOBS the one section head in the app
-                // sitting on grey while TODAY, two rows up, sat on paper, and
-                // when the list was empty it painted a grey slab grounding
-                // nothing (Isaac, 2026-08-09). The bed now appears exactly
-                // when there is something for it to ground.
-                VStack(spacing: 10) {
-                    ForEach(activeJobs) { job in
-                        OperatorJobCard(job: job, walks: walks(for: job.id)) { walk in
-                            model.reopenWalk(sessionId: walk.sessionId)
-                        }
-                    }
-                }
-                .padding(.horizontal, Theme.S.screenPad)
-                .padding(.top, 12)
-                .padding(.bottom, 14)
-                .frame(maxWidth: .infinity)
-                .background(Theme.C.paperDeep)
-            }
+            filedWalksList
         }
         .onAppear(perform: loadJobs)
         // A SHEET, not an `.alert` (design review P1 #9). A TextField inside an
@@ -514,6 +469,114 @@ extension BoardView {
             .presentationDetents([.height(300)])
             .presentationBackground(Theme.C.paper)
         }
+    }
+
+    /// The filter row. `+ Job` rides inside it rather than owning a full-width
+    /// slot: creating a job is rare, and a dashed box reads as an empty
+    /// placeholder rather than a control (see `WellChipStyle`).
+    private var jobChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                jobChip(title: "All", selected: selectedJobId == nil) { selectedJobId = nil }
+                ForEach(activeJobs) { job in
+                    jobChip(title: job.name, selected: selectedJobId == job.id) {
+                        selectedJobId = job.id
+                    }
+                }
+                Button { showNewJob = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus").font(.system(size: 11, weight: .bold))
+                        Text("Job").font(Theme.F.ui(13.5, .semibold))
+                    }
+                    .foregroundStyle(Theme.C.amberInk)
+                }
+                .buttonStyle(WellChipStyle(minHeight: 36))
+                .accessibilityLabel("Add a new job")
+            }
+            .padding(.horizontal, Theme.S.screenPad)
+            .padding(.vertical, 12)
+        }
+    }
+
+    /// No tick and no travel on purpose: selecting a filter changes what you
+    /// SEE, and the pill filling with ink is that feedback, immediately. The
+    /// tick belongs to taps that commit something (`BareTapStyle`).
+    private func jobChip(
+        title: String, selected: Bool, tap: @escaping () -> Void
+    ) -> some View {
+        Button(action: tap) {
+            Text(title)
+                .font(Theme.F.ui(13.5, .semibold))
+                .lineLimit(1)
+                .foregroundStyle(selected ? Theme.C.paper : Theme.C.ink60)
+                .padding(.horizontal, 15)
+                .frame(minHeight: 36)
+                .background(Capsule().fill(selected ? Theme.C.ink : Theme.C.paperDeep))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    /// Walks already filed, narrowed by the selected chip. Grouped by day —
+    /// unlike the TO FILE pile, where the question is "what still needs me?",
+    /// the question here is "when did I do this?".
+    private var filedWalksList: some View {
+        let walks = filedWalks
+        return Group {
+            if walks.isEmpty {
+                if let id = selectedJobId {
+                    // A filter that hides everything has to explain itself and
+                    // offer the way out, or it reads as lost work.
+                    VStack(spacing: 10) {
+                        EmptyPanel("No walks filed at \(jobName(id)) yet.")
+                        Button("Show all walks") { selectedJobId = nil }
+                            .font(Theme.F.ui(13, .semibold))
+                            .buttonStyle(WellChipStyle(minHeight: 34))
+                    }
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.vertical, 14)
+                } else if activeJobs.isEmpty {
+                    EmptyPanel("No jobs yet. Add one and your walks will file under it.")
+                        .padding(.horizontal, Theme.S.screenPad)
+                        .padding(.bottom, 14)
+                }
+            } else {
+                ForEach(
+                    AppModel.groupWalksByDay(walks, now: Date(), calendar: .current)
+                ) { section in
+                    SectionHead(
+                        left: section.title,
+                        right: "\(section.walks.count) \(section.walks.count == 1 ? "WALK" : "WALKS")",
+                        rightColor: Theme.C.amberInk
+                    )
+                    ForEach(section.walks) { walk in
+                        WalkLogRow(walk: walk) {
+                            model.reopenWalk(sessionId: walk.sessionId)
+                        } trailing: {
+                            // Where it went, in the slot an unfiled row uses
+                            // for what it needs. One trailing column, two
+                            // states, never both.
+                            Text(jobName(walk.jobId))
+                                .font(Theme.F.ui(12, .semibold))
+                                .foregroundStyle(Theme.C.ink45)
+                                .lineLimit(1)
+                                .frame(maxWidth: 108, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var filedWalks: [AppModel.WalkRecord] {
+        let filed = model.sessionWalks.filter { $0.jobId != nil }
+        guard let selectedJobId else { return filed }
+        return filed.filter { $0.jobId == selectedJobId }
+    }
+
+    private func jobName(_ id: String?) -> String {
+        guard let id else { return "" }
+        return operatorJobs.first { $0.id == id }?.name ?? "Filed"
     }
 
     var activeJobs: [JobModel] { operatorJobs.filter { $0.status == .active } }
@@ -875,6 +938,43 @@ struct CoachCallout: View {
 /// Two independent targets, deliberately siblings rather than nested: tapping
 /// the row reopens the walk's notes, and the trailing chip files it under a
 /// job. A `Menu` inside the row's `Button` would fight it for taps.
+/// The bordered zone for walks that still need filing.
+///
+/// Amber hairline and label only — the fill stays paper. Isaac's call on the
+/// mockup (direction B): amber marks the one thing you press, and START WALK
+/// owns it. A card that competed with the button for the eye would make the
+/// screen busier, which is the opposite of the brief.
+private struct ToFileCard<Content: View>: View {
+    let count: Int
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("TO FILE")
+                    .font(Theme.F.mono(9.5, .semibold))
+                    .tracking(1.4)
+                Spacer()
+                Text("\(count)")
+                    .font(Theme.F.mono(9.5, .semibold))
+                    .tracking(1.0)
+            }
+            .foregroundStyle(Theme.C.amberInk)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(Theme.C.orangeTint)
+            content
+        }
+        .background(Theme.C.sheet)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.S.radiusCard))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.S.radiusCard)
+                .stroke(Theme.C.orangeDeep, lineWidth: 1.5)
+        )
+    }
+}
+
 private struct WalkLogRow<Trailing: View>: View {
     let walk: AppModel.WalkRecord
     let onOpen: () -> Void
