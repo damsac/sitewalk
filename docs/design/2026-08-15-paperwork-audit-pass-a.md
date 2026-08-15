@@ -148,3 +148,17 @@ isn't counted. Two ways:
 Recommendation: (1), because an invoice that shows a total without breaking out
 tax is the version a bookkeeper questions — but (2) is genuinely free and worth
 knowing we already have.
+
+**Decided: option 1.** The tax field gets a total-participating slot — a row
+directly above TOTAL, included in the sum, giving Subtotal / Tax / Total. So
+the build is: a manual `tax` field on the priced kinds, a renderer that draws
+it between the last line and the total, and a total that adds it. The amount is
+typed; nothing computes a rate.
+
+Two things for whoever builds it. The app currently sums `amount_cents` in
+`DocumentModel.totalValue` while core computes its own total (#337) — tax must
+land in BOTH or they will disagree on the same document, which is exactly the
+duplication #337 was opened to end; folding the app's sum into core's number is
+the better fix and this is the moment it becomes urgent. And an unfilled tax
+field prints nothing at all: no "TAX ——", no zero row. A blank is a real state
+here, the same as every other optional field.
