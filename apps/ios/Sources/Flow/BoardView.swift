@@ -239,32 +239,26 @@ struct BoardView: View {
                                 }
                             }
                         }
-                    }
-                    .padding(.horizontal, Theme.S.screenPad)
-                    .padding(.top, 16)
-                    if model.looseWalks.count > Self.collapsedWalkCount {
-                        // Tier 3: was 8.5pt amber text with no bounds at all
-                        // (~27pt tall). Amber also goes — a disclosure toggle
-                        // is not the screen's primary action.
-                        // Sized to its label, not the screen. Full-width gave a
-                        // disclosure toggle the visual weight of a primary
-                        // action (Isaac's on-device shot: a large grey slab).
-                        HStack {
+                        // The disclosure belongs to the pile it expands. It
+                        // used to sit BELOW the card with a rule of its own,
+                        // which read as a separate section header for nothing
+                        // — the card had already claimed the group.
+                        if model.looseWalks.count > Self.collapsedWalkCount {
+                            Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
                             Button { showAllWalks.toggle() } label: {
                                 Text(showAllWalks
                                      ? "Show less"
-                                     : "Show all \(model.looseWalks.count) walks")
+                                     : "Show all \(model.looseWalks.count)")
                                     .font(Theme.F.ui(13, .semibold))
+                                    .foregroundStyle(Theme.C.ink60)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
                             }
-                            .buttonStyle(WellChipStyle(minHeight: 34))
-                            Spacer()
-                        }
-                        .padding(.horizontal, Theme.S.screenPad)
-                        .padding(.vertical, 8)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(Theme.C.hairlineSoft).frame(height: 1)
+                            .buttonStyle(.bareTap)
                         }
                     }
+                    .padding(.horizontal, Theme.S.screenPad)
+                    .padding(.top, 16)
 
                     if let reopenError = model.reopenError {
                         // F4 floor: the breadcrumb surfaces; chrome is sac's.
