@@ -116,3 +116,35 @@ operator-controlled, testers are being paid by cheque and transfer arranged
 off-document, and a separate remit-to block would be a second place to maintain
 the same facts. Revisit if a tester actually asks for card payment or an ACH
 block — that is the signal that it needs its own structure.
+
+### Revised, same day: tax is a manual field, not a profile setting
+
+Isaac: *"let's just leave tax as a manual field the user has the option to
+input — that keeps it simple."* And on terms: *"the user needs to turn that on
+in settings or wherever, and when they turn it on they have the option to
+change the wording."*
+
+So tax drops the profile setting, the stored rate, and the snapshot problem
+along with it: the operator types an AMOUNT on the document, once, where they
+can see the subtotal it applies to. No rate, no arithmetic the app can get
+wrong, nothing to configure before the first invoice. If computed tax is ever
+wanted, a rate on the profile is a strict upgrade from here and this field is
+where it would land.
+
+**The one thing this forces a decision on: a manual tax field is only worth
+building if it reaches the TOTAL.** Today a `fill: manual` field renders inside
+a section, and sections sit above the lines — a tax that prints in a paragraph
+and is not added up is worse than no tax line, because it looks paid for and
+isn't counted. Two ways:
+
+1. **Tax is a manual field with a total-participating slot** — renders as a row
+   directly above TOTAL, included in the sum. Gives the trade-standard
+   Subtotal / Tax / Total shape. Small, and the schema already distinguishes
+   `total_kind`.
+2. **Tax is just a line the operator adds** — ADD LINE exists and already does
+   this; EST-0001 carried "Tax $35" that way, summed correctly, with no work at
+   all. Costs nothing, and gives no subtotal/tax labelling.
+
+Recommendation: (1), because an invoice that shows a total without breaking out
+tax is the version a bookkeeper questions — but (2) is genuinely free and worth
+knowing we already have.
