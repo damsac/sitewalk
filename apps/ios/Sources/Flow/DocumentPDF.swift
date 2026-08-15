@@ -74,7 +74,13 @@ enum DocumentPDF {
             docDate: docDate ?? trade.docDate,
             branding: branding, layout: layout
         )
-        .frame(width: pageSize.width, height: pageSize.height)
+        // Width is fixed; HEIGHT is whatever the document needs. It used to be
+        // pinned to one page height, which did not fit long documents onto a
+        // page — it CROPPED them, silently, with no error and nothing in the
+        // suite watching. A twenty-line estimate is an ordinary walk, and the
+        // lines that fell off were lines someone was being charged for.
+        .frame(width: pageSize.width)
+        .frame(minHeight: pageSize.height, alignment: .top)
 
         let renderer = ImageRenderer(content: content)
         renderer.scale = 3
@@ -89,8 +95,27 @@ enum DocumentPDF {
         let pdf = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: pageSize))
         do {
             try pdf.writePDF(to: url) { ctx in
-                ctx.beginPage()
-                image.draw(in: CGRect(origin: .zero, size: pageSize))
+                // One tall render, sliced into pages: each page draws the whole
+                // image shifted up by a page height, and the page bounds clip
+                // the rest. Simple, and it cannot lose content the way a single
+                // fixed-height page did.
+                //
+                // KNOWN LIMIT: a slice can land mid-row, so a line can be cut
+                // across two pages. That is a cosmetic fault where cropping was
+                // a correctness one, and the fix (laying out page by page,
+                // measuring row heights) is a different piece of work. Recorded
+                // rather than hidden — see the paperwork audit plan.
+                let totalHeight = image.size.height
+                let pageCount = max(1, Int(ceil(totalHeight / pageSize.height)))
+                for page in 0..<pageCount {
+                    ctx.beginPage()
+                    image.draw(in: CGRect(
+                        x: 0,
+                        y: -CGFloat(page) * pageSize.height,
+                        width: pageSize.width,
+                        height: totalHeight
+                    ))
+                }
             }
             return url
         } catch {
