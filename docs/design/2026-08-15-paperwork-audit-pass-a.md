@@ -84,3 +84,35 @@ Deposit arithmetic, then tax, then invoice due-date/terms. Those three are the
 difference between a document a trade can use and one it has to redo by hand —
 and all three are schema-shaped, which is the cheapest kind of fix here: the
 #321 seeding upgrade delivers them to existing installs with no migration.
+
+---
+
+## Decisions on the P0 fixes (Isaac, 2026-08-15)
+
+**Tax is an optional business-profile setting.** *"There should just be an
+option to add tax in the business profile. If it does get set up, then it gets
+pulled into the paperwork, if not then it doesn't."*
+
+So tax is absent by default and appears only once configured — which is the
+honest posture and matches the app's existing rule that a blank is a real
+state, not a defect. Two consequences worth building deliberately: a document
+produced BEFORE tax was configured must not retroactively grow a tax line
+(documents are snapshots, D7), and the rate has to be stored on the document at
+build time rather than read live at render.
+
+**`deposit_held` is manual.** Typed at review, like PREPARED FOR. Nothing in a
+walk knows it, it is entered once per move-out, and it is the number a tenant
+disputes — so it should be deliberate rather than inferred.
+
+**Invoice terms are manual and off by default.** *"Should be manually turned on
+and filled in by the user."* Same shape as `DocumentLayout.termsText` /
+`showSignature` today: the operator turns it on, writes their own words, and it
+persists. No "Net 30" default — a payment term the operator did not choose is a
+promise the app made on their behalf.
+
+**Remit-to stays in the letterhead** for now (Isaac: *"letterhead is ok but
+whatever you think"*). Reasoning: `Branding.contactLine` already exists and is
+operator-controlled, testers are being paid by cheque and transfer arranged
+off-document, and a separate remit-to block would be a second place to maintain
+the same facts. Revisit if a tester actually asks for card payment or an ACH
+block — that is the signal that it needs its own structure.
