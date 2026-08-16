@@ -196,3 +196,46 @@ divergence IS the operator's unsent edit.
 the board and the PDF will disagree about the same document — one counting tax
 and one not. That is the actual constraint tax imposes, rather than the
 deduplication I claimed.
+
+---
+
+## Terms belong to the document type, not to the letterhead
+
+Turning terms on for the audit renders exposed that `DocumentLayout.termsText`
+is GLOBAL — one text across all seven kinds. The estimate wants "50% deposit to
+schedule · balance on completion"; the invoice wants "Net 30, 1.5% monthly".
+Both are correct and neither belongs on the other document, and an operator can
+only have one.
+
+Isaac, 2026-08-16: *"maybe we just make the terms thing a custom thing that
+people can add when they edit documents? In the Structure section?"*
+
+That is right, and the mechanism is already built. `fill: "static"` — a schema
+field whose value is fixed text printed on every document of that kind — has
+been in `VALID_FILL_KINDS` since Plan 19, is handled in the fill pass
+(`document.rs:697`), and its own test fixture value is "Valid for 30 days."
+Nothing uses it, the same way nothing used `fill: "manual"` until PREPARED FOR
+made it load-bearing.
+
+So terms are not a new feature. They are a static field on a schema, and the
+only missing piece is the **Document Builder** (#234) — the editor that lets an
+operator change a document's structure at all.
+
+**Recommendation: fold terms into #234's scope rather than build a second
+mechanism now.** Concretely:
+
+- Leave `DocumentLayout.termsText` alone. One global text beats none, and it
+  works today.
+- When the Builder ships, a terms field is a static field the operator adds to
+  whichever kinds want one — with different wording per kind, by construction.
+- At that point `termsText` migrates into the estimate and invoice schemas as
+  static fields and the layout setting retires.
+
+Building per-kind terms into the Letterhead Studio first would mean shipping a
+second, weaker version of a mechanism that already exists — and then deleting
+it when the Builder lands.
+
+**One thing this also resolves:** the new VALIDITY block and the global terms
+currently overlap, because "quote valid 30 days" is the natural thing to write
+in both. Once terms are per-kind and authored on the estimate, the operator can
+say it once, wherever they prefer.
