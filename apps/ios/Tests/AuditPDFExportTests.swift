@@ -18,11 +18,23 @@ final class AuditPDFExportTests: XCTestCase {
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
         for spec in AuditFixtures.all {
+            // Terms and the signature line are OPERATOR-authored and off by
+            // default (LetterheadStudioView). The audit renders the money
+            // documents with them ON, because that is the configuration a
+            // trade would actually send — and the point of the audit is to
+            // read what a client receives.
+            var layout = DocumentLayout.default
+            if spec.name.hasSuffix("estimate") || spec.name.hasSuffix("invoice") {
+                layout.termsText = spec.name.hasSuffix("estimate")
+                    ? "50% deposit to schedule · balance on completion · quote valid 30 days."
+                    : "Net 30. Late balances accrue 1.5% monthly."
+                layout.showSignature = true
+            }
             let url = try XCTUnwrap(
                 DocumentPDF.render(
                     trade: Fixtures.all[0], document: spec.document,
                     biz: "Trimmers LLC", bizSub: "Landscape & property care",
-                    docDate: "AUG 16 2026"
+                    docDate: "AUG 16 2026", layout: layout
                 )
             )
             let dest = out.appendingPathComponent("\(spec.name).pdf")
