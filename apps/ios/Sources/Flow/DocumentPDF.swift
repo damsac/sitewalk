@@ -169,8 +169,11 @@ private struct PDFPageView: View {
             // A document with nothing to total prints no total row — WO-0002
             // went to a crew with `TOTAL ——` under the assignment.
             if document.showsTotal {
-                TotalRow(key: document.totalKey, value: document.totalValue, gaps: 0)
-                    .padding(.top, 2)
+                ForEach(document.totalLines) { line in
+                    TotalRow(key: line.key, value: line.value, gaps: 0)
+                        .padding(.top, line.strong ? 2 : 0)
+                        .opacity(line.strong ? 1 : 0.85)
+                }
             }
             // Structure basics (DocumentLayout): operator terms + signature line.
             if !layout.termsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
