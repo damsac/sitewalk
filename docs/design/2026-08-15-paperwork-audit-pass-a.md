@@ -162,3 +162,37 @@ duplication #337 was opened to end; folding the app's sum into core's number is
 the better fix and this is the moment it becomes urgent. And an unfilled tax
 field prints nothing at all: no "TAX ——", no zero row. A blank is a real state
 here, the same as every other optional field.
+
+---
+
+## Pass B, first finding — and a correction
+
+`FFIDocumentPayload` carries `static_total_cents` (null for every built-in) and
+NOT the `total_cents` core started computing in #337. So core computes a
+document total that nothing reads: the app still sums `amount_cents` itself in
+`DocumentModel.totalValue`, and core's number is used only by the board.
+
+**The correction:** I wrote above that folding the app's sum into core's number
+is the better fix. That is wrong, and the reason matters.
+
+The two numbers are not duplicates of each other. Core's total is a SNAPSHOT,
+computed at build and frozen into the artifact. The app's sum is LIVE — the
+operator can retitle a line, change an amount or delete a row at review, before
+anything is sent, and the total on screen has to follow. Replace the app's sum
+with core's and an edited estimate would display a total that contradicts its
+own visible lines, which is the worst class of defect this document can carry.
+
+So both stay, with distinct jobs:
+
+- **core's `total_cents`** — what this document was worth when it was built.
+  Feeds the board, and anything counting money across walks.
+- **`DocumentModel.totalValue`** — what the page in front of you adds up to
+  right now, edits included.
+
+They agree at build and are allowed to diverge afterwards, because that
+divergence IS the operator's unsent edit.
+
+**What this means for tax:** it has to be included in both, in the same way, or
+the board and the PDF will disagree about the same document — one counting tax
+and one not. That is the actual constraint tax imposes, rather than the
+deduplication I claimed.
