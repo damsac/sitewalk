@@ -18,8 +18,15 @@ enum DocumentPDF {
         // enters it) but PRINTS in the total block, where the arithmetic that
         // uses it lives. Left in both, the page states the same number twice
         // and the second one looks like a different fact.
+        // Money fields that PRINT in the total block are typed in a section
+        // (that is how the operator enters them) and must not also appear
+        // above the lines, or the page states the same number twice and the
+        // second one reads as a different fact. Dates and windows are NOT in
+        // this list: "Valid until" and "Due" are document facts, not
+        // arithmetic, and they belong on the page where they are read.
+        let printsInTotals: Set<String> = ["deposit_held", "tax"]
         out.fields = section.fields.filter {
-            !($0.value ?? "").isEmpty && $0.key != "deposit_held"
+            !($0.value ?? "").isEmpty && !printsInTotals.contains($0.key)
         }
         return out
     }
