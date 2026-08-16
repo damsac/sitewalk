@@ -473,6 +473,18 @@ pub fn builtin_schemas() -> Vec<DocumentSchema> {
                  where on the property, and anything notable about how or in what order. \
                  No prices — they are on the lines.",
                 )]),
+                // What makes this an OFFER rather than a list of prices.
+                //
+                // An estimate with no window can be accepted next spring at
+                // last spring's numbers, and one with no tax line is a total a
+                // client will dispute at the door. Both are manual: nothing in
+                // a walk knows how long the operator wants to stand behind a
+                // price, and tax is a figure they type once (Isaac,
+                // 2026-08-15: "just leave tax as a manual field").
+                filled("validity", "Validity", vec![manual_field(
+                    "valid_until", "text", "Valid until",
+                )]),
+                filled("tax", "Tax", vec![manual_field("tax", "text", "Tax")]),
             ],
         ),
         // INVOICE — the same document after the fact, and the difference is
@@ -490,6 +502,14 @@ pub fn builtin_schemas() -> Vec<DocumentSchema> {
                 "2-3 plain sentences in PAST tense: what was actually done, where, and \
                  anything the client should know about the finished work. No prices.",
                 )]),
+                // What makes this a DEMAND rather than a receipt: a date it
+                // is due by, and the tax that is part of what is owed. An
+                // invoice with neither is a statement of work already done,
+                // which is not a thing anyone pays against.
+                filled("payment", "Payment", vec![manual_field(
+                    "due_date", "text", "Due",
+                )]),
+                filled("tax", "Tax", vec![manual_field("tax", "text", "Tax")]),
             ],
         ),
         // WORK ORDER — the only one of these written for the crew, and the

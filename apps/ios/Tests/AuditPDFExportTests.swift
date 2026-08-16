@@ -87,6 +87,11 @@ enum AuditFixtures {
                         fields: [field("prepared_for", "Prepared for", "Mary Lou\n117 Lex St")]),
                     DocSectionFixture(key: "scope", label: "SCOPE OF WORK",
                         fields: [field("scope_summary", "Scope of work", scope)]),
+                    DocSectionFixture(key: "validity", label: "VALIDITY",
+                        fields: [field("valid_until", "Valid until", "September 15, 2026",
+                                       para: false)]),
+                    DocSectionFixture(key: "tax", label: "TAX",
+                        fields: [field("tax", "Tax", "$88.69", para: false)]),
                 ])),
             Spec(name: "2-invoice", document: doc(
                 "invoice", "INVOICE", "INV-0001", totalKey: "AMOUNT DUE", priced: true,
@@ -96,6 +101,10 @@ enum AuditFixtures {
                     DocSectionFixture(key: "work", label: "WORK PERFORMED",
                         fields: [field("work_summary", "Work performed",
                             scope.replacingOccurrences(of: "We will", with: "We"))]),
+                    DocSectionFixture(key: "payment", label: "PAYMENT",
+                        fields: [field("due_date", "Due", "September 15, 2026", para: false)]),
+                    DocSectionFixture(key: "tax", label: "TAX",
+                        fields: [field("tax", "Tax", "$88.69", para: false)]),
                 ])),
             Spec(name: "3-work-order", document: doc(
                 "work_order", "WORK ORDER", "WO-0001", totalKey: "TOTAL", priced: false,

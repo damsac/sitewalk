@@ -143,15 +143,23 @@ struct DocumentModel {
         let strong: Bool
     }
 
-    /// The deposit the operator typed, in cents. `nil` when the document has
-    /// no such field or it is still blank.
-    var depositHeldCents: Int? {
-        guard let raw = sections
-            .flatMap(\.fields)
-            .first(where: { $0.key == "deposit_held" })?
-            .value
+    /// A manual money field, in cents. `nil` when the document has no such
+    /// field or it is still blank — blank is a real state, not a zero.
+    func manualCents(_ key: String) -> Int? {
+        guard let raw = sections.flatMap(\.fields).first(where: { $0.key == key })?.value
         else { return nil }
         return DocumentModel.parseCents(raw)
+    }
+
+    var depositHeldCents: Int? { manualCents("deposit_held") }
+
+    /// Tax as typed. An AMOUNT, never a rate: nothing computes a percentage,
+    /// so nothing can compute it wrongly (Isaac, 2026-08-15).
+    var taxCents: Int? { manualCents("tax") }
+
+    /// What the lines come to, before tax.
+    var subtotalCents: Int {
+        rows.compactMap { DocumentModel.parseCents($0.amount) }.reduce(0, +)
     }
 
     /// "$500", "500", "1,250.50" → cents. Same tolerance the amount editor
@@ -176,8 +184,26 @@ struct DocumentModel {
     /// invented about someone's money.
     var totalLines: [TotalLine] {
         let plain = [TotalLine(key: totalKey, value: totalValue, strong: true)]
+
+        // Tax, when the operator has entered one: the trade-standard
+        // SUBTOTAL / TAX / TOTAL, and the total is the one that INCLUDES it.
+        // A tax that printed beside a total which ignored it would be worse
+        // than no tax line — it would look paid for and not be counted.
+        if let tax = taxCents, depositHeldCents == nil {
+            let subtotal = subtotalCents
+            return [
+                TotalLine(key: "SUBTOTAL", value: DocumentModel.money(cents: subtotal), strong: false),
+                TotalLine(key: "TAX", value: DocumentModel.money(cents: tax), strong: false),
+                TotalLine(
+                    key: totalKey,
+                    value: DocumentModel.money(cents: subtotal + tax),
+                    strong: true
+                ),
+            ]
+        }
+
         guard let deposit = depositHeldCents else { return plain }
-        let deductions = rows.compactMap { DocumentModel.parseCents($0.amount) }.reduce(0, +)
+        let deductions = subtotalCents
         // Held, then taken, then left — the order the sentence is spoken in,
         // and the order a tenant checks it in (Isaac, 2026-08-16).
         return [
