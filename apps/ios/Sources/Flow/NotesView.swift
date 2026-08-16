@@ -767,7 +767,12 @@ struct NotesView: View {
             }
             lines.append("")
         }
-        lines.append("Prepared with Sitewalk")
+        // The product has been Jefe since #202 (2026-07-12). The PDF footer
+        // was renamed then; this one — the TEXT export an operator shares
+        // straight out of the notes screen — was missed, and has been sending
+        // the dead name to whoever receives it ever since. Found in Isaac's
+        // own walk-notes export, 2026-08-16.
+        lines.append("Prepared with Jefe")
         let text = lines.joined(separator: "\n")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("walk-notes.txt")
         try? text.data(using: .utf8)?.write(to: url)
