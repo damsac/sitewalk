@@ -194,7 +194,16 @@ private struct PDFPageView: View {
             //
             // A document with nothing to total prints no total row — WO-0002
             // went to a crew with `TOTAL ——` under the assignment.
-            if document.showsTotal {
+            // A total with nothing in it prints NOTHING. On screen "——" is the
+            // app telling the operator a number is still missing; on the page
+            // it is a heading over an em dash addressed to a client — Isaac's
+            // MO-0002 went out reading "DEPOSIT DEDUCTION ——".
+            //
+            // Exactly the rule `printableRow` already applies to a gap's
+            // amount ("an unfilled amount prints blank, not a yellow dashed
+            // ——"). The total row never got it.
+            if document.showsTotal,
+               !document.totalLines.allSatisfy({ $0.value == DocumentModel.noTotal }) {
                 ForEach(document.totalLines) { line in
                     TotalRow(key: line.key, value: line.value, gaps: 0)
                         .padding(.top, line.strong ? 2 : 0)
