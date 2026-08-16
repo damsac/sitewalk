@@ -332,3 +332,117 @@ async fn real_walk_becomes_a_work_order() {
         assert_eq!(line["item_id"].as_str().unwrap(), item.id, "a line lost its item");
     }
 }
+
+/// A PROPERTY walk: the input the property-scoped kinds are built for.
+/// States a unit, a move-out date, damage separated from wear, and access —
+/// and deliberately says nothing about a crew or a schedule, so the audit can
+/// watch those come back as gaps instead of inventions.
+const PROPERTY_TRANSCRIPT: &str = "Unit two at 117 Lex, move-out walk, tenant handed \
+keys back on the twelfth. Carpet in the main bedroom has a burn near the window, that's \
+damage. Wall scuffs down the hallway are normal wear. Kitchen drawer front is cracked. \
+Blinds in the second bedroom are missing two slats. Lockbox code is 8890.";
+
+/// Pass C of the paperwork audit: does each kind fill from a walk that states
+/// its fields, and stay honestly blank where the walk says nothing?
+///
+/// One run over five kinds. The invariants asserted here are the ones that
+/// hold for EVERY document regardless of trade: money only where the kind is
+/// priced, no crew name on a document a client reads, and no field invented
+/// from a walk that never mentioned it.
+#[tokio::test]
+#[ignore = "hits the real API; set ANTHROPIC_API_KEY and run with --ignored"]
+async fn every_kind_fills_from_a_walk_that_states_it() {
+    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("set ANTHROPIC_API_KEY");
+
+    // kind, session template, transcript, priced
+    let cases: [(&str, &str, &str, bool); 5] = [
+        ("invoice", "landscape", TRANSCRIPT, true),
+        ("report", "landscape", TRANSCRIPT, false),
+        ("condition", "property", PROPERTY_TRANSCRIPT, false),
+        ("move_out", "property", PROPERTY_TRANSCRIPT, true),
+        ("inspection", "inspection", PROPERTY_TRANSCRIPT, false),
+    ];
+
+    for (kind, template, transcript, priced) in cases {
+        let provider = Arc::new(AnthropicProvider::from_env(api_key.clone(), model()));
+        let store = Store::open_in_memory("smoke-device").unwrap();
+        let session = store.start_session_with_template(None, template).unwrap();
+        store.append_transcript(&session.id, transcript).unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        let store = Arc::new(Mutex::new(store));
+
+        SessionProcessor::new(
+            provider.clone(),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        )
+        .process(&session.id)
+        .await
+        .expect("processing failed");
+
+        let outcome = DocumentBuilder::new(
+            provider,
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(NullMemoryStore),
+        )
+        .build(&session.id, kind)
+        .await
+        .unwrap_or_else(|e| panic!("{kind} build failed: {e:?}"));
+
+        let guard = store.lock().unwrap();
+        let artifact = guard.get_artifact(&outcome.document_artifact_id).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&artifact.body).unwrap();
+
+        println!("\n===== {} =====", kind.to_uppercase());
+        for f in doc["fields"].as_array().unwrap() {
+            let value = f["value"].as_str().unwrap_or("—— (gap)");
+            println!("[{}] {}: {}", f["key"], f["label"].as_str().unwrap_or(""), value);
+        }
+        for line in doc["lines"].as_array().unwrap() {
+            println!(
+                "  {}   amount: {}",
+                line["title"].as_str().unwrap_or(""),
+                line["amount_cents"]
+            );
+        }
+        println!("  total_cents: {}", doc["total_cents"]);
+
+        assert!(!outcome.queued, "{kind}: the compose call did not complete");
+
+        // Money lives only where the kind is priced.
+        if !priced {
+            for line in doc["lines"].as_array().unwrap() {
+                assert!(
+                    line["amount_cents"].is_null(),
+                    "{kind}: money on an unpriced document: {line}"
+                );
+            }
+            assert!(doc["total_cents"].is_null(), "{kind}: an unpriced total");
+        }
+
+        // A crew name is a work-order fact. No client-facing kind may carry
+        // one in a line title (Isaac's EST-0005 defect, generalized).
+        if kind != "work_order" {
+            for line in doc["lines"].as_array().unwrap() {
+                let title = line["title"].as_str().unwrap();
+                for name in ["Jose", "Michael"] {
+                    assert!(!title.contains(name), "{kind}: a crew name on a line: {title:?}");
+                }
+            }
+        }
+
+        // Manual fields are the operator's to fill. The walk never speaks
+        // them, so they must arrive blank rather than guessed.
+        for f in doc["fields"].as_array().unwrap() {
+            let key = f["key"].as_str().unwrap();
+            if ["prepared_for", "deposit_held", "tax", "valid_until", "due_date"].contains(&key) {
+                assert!(
+                    f["value"].is_null() || f["value"].as_str() == Some(""),
+                    "{kind}: manual field {key} was filled from a walk that never said it"
+                );
+            }
+        }
+    }
+}
