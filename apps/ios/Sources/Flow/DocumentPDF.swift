@@ -76,7 +76,8 @@ enum DocumentPDF {
     static func render(
         trade: TradeFixture, document: DocumentModel,
         biz: String? = nil, bizSub: String? = nil, docDate: String? = nil,
-        branding: Branding = .default, layout: DocumentLayout = .default
+        branding: Branding = .default, layout: DocumentLayout = .default,
+        photos: [URL] = []
     ) -> URL? {
         let pageSize = CGSize(width: 612, height: 792) // US Letter @ 72 dpi
 
@@ -85,7 +86,8 @@ enum DocumentPDF {
             biz: biz ?? trade.biz,
             bizSub: bizSub ?? trade.bizSub,
             docDate: docDate ?? trade.docDate,
-            branding: branding, layout: layout
+            branding: branding, layout: layout,
+            photos: photos
         )
         // Width is fixed; HEIGHT is whatever the document needs. It used to be
         // pinned to one page height, which did not fit long documents onto a
@@ -146,6 +148,8 @@ private struct PDFPageView: View {
     let docDate: String
     var branding: Branding = .default
     var layout: DocumentLayout = .default
+    /// File URLs under <Documents>/photos/, in capture order.
+    var photos: [URL] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -197,6 +201,18 @@ private struct PDFPageView: View {
                         .opacity(line.strong ? 1 : 0.85)
                 }
             }
+            // PHOTOGRAPHS. On a condition or inspection report these are not
+            // decoration — they are most of the proof, and they have been
+            // captured since Plan 11 and printed nowhere. A report describing
+            // a burn in the carpet is an assertion; the same report with the
+            // photograph is evidence.
+            //
+            // Below the lines on purpose: the reader wants what was found
+            // first, then what it looked like. Two across, because one per row
+            // wastes a page and three makes a burn mark unreadable.
+            if !photos.isEmpty {
+                PhotoPlate(urls: photos)
+            }
             // Structure basics (DocumentLayout): operator terms + signature line.
             if !layout.termsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 TermsBlock(text: layout.termsText)
@@ -222,6 +238,51 @@ private struct PDFPageView: View {
 
 }
 
+
+/// The photo plate: a stamped label and a two-column grid.
+///
+/// Images are drawn from disk at render time. A file that has gone missing
+/// draws nothing rather than a broken-image box — on a document a client
+/// receives, an error placeholder is worse than an absence.
+private struct PhotoPlate: View {
+    let urls: [URL]
+
+    private var rows: [[URL]] {
+        stride(from: 0, to: urls.count, by: 2).map {
+            Array(urls[$0..<min($0 + 2, urls.count)])
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("PHOTOS")
+                .font(Theme.F.mono(7.5, .semibold))
+                .tracking(1.2)
+                .foregroundStyle(Theme.C.ink60)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 8) {
+                    ForEach(row, id: \.self) { url in
+                        if let image = UIImage(contentsOfFile: url.path) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 150)
+                                .frame(maxWidth: .infinity)
+                                .clipped()
+                                .overlay(Rectangle().stroke(Theme.C.hairline, lineWidth: 1))
+                        } else {
+                            Color.clear.frame(height: 0).frame(maxWidth: .infinity)
+                        }
+                    }
+                    // A final odd photo keeps its column width rather than
+                    // stretching across the page.
+                    if row.count == 1 { Color.clear.frame(maxWidth: .infinity) }
+                }
+            }
+        }
+        .padding(.top, 14)
+    }
+}
 
 // MARK: - Share sheet wrapper
 

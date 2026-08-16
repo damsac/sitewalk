@@ -1734,7 +1734,14 @@ final class AppModel {
         shareURL = DocumentPDF.render(
             trade: trade, document: doc,
             biz: letterheadBiz, bizSub: letterheadSub, docDate: letterheadDate,
-            branding: branding, layout: documentLayout
+            branding: branding, layout: documentLayout,
+            // The walk's photographs, in capture order. Only files that still
+            // exist are passed — a photo deleted at review must not print, and
+            // a missing file must never become a broken-image box on a
+            // document a client receives.
+            photos: photos
+                .map { AppModel.photoURL(filename: $0.filename) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
         )
     }
 
