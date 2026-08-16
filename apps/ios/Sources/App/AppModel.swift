@@ -1114,6 +1114,22 @@ final class AppModel {
                 // its photos live in the store, not in the stale in-memory
                 // `photos` array left over from whatever was on screen before.
                 self.loadPhotos(sessionId: sessionId)
+                // Same defect the photos had, and it was still here for the
+                // words. `NotesView` renders `model.transcript`, which is the
+                // LIVE transcript of the walk last recorded — so a reopened
+                // walk showed somebody else's speech under its own notes
+                // (Isaac, 2026-08-16: a landscape walk displaying the
+                // move-out walk's transcript).
+                //
+                // Cleared rather than loaded: the stored transcript is
+                // deliberately NOT in the walk projection — `WalkSummary` has
+                // a compile-enforced guard against it, because transcripts are
+                // large and the board must never carry them. Showing "—" is
+                // honest about what the app has in hand; showing the previous
+                // walk's words is not, and it is the kind of wrong that makes
+                // an operator doubt the notes above it.
+                self.transcript = ""
+                self.previewTail = ""
                 self.phase = .notes
                 self.path = [.notes]
             } catch {
