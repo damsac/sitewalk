@@ -239,3 +239,39 @@ it when the Builder lands.
 currently overlap, because "quote valid 30 days" is the natural thing to write
 in both. Once terms are per-kind and authored on the estimate, the operator can
 say it once, wherever they prefer.
+
+---
+
+## Pass C — first run, two findings
+
+Five kinds built from real walks against the shipped model.
+
+**1. A coordination sentence became a line item on the report.** The record
+drew this as work:
+
+> "Dog in back until 8am, starting Thursday first thing. Jose: strip bark and
+> mulch. Michael: edging."
+
+Three separate facts — an access note, a schedule, and a crew assignment —
+bundled into one extracted item, which then rendered as a line on a document a
+client reads. It breaks three rules at once: a line is a noun phrase, not a
+sentence; crew names belong to work orders alone (Isaac, EST-0005); and the
+schedule and the dog belong in a work order's blocks.
+
+`draws_kind` cannot fix this one. A report is `observation` and SHOULD draw
+notes — that is what a record is for. The defect is upstream: extraction
+bundled four facts into a single item, so no per-kind filter can separate them.
+The fix belongs in the extraction prompt, which already says one item is one
+piece of work or one material.
+
+**2. An invoice off a walk with no prices spoken comes back with no money —
+and that is correct.** Every line `amount_cents: null`, `total_cents: null`.
+Worth writing down because it LOOKS like a defect: a priced kind with no
+prices. It is R6 working — the walk stated no figures, so none were invented,
+and #337's rule holds that a priced document with nothing priced totals to
+`null` rather than $0.
+
+**Not yet run:** the same five kinds three times each. One run cannot separate
+a defect from variance, and the work-order instructions block took three runs
+to reveal that it was empty two times in three. The test is committed and
+`#[ignore]`d, so CI never pays for it.
