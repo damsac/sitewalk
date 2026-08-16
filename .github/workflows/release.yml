@@ -156,7 +156,31 @@ jobs:
             MARKETING_VERSION=""
             LANE=internal
             UPLOAD=true
-            echo "Release lane: internal (MARKETING_VERSION from project-release.yml)"
+            # Skip the ASC upload when a NEWER commit is already on main.
+            #
+            # Apple caps uploads per app per day. On 2026-07-29 ten merges in
+            # three hours spent 23 attempts, Apple 409'd ("Upload limit
+            # reached"), and the build that got refused was the one carrying a
+            # crash fix — it shipped a day late (issue #304).
+            #
+            # This does NOT cancel anything: `concurrency.cancel-in-progress`
+            # stays false, so a run already inside altool always finishes. Every
+            # run still builds, signs and exports its .ipa, so the artifact and
+            # the signing check keep working. Only the upload — the metered
+            # resource — is skipped, and only for a build nobody could install
+            # anyway because a newer one exists.
+            #
+            # `ls-remote` rather than fetch+rev-parse: one network call, no
+            # local git state, and correct under actions/checkout's shallow
+            # clone. If it fails for any reason TIP is empty and the guard is
+            # skipped — this fails OPEN, because burning a quota slot is a far
+            # better outcome than silently not shipping.
+            TIP="$(git ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
+            if [[ -n "$TIP" && "$TIP" != "$GITHUB_SHA" ]]; then
+              UPLOAD=false
+              echo "::notice::Superseded by $TIP — building and signing, but skipping the ASC upload."
+            fi
+            echo "Release lane: internal (upload=$UPLOAD)"
           fi
           {
             echo "marketing_version=$MARKETING_VERSION"
