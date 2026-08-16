@@ -574,12 +574,29 @@ pub fn builtin_schemas() -> Vec<DocumentSchema> {
         builtin_schema(
             BUILTIN_SCHEMA_ID_MOVE_OUT, "move_out", "Move-Out Report", "MO",
             Some("property"), true, ("sum", "deposit_deduction"), "observation",
-            vec![filled("summary", "Summary", vec![walk_field(
-                "summary", "long_text", "Summary",
-                "2-4 plain sentences: the unit, the move-out date if stated, and the overall \
-                 condition — separating damage from normal wear where it was called out. \
-                 This may be read by a tenant disputing a deduction, so stay factual.",
-            )])],
+            vec![
+                filled("summary", "Summary", vec![walk_field(
+                    "summary", "long_text", "Summary",
+                    "2-4 plain sentences: the unit, the move-out date if stated, and the overall \
+                     condition — separating damage from normal wear where it was called out. \
+                     This may be read by a tenant disputing a deduction, so stay factual.",
+                )]),
+                // The other half of the sentence this document exists to say.
+                //
+                // Summing deductions answers "what is being withheld"; a tenant
+                // needs "and therefore what do I get back", which is
+                // deposit - deductions. Without the deposit the report states
+                // an amount against nothing, and in most states it is running
+                // against a statutory deadline while it does it.
+                //
+                // MANUAL, not walk-filled: no walk knows the deposit. It was
+                // taken months earlier and lives in a lease, so the operator
+                // types it once at review — the same posture as PREPARED FOR,
+                // and for the same reason (Isaac, 2026-08-15: "yes manual").
+                filled("deposit", "Deposit", vec![manual_field(
+                    "deposit_held", "text", "Deposit held",
+                )]),
+            ],
         ),
         // INSPECTION REPORT — findings, not money, which is why it counts
         // instead of summing.

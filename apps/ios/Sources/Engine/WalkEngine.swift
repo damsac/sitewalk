@@ -133,6 +133,67 @@ struct DocumentModel {
 
     var gapCount: Int { rows.filter(\.isGap).count }
 
+    /// One row of the total block. Most documents have exactly one; a move-out
+    /// report has three, because the arithmetic IS the document.
+    struct TotalLine: Identifiable {
+        let id = UUID()
+        let key: String
+        let value: String
+        /// The bottom line — the number someone acts on.
+        let strong: Bool
+    }
+
+    /// The deposit the operator typed, in cents. `nil` when the document has
+    /// no such field or it is still blank.
+    var depositHeldCents: Int? {
+        guard let raw = sections
+            .flatMap(\.fields)
+            .first(where: { $0.key == "deposit_held" })?
+            .value
+        else { return nil }
+        return DocumentModel.parseCents(raw)
+    }
+
+    /// "$500", "500", "1,250.50" → cents. Same tolerance the amount editor
+    /// already grants, because this is typed by a thumb on a job site.
+    static func parseCents(_ raw: String) -> Int? {
+        let cleaned = raw
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: "$", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let dollars = Double(cleaned), dollars > 0 else { return nil }
+        return Int((dollars * 100).rounded())
+    }
+
+    /// The total block, as rows.
+    ///
+    /// A move-out report that sums deductions has said half of what it exists
+    /// to say. The tenant's question is not "what is being withheld" but "what
+    /// do I get back", and that answer is deposit − deductions. When the
+    /// operator has typed a deposit, the block does the subtraction and shows
+    /// its working; until then it stays the plain total it always was, because
+    /// a balance computed from a deposit nobody entered would be a number
+    /// invented about someone's money.
+    var totalLines: [TotalLine] {
+        let plain = [TotalLine(key: totalKey, value: totalValue, strong: true)]
+        guard let deposit = depositHeldCents else { return plain }
+        let deductions = rows.compactMap { DocumentModel.parseCents($0.amount) }.reduce(0, +)
+        // Held, then taken, then left — the order the sentence is spoken in,
+        // and the order a tenant checks it in (Isaac, 2026-08-16).
+        return [
+            TotalLine(key: "DEPOSIT HELD", value: DocumentModel.money(cents: deposit), strong: false),
+            TotalLine(key: totalKey, value: DocumentModel.money(cents: deductions), strong: false),
+            TotalLine(
+                key: deposit >= deductions ? "BALANCE RETURNED" : "BALANCE OWED",
+                // A deduction total above the deposit is a real outcome — the
+                // damage cost more than was held — and it is stated as owed
+                // rather than shown as a negative refund.
+                value: DocumentModel.money(cents: abs(deposit - deductions)),
+                strong: true
+            ),
+        ]
+    }
+
     /// Sum of $-parseable amounts; falls back to the template total.
     ///
     /// Summed in CENTS, from a `Double` parse. It used to parse each amount as

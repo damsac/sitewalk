@@ -14,7 +14,13 @@ enum DocumentPDF {
         // Anything with no value comes off, whether it is a gap the walk left
         // or an optional the operator chose not to fill. "TAP TO ADD" is an
         // instruction to the person holding the phone.
-        out.fields = section.fields.filter { !($0.value ?? "").isEmpty }
+        // `deposit_held` is typed in a section (that is how the operator
+        // enters it) but PRINTS in the total block, where the arithmetic that
+        // uses it lives. Left in both, the page states the same number twice
+        // and the second one looks like a different fact.
+        out.fields = section.fields.filter {
+            !($0.value ?? "").isEmpty && $0.key != "deposit_held"
+        }
         return out
     }
 
@@ -156,8 +162,17 @@ private struct PDFPageView: View {
             // fix it; in the exported PDF that sentence would be addressed to
             // the CLIENT, telling them the contractor's software missed
             // something. A block with nothing written in it is simply omitted.
-            ForEach(document.sections.filter(\.hasContent)) { section in
-                DocSectionView(section: DocumentPDF.printableSection(section))
+            // Strip FIRST, then decide whether anything survived. Filtering on
+            // `hasContent` before the strip let a section through whose only
+            // field the strip then removed — printing "DEPOSIT" over nothing,
+            // the same heading-over-an-empty-box defect the blocks and the
+            // total row were already fixed for.
+            ForEach(
+                document.sections
+                    .map(DocumentPDF.printableSection)
+                    .filter(\.hasContent)
+            ) { section in
+                DocSectionView(section: section)
             }
             ForEach(document.rows) { row in
                 DocRowView(row: DocumentPDF.printableRow(row))
@@ -169,8 +184,11 @@ private struct PDFPageView: View {
             // A document with nothing to total prints no total row — WO-0002
             // went to a crew with `TOTAL ——` under the assignment.
             if document.showsTotal {
-                TotalRow(key: document.totalKey, value: document.totalValue, gaps: 0)
-                    .padding(.top, 2)
+                ForEach(document.totalLines) { line in
+                    TotalRow(key: line.key, value: line.value, gaps: 0)
+                        .padding(.top, line.strong ? 2 : 0)
+                        .opacity(line.strong ? 1 : 0.85)
+                }
             }
             // Structure basics (DocumentLayout): operator terms + signature line.
             if !layout.termsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
