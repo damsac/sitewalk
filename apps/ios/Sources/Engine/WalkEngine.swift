@@ -178,9 +178,11 @@ struct DocumentModel {
         let plain = [TotalLine(key: totalKey, value: totalValue, strong: true)]
         guard let deposit = depositHeldCents else { return plain }
         let deductions = rows.compactMap { DocumentModel.parseCents($0.amount) }.reduce(0, +)
+        // Held, then taken, then left — the order the sentence is spoken in,
+        // and the order a tenant checks it in (Isaac, 2026-08-16).
         return [
-            TotalLine(key: totalKey, value: DocumentModel.money(cents: deductions), strong: false),
             TotalLine(key: "DEPOSIT HELD", value: DocumentModel.money(cents: deposit), strong: false),
+            TotalLine(key: totalKey, value: DocumentModel.money(cents: deductions), strong: false),
             TotalLine(
                 key: deposit >= deductions ? "BALANCE RETURNED" : "BALANCE OWED",
                 // A deduction total above the deposit is a real outcome — the

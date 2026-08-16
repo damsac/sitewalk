@@ -35,9 +35,10 @@ final class DepositArithmeticTests: XCTestCase {
     func testADepositProducesTheBalanceReturned() {
         let doc = moveOut(deposit: "$500", deductions: ["$120", "$65"])
         let lines = doc.totalLines
-        XCTAssertEqual(lines.map(\.key), ["DEPOSIT DEDUCTION", "DEPOSIT HELD", "BALANCE RETURNED"])
-        XCTAssertEqual(lines[0].value, "$185")
-        XCTAssertEqual(lines[1].value, "$500")
+        // Held, then taken, then left: the order the sentence is spoken in.
+        XCTAssertEqual(lines.map(\.key), ["DEPOSIT HELD", "DEPOSIT DEDUCTION", "BALANCE RETURNED"])
+        XCTAssertEqual(lines[0].value, "$500")
+        XCTAssertEqual(lines[1].value, "$185")
         XCTAssertEqual(lines[2].value, "$315", "500 − 185")
         XCTAssertTrue(lines[2].strong, "the balance is the number the tenant acts on")
     }
