@@ -64,6 +64,13 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
          - Site conditions and access details are never items either — gate codes, \
          parking, dogs, working hours, hazards. They belong in the notes. An item is \
          something the operator does or buys.\n\
+         - If you do record a note item, it carries ONE fact. Never glue several \
+         together: \"Dog in back until 8am, starting Thursday first thing. Jose: \
+         strip bark and mulch. Michael: edging\" is four separate facts — an access \
+         detail, a schedule and two crew assignments — and every one of them is \
+         already forbidden above. Glued into one item it survives every later filter, \
+         because nothing downstream can split what arrived as a single item, and it \
+         prints as a line of WORK on a report a client reads.\n\
          - Use upsert_contact for people mentioned with a role (sub, client, supplier).\n\
          - Call write_report at most once, and only if the session has enough \
          substance for a report worth sharing.\n\
