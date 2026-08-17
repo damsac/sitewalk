@@ -1,21 +1,23 @@
-//! #357/#359 — the attribute-binding eval, end to end.
+//! #357/#359 — document accuracy end to end: is what was said on the page,
+//! and is it on the right line?
 //!
 //! Mirrors `summary_voice.rs`: drives the REAL `DocumentBuilder` over a real
-//! session, then harvests the built artifact and grades it. Under a mock the
-//! composition is whatever the script emits, so this is not a measurement of
-//! the model — it is the pin that the defect is VISIBLE THROUGH THE SHIPPING
-//! PATH. Before this, it was not: a work order that assigned Dana to the
-//! compost she was never mentioned with scored a clean F0.5 and a clean
-//! summary voice, because every item was right and only the ATTACHMENT was
-//! wrong.
+//! session, then harvests the built artifact and grades it on both axes.
+//! Under a mock the composition is whatever the script emits, so these are
+//! not measurements of the model — they are the pin that both defects are
+//! VISIBLE THROUGH THE SHIPPING PATH. Before this, neither was: a work order
+//! that assigned Dana to the compost she was never mentioned with scored a
+//! clean F0.5 and a clean summary voice, because every item was right and
+//! only the ATTACHMENT was wrong.
 //!
 //! Movement on real output comes from the gated test at the bottom, which
-//! builds the same work order against the real API and prints every binding
-//! with the sentence that does or does not support it.
+//! builds five document kinds across both trades against the real API and
+//! prints every misplacement and every invention.
 
 use std::sync::{Arc, Mutex};
 
 use evals::binding::{document_bindings, grade_bindings};
+use evals::grounding::document_grounding;
 use harness::{
     CompletionResponse, ContentBlock, LlmProvider, Memory, MockProvider, StopReason, Usage,
 };
@@ -26,8 +28,21 @@ use murmur_core::{DocumentBuilder, ItemSource, Store};
 const LANDSCAPE: &str = "Front yard at the Kesler place. We're doing four yards of dark \
 mulch in the front beds, and two bags of compost worked into the rose bed. Strip the old \
 bark out before the mulch goes down. Weed eating along the fence line, about forty feet. \
+Two hundred for the mulch, ninety for the compost, three hundred for the labor. \
 Marcus is stripping the bark and laying mulch, Dana takes the weed eating. Gate code is \
 7781.";
+
+/// The property walk from the same day — the one whose move-out and condition
+/// reports both put "normal wear" on the kitchen faucet (#359).
+const PROPERTY: &str = "Unit four at 220 Bell, move-out walk, keys came back yesterday. \
+There's a burn in the bedroom carpet near the window, that's damage. Scuffs down the \
+hallway are normal wear. The kitchen faucet drips. Screen on the back door is torn. \
+Lockbox is 4419.";
+
+/// The trade phrases with consequences on a property document: they decide
+/// what may lawfully be withheld from a deposit, so landing one on the wrong
+/// item is not a wording problem.
+const CLASSIFICATIONS: &[&str] = &["normal wear", "damage", "tenant damage"];
 
 fn tool_use(name: &str, input: serde_json::Value) -> CompletionResponse {
     CompletionResponse {
@@ -135,6 +150,44 @@ fn a_work_order_that_assigns_nobody_is_ok() {
     assert_eq!(score.supported, 0);
 }
 
+/// The invention half, through the same shipping path: a compose pass that
+/// writes a gate code the operator never said puts it on the page as an
+/// ordinary filled field, indistinguishable from a true one — present, well
+/// worded, and wrong.
+#[test]
+fn an_invented_field_value_is_caught_end_to_end() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (real, invented) = rt.block_on(async {
+        let mut out = Vec::new();
+        for access in ["Gate code 7781", "Gate code 4412"] {
+            let store = Store::open_in_memory("eval-device").unwrap();
+            let (sid, _) = processed_session(&store);
+            let store = Arc::new(Mutex::new(store));
+            let provider: Arc<dyn LlmProvider> = Arc::new(MockProvider::new(vec![tool_use(
+                "compose_document",
+                serde_json::json!({ "fields": [{"key": "access", "value": access}] }),
+            )]));
+            let builder = DocumentBuilder::new(
+                provider,
+                store.clone(),
+                Arc::new(Mutex::new(Memory::default())),
+                Arc::new(evals::run::NullMemoryStore),
+            );
+            let outcome = builder.build(&sid, "work_order").await.unwrap();
+            let guard = store.lock().unwrap();
+            let art = guard.get_artifact(&outcome.document_artifact_id).unwrap();
+            let document: serde_json::Value = serde_json::from_str(&art.body).unwrap();
+            out.push(document_grounding(&document, LANDSCAPE));
+        }
+        (out.remove(0), out.remove(0))
+    });
+
+    assert!(real.ok, "the code the walk states must not read as invented: {:?}", real.findings);
+    assert!(real.checked > 0, "and it must actually have been checked");
+    assert!(!invented.ok, "a gate code nobody said must not land silently");
+    assert_eq!(invented.findings[0].tokens, vec!["4412"]);
+}
+
 /// The gated real run — the WHOLE path, transcript to document, because the
 /// compose pass is not given the transcript. It writes from the summary and
 /// the notes artifact that `SessionProcessor` produced at finish, so a walk
@@ -149,62 +202,84 @@ fn a_work_order_that_assigns_nobody_is_ok() {
 ///
 /// No thresholds — one run cannot separate a defect from variance (the
 /// work-order instructions block took three runs to reveal it was empty two
-/// times in three), so this reports and asserts only that the axis is
+/// times in three), so this reports and asserts only that both axes are
 /// well-formed on real output. Read the printed verdicts.
 ///
 /// ```sh
-/// ANTHROPIC_API_KEY=sk-... cargo test -p evals --test attribute_binding \
+/// ANTHROPIC_API_KEY=sk-... cargo test -p evals --test document_accuracy \
 ///     -- --ignored --nocapture
 /// ```
 #[tokio::test]
 #[ignore = "hits the real Anthropic API; set ANTHROPIC_API_KEY and run with --ignored"]
-async fn real_work_order_bindings_are_reported() {
+async fn real_documents_are_scored_on_both_axes() {
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("set ANTHROPIC_API_KEY");
     let model = std::env::var("SMOKE_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".into());
     let provider = Arc::new(harness::AnthropicProvider::from_env(api_key, model));
 
-    let store = Store::open_in_memory("eval-device").unwrap();
-    let session = store.start_session_with_template(None, "landscape").unwrap();
-    store.append_transcript(&session.id, LANDSCAPE).unwrap();
-    store.end_and_record_session(&session.id).unwrap();
-    let sid = session.id.clone();
-    let store = Arc::new(Mutex::new(store));
+    // Both trades, and every document kind that carries money, crew or a
+    // classification — the three slots an invention can hide in.
+    for (template, transcript, kinds) in [
+        ("landscape", LANDSCAPE, &["work_order", "estimate", "invoice"][..]),
+        ("property", PROPERTY, &["move_out", "condition"][..]),
+    ] {
+        let store = Store::open_in_memory("eval-device").unwrap();
+        let session = store.start_session_with_template(None, template).unwrap();
+        store.append_transcript(&session.id, transcript).unwrap();
+        store.end_and_record_session(&session.id).unwrap();
+        let sid = session.id.clone();
+        let store = Arc::new(Mutex::new(store));
 
-    murmur_core::SessionProcessor::new(
-        provider.clone(),
-        store.clone(),
-        Arc::new(Mutex::new(Memory::default())),
-        Arc::new(evals::run::NullMemoryStore),
-    )
-    .process(&sid)
-    .await
-    .expect("the walk processes");
+        murmur_core::SessionProcessor::new(
+            provider.clone(),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(evals::run::NullMemoryStore),
+        )
+        .process(&sid)
+        .await
+        .expect("the walk processes");
 
-    let builder = DocumentBuilder::new(
-        provider,
-        store.clone(),
-        Arc::new(Mutex::new(Memory::default())),
-        Arc::new(evals::run::NullMemoryStore),
-    );
-    let outcome = builder.build(&sid, "work_order").await.unwrap();
-
-    let document: serde_json::Value = {
-        let guard = store.lock().unwrap();
-        serde_json::from_str(&guard.get_artifact(&outcome.document_artifact_id).unwrap().body)
-            .unwrap()
-    };
-    assert!(!outcome.queued, "the compose pass failed and the document fell back to a retry queue");
-
-    let score = grade_bindings(&document_bindings(&document, &[]), LANDSCAPE);
-    println!("\n--- bindings: {} supported, {} unsupported ---", score.supported, score.unsupported);
-    for v in &score.verdicts {
-        println!(
-            "  [{}] {} → {}\n      said: {}",
-            if v.supported { "ok " } else { "BAD" },
-            v.attribute,
-            v.item,
-            v.sentence.as_deref().unwrap_or("(never spoken)")
+        let builder = DocumentBuilder::new(
+            provider.clone(),
+            store.clone(),
+            Arc::new(Mutex::new(Memory::default())),
+            Arc::new(evals::run::NullMemoryStore),
         );
+
+        for kind in kinds {
+            let outcome = builder.build(&sid, kind).await.unwrap();
+            let document: serde_json::Value = {
+                let guard = store.lock().unwrap();
+                serde_json::from_str(
+                    &guard.get_artifact(&outcome.document_artifact_id).unwrap().body,
+                )
+                .unwrap()
+            };
+
+            let bound = grade_bindings(&document_bindings(&document, CLASSIFICATIONS), transcript);
+            let ground = document_grounding(&document, transcript);
+            println!(
+                "\n===== {kind} =====\nbindings: {} supported / {} unsupported     \
+                 grounding: {} checked / {} ungrounded",
+                bound.supported,
+                bound.unsupported,
+                ground.checked,
+                ground.findings.len()
+            );
+            for v in bound.verdicts.iter().filter(|v| !v.supported) {
+                println!(
+                    "  MISPLACED  {} → {}\n             said: {}",
+                    v.attribute,
+                    v.item,
+                    v.sentence.as_deref().unwrap_or("(never spoken)")
+                );
+            }
+            for f in &ground.findings {
+                println!("  INVENTED   {} in {} — {:?}", f.slot, f.value, f.tokens);
+            }
+
+            assert_eq!(bound.supported + bound.unsupported, bound.verdicts.len());
+            assert!(ground.checked >= ground.findings.len());
+        }
     }
-    assert_eq!(score.supported + score.unsupported, score.verdicts.len());
 }

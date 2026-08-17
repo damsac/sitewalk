@@ -14,7 +14,15 @@
 //!   wear". On a deposit document that phrase decides what may lawfully be
 //!   withheld, so it exempted the wrong item and left the scuffs deductible.
 //!
-//! Both are one shape: an attribute spoken about item A landing on item B.
+//! - His flagstone estimate (2026-08-10): "three hundred for the flagstone"
+//!   landed as $300 on the GRADING task. Same defect with money on it — a
+//!   client would have paid that line.
+//!
+//! All three are one shape: an attribute spoken about item A landing on item
+//! B. So this grades all three through one mechanism — a name, a
+//! classification, and an amount are the same question asked of different
+//! slots, and an amount only needs `normalize` in the middle so that "three
+//! hundred" in the walk can support `$300` on the page.
 //!
 //! Lexical and deterministic on purpose, exactly like `summary` — no judge
 //! model, no network, runs under `cargo test --workspace`, and comparable
@@ -25,13 +33,6 @@
 //! never said together at all.
 
 use serde::{Deserialize, Serialize};
-
-/// Words too common to prove two phrases are about the same thing. Matching on
-/// "the" would make every binding look supported.
-const STOPWORDS: [&str; 24] = [
-    "the", "a", "an", "and", "or", "of", "in", "on", "at", "to", "for", "with", "is", "are",
-    "was", "were", "be", "it", "that", "this", "all", "from", "by", "into",
-];
 
 /// One attribute the document attached to one line.
 #[derive(Clone, Debug, PartialEq)]
@@ -53,9 +54,12 @@ impl Binding {
 /// stored — the same JSON the app renders, so this grades what shipped rather
 /// than an intermediate the operator never sees.
 ///
-/// Two kinds come out:
+/// Three kinds come out — everything a document attaches to a line:
 ///
 /// - **assignees** — `lines[].assignee`, written only on directive documents.
+/// - **amounts** — `lines[].amount_cents`, as spoken dollars. This is the one
+///   with money on it: Isaac's flagstone estimate put his $300 of stone on
+///   the grading task, and the client would have paid it.
 /// - **classifications** — any phrase in `phrases` that appears in a line's
 ///   `detail`. Passed in rather than inferred because the phrases that MATTER
 ///   are trade terms with consequences ("normal wear", "tenant damage",
@@ -77,14 +81,35 @@ pub fn document_bindings(document: &serde_json::Value, phrases: &[&str]) -> Vec<
                 out.push(Binding::new(title, assignee.trim()));
             }
         }
-        let detail = line.get("detail").and_then(|v| v.as_str()).unwrap_or_default().to_lowercase();
+        if let Some(cents) = line.get("amount_cents").and_then(|v| v.as_i64()) {
+            out.push(Binding::new(title, dollars(cents)));
+        }
+        // Title AND detail. A classification lands in either — once the
+        // extraction fix gave a no-work condition its own line, "normal wear"
+        // moved into the TITLE ("Hallway scuffs — normal wear"), and a
+        // harvester that read only details would have reported a clean sweep
+        // by looking in the one place the phrase no longer was.
+        let detail = line.get("detail").and_then(|v| v.as_str()).unwrap_or_default();
+        let text = format!("{title} {detail}").to_lowercase();
         for phrase in phrases {
-            if detail.contains(&phrase.to_lowercase()) {
+            if text.contains(&phrase.to_lowercase()) {
                 out.push(Binding::new(title, *phrase));
             }
         }
     }
     out
+}
+
+/// Cents as the operator would have said them: `30000` → `"300"`, `4720` →
+/// `"47.20"`. A whole-dollar amount drops the cents entirely, because nobody
+/// says "three hundred point zero zero" and the walk will not contain it.
+pub fn dollars(cents: i64) -> String {
+    let cents = cents.abs();
+    if cents % 100 == 0 {
+        (cents / 100).to_string()
+    } else {
+        format!("{}.{:02}", cents / 100, cents % 100)
+    }
 }
 
 /// One binding's verdict.
@@ -116,12 +141,28 @@ pub struct BindingScore {
     pub ok: bool,
 }
 
-fn content_words(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() > 2 && !STOPWORDS.contains(w))
-        .map(str::to_string)
-        .collect()
+/// True when `attribute` is a bare amount — "300", "47.20". Amounts are the
+/// third thing a document binds to a line, after names and classifications,
+/// and they are the one that cannot be matched as text: the document prints
+/// `$300` and the operator said "three hundred". Routing them through
+/// `normalize::token_set` (which already turns spelled numbers into digits
+/// for the F0.5 grader) is what lets ONE mechanism cover all three.
+fn is_amount(attribute: &str) -> bool {
+    !attribute.is_empty()
+        && attribute.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && attribute.chars().any(|c| c.is_ascii_digit())
+}
+
+/// Does this span carry the attribute? Text matches literally; an amount
+/// matches against the span's normalized tokens, so "three hundred" in the
+/// walk supports `$300` on the page.
+fn span_carries(span_lower: &str, attribute: &str) -> bool {
+    if is_amount(attribute) {
+        let dollars = attribute.split('.').next().unwrap_or(attribute);
+        crate::normalize::token_set(span_lower).contains(dollars)
+    } else {
+        span_lower.contains(attribute)
+    }
 }
 
 /// Splits on sentence terminators. A binding is judged within one sentence
@@ -152,7 +193,7 @@ fn clause_for<'a>(sentence: &'a str, attribute: &str) -> &'a str {
     sentence
         .split(',')
         .map(str::trim)
-        .find(|c| c.to_lowercase().contains(attribute))
+        .find(|c| span_carries(&c.to_lowercase(), attribute))
         .unwrap_or(sentence)
 }
 
@@ -164,7 +205,21 @@ pub fn grade_bindings(bindings: &[Binding], transcript: &str) -> BindingScore {
 
     for binding in bindings {
         let attribute = binding.attribute.to_lowercase();
-        let item_words = content_words(&binding.item);
+        // Normalized so the page and the walk can disagree about spelling and
+        // still be talking about the same thing: "4 yards" ↔ "four yards",
+        // "beds" ↔ "bed".
+        //
+        // The attribute's own words are excluded, because an attribute cannot
+        // be evidence for itself. Once a classification prints in the title
+        // ("Bedroom carpet burn — normal wear"), "normal" and "wear" appear on
+        // BOTH sides, and the span "Scuffs down the hallway are normal wear"
+        // would match itself into a pass — the exact defect, scored clean.
+        let attribute_words = crate::normalize::token_set(&binding.attribute);
+        let item_words: Vec<String> = crate::normalize::token_set(&binding.item)
+            .into_iter()
+            .filter(|w| w.len() > 2 || w.chars().all(|c| c.is_ascii_digit()))
+            .filter(|w| !attribute_words.contains(w))
+            .collect();
 
         // The sentence that carries the attribute, and the item words it also
         // carries. Best match wins: an attribute repeated across sentences is
@@ -172,7 +227,7 @@ pub fn grade_bindings(bindings: &[Binding], transcript: &str) -> BindingScore {
         let mut best: Option<(String, Vec<String>)> = None;
         for sentence in &sentences {
             let lower = sentence.to_lowercase();
-            if !lower.contains(&attribute) {
+            if !span_carries(&lower, &attribute) {
                 continue;
             }
             // Narrow to a clause only when this sentence is genuinely
@@ -182,14 +237,11 @@ pub fn grade_bindings(bindings: &[Binding], transcript: &str) -> BindingScore {
             // the weed eating" for punctuation.
             let contested = attributes
                 .iter()
-                .any(|other| *other != attribute && lower.contains(other.as_str()));
+                .any(|other| *other != attribute && span_carries(&lower, other));
             let scope = if contested { clause_for(sentence, &attribute) } else { sentence };
-            let scope_lower = scope.to_lowercase();
-            let shared: Vec<String> = item_words
-                .iter()
-                .filter(|w| scope_lower.contains(w.as_str()))
-                .cloned()
-                .collect();
+            let scope_tokens = crate::normalize::token_set(scope);
+            let shared: Vec<String> =
+                item_words.iter().filter(|w| scope_tokens.contains(*w)).cloned().collect();
             let better = best.as_ref().is_none_or(|(_, b)| shared.len() > b.len());
             if better {
                 best = Some((scope.to_string(), shared));
@@ -200,10 +252,15 @@ pub fn grade_bindings(bindings: &[Binding], transcript: &str) -> BindingScore {
             Some((s, shared)) => (Some(s), shared),
             None => (None, Vec::new()),
         };
+        // At least one WORD, never a number alone. "2 bags of compost" and "2
+        // gates" share a token and are not the same work, and an amount
+        // binding is the case where this matters most: `$300` next to a line
+        // whose only tie to the span is the 300 itself proves nothing.
+        let supported = shared.iter().any(|w| w.chars().any(|c| c.is_alphabetic()));
         verdicts.push(BindingVerdict {
             item: binding.item.to_string(),
             attribute: binding.attribute.to_string(),
-            supported: !shared.is_empty(),
+            supported,
             sentence,
             shared,
         });
@@ -329,6 +386,82 @@ The kitchen faucet drips. Screen on the back door is torn.";
             "Dana, who's on the trailer today, takes the weed eating.",
         );
         assert!(score.ok, "{:?}", score.verdicts);
+    }
+
+    /// Isaac's flagstone walk (2026-08-10), the one whose estimate put his
+    /// $300 of stone on the grading task.
+    const FLAGSTONE: &str = "Grade and weed the path area first to get it flat, then lay \
+the gravel down, then the flagstone goes in. Three hundred for the flagstone, two hundred \
+for the gravel, three hundred for the labor.";
+
+    /// The money version of the same defect — and the reason amounts go
+    /// through `normalize`: the walk says "three hundred", the page says
+    /// $300, and nothing matches them as text.
+    #[test]
+    fn a_price_on_the_wrong_line_is_unsupported() {
+        let score = grade_bindings(
+            &[
+                Binding::new("Flagstone, supply and lay", "300"),
+                Binding::new("Grade and weed path area", "300"),
+            ],
+            FLAGSTONE,
+        );
+        assert!(score.verdicts[0].supported, "the stone is what $300 was said about");
+        assert!(!score.verdicts[1].supported, "the grading was never priced out loud");
+    }
+
+    /// A price nobody spoke at all. `price_items` may only use a stated
+    /// figure or a remembered one (Isaac, 2026-08-10), so with no memory in
+    /// play an unspoken amount is an invention — and it is the class of
+    /// defect he said is worth interrupting him for.
+    #[test]
+    fn a_price_that_was_never_spoken_is_unsupported() {
+        let score = grade_bindings(&[Binding::new("Flagstone, supply and lay", "450")], FLAGSTONE);
+        assert!(!score.ok);
+        assert_eq!(score.verdicts[0].sentence, None, "no span of the walk carries $450");
+    }
+
+    /// Cents survive the round trip, because a typed tax or a per-unit price
+    /// is not whole dollars and must still be checkable.
+    #[test]
+    fn amounts_read_the_way_they_are_spoken() {
+        assert_eq!(dollars(30000), "300");
+        assert_eq!(dollars(4720), "47.20");
+        assert_eq!(dollars(5), "0.05");
+    }
+
+    /// The harvest covers money too: an amount on a line is a binding, the
+    /// same as a name on one.
+    #[test]
+    fn the_harvest_reads_amounts_off_a_document() {
+        let doc = serde_json::json!({
+            "lines": [
+                {"title": "Grade and weed path area", "detail": "", "assignee": null,
+                 "amount_cents": 30000},
+            ]
+        });
+        let score = grade_bindings(&document_bindings(&doc, &[]), FLAGSTONE);
+        assert_eq!(score.unsupported, 1, "the grading was never the thing $300 was said about");
+    }
+
+    /// The shape the extraction fix produced: the classification lives in the
+    /// TITLE now, not the detail. Both directions must still separate, and
+    /// the wrong one must not be able to prove itself with its own words.
+    #[test]
+    fn a_classification_in_the_title_is_still_graded_on_its_own_merits() {
+        let doc = serde_json::json!({
+            "lines": [
+                {"title": "Hallway scuffs — normal wear", "detail": "", "is_gap": false},
+                {"title": "Bedroom carpet burn — normal wear", "detail": "", "is_gap": false},
+            ]
+        });
+        let score = grade_bindings(&document_bindings(&doc, &["normal wear"]), PROPERTY);
+        assert!(score.verdicts[0].supported, "the scuffs are what was called normal wear");
+        assert!(
+            !score.verdicts[1].supported,
+            "the burn is damage — and 'normal wear' must not prove itself: {:?}",
+            score.verdicts[1]
+        );
     }
 
     /// A document that claims nothing mis-claims nothing.

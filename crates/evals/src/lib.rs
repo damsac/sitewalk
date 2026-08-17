@@ -6,6 +6,7 @@
 pub mod binding;
 pub mod corpus;
 pub mod grade;
+pub mod grounding;
 pub mod normalize;
 pub mod report;
 pub mod run;
