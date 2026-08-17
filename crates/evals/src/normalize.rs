@@ -146,6 +146,22 @@ fn combine_number_words(tokens: Vec<String>) -> Vec<String> {
 /// (word or bare numeral), drop stopwords, and collect into a set. Returns a
 /// `BTreeSet` for deterministic iteration order (matters only for debug
 /// output; scores are set ops).
+/// The same canonicalization as `token_set`, but ORDERED and with stopwords
+/// kept — what a sequence comparison needs. Word error rate has to see "the"
+/// and has to see word order; the extraction grader's set does not and drops
+/// both. Sharing the number handling is the point: "three hundred" and "$300"
+/// must be one transcript in every grader, or an eval reports a mishearing
+/// where there is only a spelling.
+pub fn tokens_ordered(s: &str) -> Vec<String> {
+    let rewritten = rewrite_numeric_punctuation(&s.to_lowercase());
+    let raw: Vec<String> = rewritten
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(strip_plural)
+        .collect();
+    combine_number_words(raw)
+}
+
 pub fn token_set(s: &str) -> BTreeSet<String> {
     let rewritten = rewrite_numeric_punctuation(&s.to_lowercase());
     let raw: Vec<String> = rewritten
