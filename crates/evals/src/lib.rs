@@ -3,8 +3,11 @@
 //! comparable across prompt variants. Pure consumer of `murmur-core` public API;
 //! zero impact on shipping code.
 
+pub mod asr;
+pub mod binding;
 pub mod corpus;
 pub mod grade;
+pub mod grounding;
 pub mod normalize;
 pub mod report;
 pub mod run;

@@ -22,3 +22,8 @@
 # present on disk depending on which models you've fetched.
 apps/ios/Sources/Resources/ggml-base.en-q5_1.bin
 apps/ios/Sources/Resources/ggml-small.en-q5_1.bin
+
+# Generated speech-accuracy fixtures (scripts/make-asr-fixtures.sh). The
+# manifest is checked in; the audio is not — synthetic audio is reproducible
+# from it, and real recordings are large and belong to whoever recorded them.
+crates/evals/fixtures/asr/*.wav

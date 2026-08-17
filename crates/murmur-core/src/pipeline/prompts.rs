@@ -15,12 +15,13 @@ const WRITE_NOTES: &str = "write_notes";
 
 /// System prompt for the extraction pass. `memory_prompt` is
 /// `Memory::to_prompt()` output ("" when empty).
-pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
+pub(crate) fn extraction_system_prompt(memory_prompt: &str, template: Option<&str>) -> String {
     let memory_block = if memory_prompt.trim().is_empty() {
         String::new()
     } else {
         format!("\n\nWhat you know about this user:\n{memory_prompt}")
     };
+    let condition_block = condition_rule(template);
     format!(
         "You process one transcribed field-work session (site walk, inspection, \
          client meeting) for a tradesperson. Extract structured records with the \
@@ -63,7 +64,7 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
          on a client's estimate. Same for WHEN it happens.\n\
          - Site conditions and access details are never items either — gate codes, \
          parking, dogs, working hours, hazards. They belong in the notes. An item is \
-         something the operator does or buys.\n\
+         something the operator does or buys.{condition_block}\n\
          - If you do record a note item, it carries ONE fact. Never glue several \
          together: \"Dog in back until 8am, starting Thursday first thing. Jose: \
          strip bark and mulch. Michael: edging\" is four separate facts — an access \
@@ -79,6 +80,48 @@ pub(crate) fn extraction_system_prompt(memory_prompt: &str) -> String {
          - Transcripts are speech-to-text: expect misrecognized jargon and names; \
          prefer terms from what you know about the user.{memory_block}"
     )
+}
+
+/// The one exception to "an item is something the operator does or buys",
+/// and it applies only where the document's PURPOSE is to record what is
+/// there: a property or inspection walk.
+///
+/// Diagnosed, not guessed (2026-08-16). On Isaac's move-out walk, "Scuffs
+/// down the hallway are normal wear" produced no item — correctly, under the
+/// rule above: nobody does anything about normal wear. Extraction returned
+/// three todos (carpet burn, faucet, screen) and the scuffs lived only in the
+/// notes. The compose pass was then handed a note saying "hallway scuffs are
+/// normal wear, not damage" and three lines to write about, none of them the
+/// hallway — so it wrote "normal wear" onto the CARPET BURN, the one line on
+/// the page that is damage, in three of six real runs (`evals`,
+/// `document_accuracy`).
+///
+/// That is #359, and it is not a compose defect. Adding a rule to the compose
+/// prompt did not move the number, because the model was placing a real fact
+/// that had nowhere correct to go. The missing line is the bug: a condition
+/// report that omits the hallway does not say "the hallway was fine", it says
+/// the hallway was never looked at — and a tenant disputing a deduction reads
+/// that gap the same way.
+///
+/// Scoped to property/inspection deliberately. On a landscape walk the same
+/// rule would put every observation on the board, and an estimate cannot draw
+/// note items anyway (`draws_kind`, "inclusion" → todo/part/price), so it
+/// would be noise with no document to land on.
+fn condition_rule(template: Option<&str>) -> &'static str {
+    match template {
+        Some("property") | Some("inspection") => {
+            "\n\
+             - THIS WALK DOCUMENTS CONDITION, so an observed condition IS an item, even \
+             when nobody has to do anything about it. \"Hallway scuffs — normal wear\" is a \
+             line on the report exactly like the carpet burn that needs replacing. Record it \
+             as a note item, ONE condition per item, keeping the operator's own classification \
+             on the item it belongs to (\"normal wear\", \"damage\", \"pre-existing\"). A \
+             condition they described that never becomes an item is a condition the report \
+             does not mention — and a report that skips the hallway reads as one where nobody \
+             looked at the hallway."
+        }
+        _ => "",
+    }
 }
 
 /// System prompt for the summary/notes pass. Named (not inline) so the voice
@@ -289,7 +332,7 @@ mod tests {
 
     #[test]
     fn extraction_prompt_carries_the_rules() {
-        let p = extraction_system_prompt("## vocabulary\n- french drain\n");
+        let p = extraction_system_prompt("## vocabulary\n- french drain\n", None);
         assert!(p.contains("Only extract what was clearly said"));
         assert!(p.contains("at most once"), "report budget");
         assert!(p.contains("french drain"), "memory is injected");
@@ -304,7 +347,7 @@ mod tests {
     #[test]
     fn both_extraction_prompts_ask_for_line_shaped_items() {
         for p in [
-            extraction_system_prompt(""),
+            extraction_system_prompt("", None),
             live_extraction_system_prompt(""),
         ] {
             assert!(p.contains("noun phrase"), "items must be shaped like lines");
@@ -320,7 +363,7 @@ mod tests {
     /// duplicate lines on the paperwork.
     #[test]
     fn the_end_of_session_prompt_keeps_people_and_site_facts_off_the_lines() {
-        let p = extraction_system_prompt("");
+        let p = extraction_system_prompt("", None);
         assert!(p.contains("WHO does the work is never an item"));
         assert!(p.contains("scope_of_work"), "it says where they go instead");
         assert!(p.contains("gate codes"), "site and access details are named");
@@ -328,7 +371,7 @@ mod tests {
 
     #[test]
     fn extraction_prompt_without_memory_omits_the_block() {
-        let p = extraction_system_prompt("");
+        let p = extraction_system_prompt("", None);
         assert!(!p.contains("What you know about this user"));
     }
 

@@ -4,9 +4,16 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+# The speech-accuracy eval pulls the native whisper stack. OFF by default so
+# `cargo test --workspace` stays hermetic and cross-platform, exactly as the
+# `stt` crate's own `whisper` feature does.
+stt-eval = ["dep:stt"]
+
 [dependencies]
 murmur-core = { path = "../murmur-core" }
 harness = { path = "../harness" }
+stt = { path = "../stt", features = ["whisper"], optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

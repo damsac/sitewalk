@@ -153,7 +153,7 @@ impl SessionProcessor {
         // template/existing-doc-number snapshot that fed it is gone too —
         // documents are now built on demand (`DocumentBuilder::build`,
         // engine-keyed, not part of `process()`).
-        let transcript = {
+        let (transcript, template) = {
             let store = self.locked()?;
             let session = store.get_session(session_id)?;
             if !matches!(
@@ -170,7 +170,7 @@ impl SessionProcessor {
             // retries can't accumulate duplicate todos or a stale hint. Never
             // touches the live board (the safety net) or manual items.
             store.clear_authoritative_outputs(session_id)?;
-            session.transcript
+            (session.transcript, session.template)
         };
 
         // Empty guard: an empty/whitespace-only transcript would send empty
@@ -208,7 +208,14 @@ impl SessionProcessor {
         let mut usage = Usage::default();
         let created_ids = Arc::new(Mutex::new(Vec::<String>::new()));
         let result = self
-            .run_llm_phases(session_id, &assembled.text, &memory_prompt, &mut usage, created_ids.clone())
+            .run_llm_phases(
+                session_id,
+                &assembled.text,
+                &memory_prompt,
+                template.as_deref(),
+                &mut usage,
+                created_ids.clone(),
+            )
             .await;
 
         // Exit: persist outcome + cost atomically, success or not.
@@ -259,6 +266,7 @@ impl SessionProcessor {
         session_id: &str,
         assembled_transcript: &str,
         memory_prompt: &str,
+        template: Option<&str>,
         usage: &mut Usage,
         created_ids: Arc<Mutex<Vec<String>>>,
     ) -> Result<(String, Option<i64>, Vec<notes::NotesEntry>), harness::HarnessError> {
@@ -279,7 +287,7 @@ impl SessionProcessor {
             self.provider.clone(),
             registry,
             AgentConfig {
-                system_prompt: prompts::extraction_system_prompt(memory_prompt),
+                system_prompt: prompts::extraction_system_prompt(memory_prompt, template),
                 max_turns: self.max_turns,
                 max_tokens: self.max_tokens,
             },

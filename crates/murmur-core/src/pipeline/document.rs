@@ -416,6 +416,28 @@ fn line_brief(line_detail: &str) -> Option<String> {
          a document that pads is one a reader stops trusting. Never restate the title in other \
          words. Write only where you are ADDING something the title does not say.";
 
+    // The rule that keeps a fact on the item it was said about, appended to
+    // every brief for the same reason as NOTHING_TO_ADD: it is not specific
+    // to one document kind, and a copy per brief would drift.
+    //
+    // Measured, not guessed. Across three real runs of six property documents
+    // (`evals`, `document_accuracy`), "Scuffs down the hallway are normal
+    // wear" came out as "normal wear" written on the BEDROOM CARPET BURN
+    // three times — the one line on the page that is damage. On a move-out
+    // report that phrase decides what may lawfully be withheld, so the
+    // sentence exempted the item the deposit should have paid for and left
+    // the item that was genuinely fine looking deductible. Both directions
+    // wrong, from one misplaced phrase, on a document a tenant can dispute.
+    //
+    // Isaac, 2026-08-16: *"The number one most important thing about this app
+    // should be that what is said is accurately transcribed and then placed
+    // into documents the way it's supposed to."*
+    const STAYS_PUT: &str = " Every condition, qualifier or classification you write on a line \
+         must be one the operator said ABOUT THAT LINE. If they said it about a different item, \
+         it belongs on that item and nowhere else. If you cannot tell which item it was said \
+         about, leave it out — a phrase on the wrong line is worse than no phrase at all, \
+         because the reader has no way to know it moved.";
+
     // Two things a second line must never contain, whatever the document.
     //
     // MONEY, because the amount has its own column two inches to the right.
@@ -460,7 +482,7 @@ fn line_brief(line_detail: &str) -> Option<String> {
         ),
         _ => return None,
     };
-    Some(format!("{brief}{NOTHING_TO_ADD}"))
+    Some(format!("{brief}{STAYS_PUT}{NOTHING_TO_ADD}"))
 }
 
 /// Renders the coordination notes the walk already produced as context.

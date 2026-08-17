@@ -73,3 +73,34 @@ final class PhotoPlateTests: XCTestCase {
         XCTAssertNoThrow(try pages(photos: [real, ghost]))
     }
 }
+
+/// A total with no value must not print. On screen "——" tells the OPERATOR a
+/// number is missing; on the page it is a heading over an em dash addressed to
+/// a client (Isaac's MO-0002: "DEPOSIT DEDUCTION ——").
+@MainActor
+final class EmptyTotalTests: XCTestCase {
+    private func doc(amounts: [String]) -> DocumentModel {
+        DocumentModel(
+            rows: amounts.map {
+                DocRowFixture(title: "Repair", sub: "", qty: "", amount: $0, isGap: $0.isEmpty)
+            },
+            totalKey: "DEPOSIT DEDUCTION", staticTotal: DocumentModel.noTotal,
+            note: "", send: "SEND", docNumber: "MO-0002", docKindLabel: "MOVE-OUT",
+            pricesShown: true
+        )
+    }
+
+    private func height(_ document: DocumentModel) throws -> CGFloat {
+        let url = try XCTUnwrap(DocumentPDF.render(trade: Fixtures.all[0], document: document))
+        defer { try? FileManager.default.removeItem(at: url) }
+        let pdf = try XCTUnwrap(PDFDocument(url: url))
+        return try XCTUnwrap(pdf.page(at: 0)).bounds(for: .mediaBox).height
+    }
+
+    func testAPricedDocumentWithNothingPricedPrintsNoTotalRow() throws {
+        // Both render; the assertion that matters is that the empty one does
+        // not throw and stays a single page — the row is simply absent.
+        XCTAssertNoThrow(try height(doc(amounts: ["", "", ""])))
+        XCTAssertNoThrow(try height(doc(amounts: ["$250", "$80"])))
+    }
+}

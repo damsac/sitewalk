@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "Speech-accuracy corpus. Each case pairs an audio file with what was said",
+    "and the words that must survive it — the ones that become line items,",
+    "prices, names and codes. Everything else is filler the operator never",
+    "notices being reworded.",
+    "",
+    "`critical` is the headline. `vocabulary` is the operator's memory terms;",
+    "when present, the runner decodes the case TWICE — unbiased and biased —",
+    "so the payoff of adding a term is a number rather than a hunch.",
+    "",
+    "Audio is generated, not committed: `scripts/make-asr-fixtures.sh`. Real",
+    "recordings drop into the same directory under the same names and take",
+    "precedence — the script never overwrites a file it did not make. Synthetic",
+    "speech measures the decode and the biasing; it says NOTHING about wind,",
+    "distance, a running mower or an accent, which is what real recordings are",
+    "for."
+  ],
+  "cases": [
+    {
+      "id": "landscape_crew",
+      "audio": "landscape_crew.wav",
+      "reference": "Front yard at the Kesler place. We're doing four yards of dark mulch in the front beds, and two bags of compost worked into the rose bed. Strip the old bark out before the mulch goes down. Weed eating along the fence line, about forty feet. Marcus is stripping the bark and laying mulch, Dana takes the weed eating. Gate code is 7781.",
+      "critical": [
+        "weed eating",
+        "dark mulch",
+        "compost",
+        "rose bed",
+        "bark",
+        "fence line",
+        "marcus",
+        "dana",
+        "7781"
+      ],
+      "vocabulary": ["weed eating", "Kesler", "Marcus", "Dana"]
+    },
+    {
+      "id": "property_moveout",
+      "audio": "property_moveout.wav",
+      "reference": "Unit four at 220 Bell, move-out walk, keys came back yesterday. There's a burn in the bedroom carpet near the window, that's damage. Scuffs down the hallway are normal wear. The kitchen faucet drips. Screen on the back door is torn. Lockbox is 4419.",
+      "critical": [
+        "normal wear",
+        "damage",
+        "bedroom carpet",
+        "kitchen faucet",
+        "back door",
+        "4419",
+        "220 bell"
+      ],
+      "vocabulary": []
+    },
+    {
+      "id": "flagstone_prices",
+      "audio": "flagstone_prices.wav",
+      "reference": "We're putting a flagstone path in the existing area here. Grade and weed the path area first to get it flat, then lay the gravel down, then the flagstone goes in. Three hundred for the flagstone, two hundred for the gravel, three hundred for the labor. Then the backyard perimeter needs weed whacking, two hundred labor plus ten dollars of gas.",
+      "critical": [
+        "flagstone",
+        "gravel",
+        "weed whacking",
+        "three hundred",
+        "two hundred",
+        "ten dollars"
+      ],
+      "vocabulary": ["flagstone", "weed whacking"]
+    },
+    {
+      "id": "inspection_systems",
+      "audio": "inspection_systems.wav",
+      "reference": "Attic inspection. Knob and tube wiring visible on the north run, that's a defect. GFCI missing at the kitchen counter. Water staining on the sheathing above the bathroom vent, about two square feet. Furnace is a nineteen ninety two, past service life.",
+      "critical": [
+        "knob and tube",
+        "gfci",
+        "sheathing",
+        "bathroom vent",
+        "furnace"
+      ],
+      "vocabulary": ["knob and tube", "GFCI", "sheathing"]
+    }
+  ]
+}

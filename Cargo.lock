@@ -406,6 +406,7 @@ dependencies = [
  "murmur-core",
  "serde",
  "serde_json",
+ "stt",
  "tokio",
 ]
 
